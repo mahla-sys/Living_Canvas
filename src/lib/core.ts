@@ -557,6 +557,9 @@ export class HttpStorageAdapter implements StorageAdapter {
   }
 }
 
+/** مرجع پایدار برای سلکتورهای خالی — جلوگیری از حلقه‌ی رندر بی‌نهایت (useSyncExternalStore) */
+export const EMPTY_ARR: never[] = [];
+
 export let storage: StorageAdapter = new IndexedDBStorageAdapter();
 
 /** تعویض زنده‌ی آداپتر — importکننده‌ها به‌لطف live binding نسخه‌ی جدید را می‌بینند */

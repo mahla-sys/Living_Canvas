@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { roleById, APP_VERSION, type RFNode } from "../state";
-import { faNum, fmtClock, fmtDate, type BusEvent } from "../lib/core";
+import { faNum, fmtClock, fmtDate, EMPTY_ARR, type BusEvent, type ChatMsg } from "../lib/core";
 import {
   IPlay, IStop, ICamera, IHistory, IGear, IChat, IX, ISend, ICheck, IWarn,
   ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD,
@@ -152,7 +152,7 @@ export function ActivityConsole() {
 export function ChatPanel() {
   const chatNodeId = useStore((s) => s.ui.chatNodeId);
   const node = useStore((s): RFNode | undefined => s.nodes.find((n) => n.id === s.ui.chatNodeId));
-  const msgs = useStore((s) => (s.ui.chatNodeId ? s.chats[s.ui.chatNodeId] ?? [] : []));
+  const msgs = useStore((s): ChatMsg[] => (s.ui.chatNodeId ? s.chats[s.ui.chatNodeId] ?? EMPTY_ARR : EMPTY_ARR));
   const typing = useStore((s) => (s.ui.chatNodeId ? s.typing[s.ui.chatNodeId] ?? false : false));
   const actions = useStore((s) => s.actions);
   const [text, setText] = useState("");
