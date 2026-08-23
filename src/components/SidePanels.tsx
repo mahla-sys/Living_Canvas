@@ -359,6 +359,7 @@ function NodeInspector({ node }: { node: RFNode }) {
   const d = node.data;
   const agent = d.agent;
   const locked = d.lock.status === "locked";
+  const runLocked = locked && (d.lock.locked_by ?? "").startsWith("run-");
   const runDisabled = useStore((s) => s.execution.status === "running" || s.execution.status === "waiting_approval");
 
   return (
@@ -370,14 +371,23 @@ function NodeInspector({ node }: { node: RFNode }) {
         <div className="min-w-0 flex-1">
           <input
             value={d.title}
+            disabled={runLocked}
             onChange={(e) => actions.updateNodeData(node.id, { title: e.target.value })}
-            className="w-full bg-transparent text-[14px] font-extrabold text-ink-50 focus:outline-none border-b border-transparent focus:border-amber-lc/50 transition-colors"
+            className={`w-full bg-transparent text-[14px] font-extrabold text-ink-50 focus:outline-none border-b border-transparent focus:border-amber-lc/50 transition-colors ${runLocked ? "opacity-50 cursor-not-allowed" : ""}`}
           />
           <p className="text-[10px] font-mono text-ink-500 mt-0.5" dir="ltr">{node.id} · {d.nodeType}</p>
         </div>
         {locked && <ILock size={15} className="text-amber-lc mt-1" />}
       </div>
 
+      {runLocked && (
+        <div className="mx-3.5 mt-3 mb-0.5 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-lc/10 border border-amber-lc/45 anim-rise">
+          <ILock size={13} className="text-amber-lc shrink-0" />
+          <p className="text-[10.5px] leading-4 text-amber-lc font-bold">در حال اجرا قفل است — ویرایش تا پایان این گام غیرفعال است (§12.5)</p>
+        </div>
+      )}
+
+      <div className={runLocked ? "lc-locked-panel" : ""}>
       <Section title="نمایش و شکل" icon={<IEye size={12} />}>
         <Field label="حالت نمایش (viewMode)">
           <div className="grid grid-cols-4 gap-1">
@@ -575,6 +585,7 @@ function NodeInspector({ node }: { node: RFNode }) {
           <ITrash size={13} /> حذف نود و فایل‌ها
         </button>
       </Section>
+      </div>
     </div>
   );
 }
