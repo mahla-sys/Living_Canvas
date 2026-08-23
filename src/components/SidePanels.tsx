@@ -10,6 +10,40 @@ import {
 
 const SWATCHES = ["#e8b04b", "#e06a4e", "#8fbf7f", "#6fb3c7", "#b98bc2", "#d9c9a3", "#c96a8a", "#8ba39d"];
 const ALL_TOOLS = ["read_memory", "write_memory", "chat_with_user", "write_output", "get_canvas_overview", "get_node_context", "get_agent_brief"];
+import { FIELD_DESC } from "../lib/engine";
+
+function pathLabel(p: string, selfId: string): string {
+  if (p === "canvas-overview.md") return "خلاصه‌ی بوم — اولین چیزی که ایجنت می‌خواند";
+  if (p === `nodes/${selfId}.md`) return "فایل خود این نود (پرامپت و مأموریت)";
+  if (p === `memory/agents/${selfId}.md`) return "حافظه‌ی اختصاصی خودش";
+  if (p.startsWith("memory/agents/")) return "حافظه‌ی یک ایجنت دیگر";
+  if (p === "memory/decisions.md") return "حافظه‌ی تصمیم‌های مهم";
+  if (p === "memory/progress.md") return "حافظه‌ی پیشرفت کار";
+  if (p === "memory/global.md") return "حافظه‌ی سراسری پروژه";
+  if (p.startsWith("outputs/")) return `خروجی‌های ${p.replace("outputs/", "").replace("/", "")}`;
+  if (p.startsWith("logs/")) return "لاگ اجرای این نود";
+  return "مسیر سفارشی";
+}
+
+function ContractGroup({ title, color, paths, nodeId }: { title: string; color: string; paths: string[]; nodeId: string }) {
+  return (
+    <div className="rounded-lg border overflow-hidden mb-2" style={{ borderColor: `${color}35`, background: `${color}08` }}>
+      <p className="text-[9.5px] font-black px-2.5 py-1.5 flex items-center gap-1.5" style={{ color, background: `${color}12` }}>
+        <span className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+        {title === "خواندن" ? "خواندن — allowed_read_paths" : "نوشتن — allowed_write_paths"}
+        <span className="ms-auto font-mono opacity-70">{faNum(paths.length)}</span>
+      </p>
+      <div className="divide-y" style={{ borderColor: `${color}15` }}>
+        {paths.map((p) => (
+          <div key={p} className="px-2.5 py-1.5 group hover:bg-ink-850/60 transition-colors">
+            <p className="text-[10px] font-bold text-ink-200">{pathLabel(p, nodeId)}</p>
+            <p className="text-[8.5px] font-mono text-ink-500 group-hover:text-ink-300 transition-colors" dir="ltr">{p}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 /* ================= palette + file tree (left) ================= */
 
@@ -468,24 +502,43 @@ function NodeInspector({ node }: { node: RFNode }) {
           </Section>
 
           <Section title="قرارداد زمینه (Context Contract)" icon={<ILock size={12} />}>
-            <p className="text-[10px] text-ink-500 mb-1.5">مسیرهای خواندن مجاز:</p>
-            <div className="space-y-0.5 mb-2.5">
-              {agent.context_contract.allowed_read_paths.map((p) => (
-                <p key={p} className="text-[9.5px] font-mono text-sky-lc bg-ink-850 border border-ink-700 rounded px-1.5 py-1" dir="ltr">{p}</p>
-              ))}
-            </div>
-            <p className="text-[10px] text-ink-500 mb-1.5">مسیرهای نوشتن مجاز:</p>
-            <div className="space-y-0.5 mb-2.5">
-              {agent.context_contract.allowed_write_paths.map((p) => (
-                <p key={p} className="text-[9.5px] font-mono text-sage bg-ink-850 border border-ink-700 rounded px-1.5 py-1" dir="ltr">{p}</p>
-              ))}
-            </div>
-            <p className="text-[10px] text-ink-500 mb-1">فیلدهای الزامی خروجی:</p>
-            <div className="flex flex-wrap gap-1">
+            <p className="text-[10px] text-ink-400 leading-5 mb-2.5 bg-ink-850 border border-ink-700 rounded-lg px-2.5 py-2">
+              ایجنت <strong className="text-ink-200">هیچ فایلی</strong> خارج از این فهرست را نمی‌بیند و در جای دیگری نمی‌نویسد — مطابق §9 سند.
+            </p>
+
+            <ContractGroup
+              title="خواندن"
+              color="#6fb3c7"
+              paths={agent.context_contract.allowed_read_paths}
+              nodeId={node.id}
+            />
+            <ContractGroup
+              title="نوشتن"
+              color="#8fbf7f"
+              paths={agent.context_contract.allowed_write_paths}
+              nodeId={node.id}
+            />
+
+            <p className="text-[10px] text-ink-500 mb-1 mt-3">فیلدهای الزامی خروجی (بدون این‌ها خروجی رد می‌شود):</p>
+            <div className="flex flex-wrap gap-1 mb-3">
               {agent.context_contract.output_contract.required_fields.map((f) => (
-                <span key={f} className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-amber-lc/10 border border-amber-lc/30 text-amber-lc" dir="ltr">{f}</span>
+                <span key={f} className="text-[9.5px] px-1.5 py-1 rounded-md bg-amber-lc/10 border border-amber-lc/30 text-amber-lc flex items-center gap-1.5" title={f}>
+                  <span className="font-bold">{FIELD_DESC[f] ?? f}</span>
+                  <span className="font-mono opacity-60" dir="ltr">{f}</span>
+                </span>
               ))}
             </div>
+
+            <button
+              onClick={() => actions.selfTest(node.id)}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-sky-lc/10 border border-sky-lc/40 text-sky-lc text-[11px] font-bold hover:bg-sky-lc/20 transition-all cursor-pointer active:scale-[0.99]"
+            >
+              <ILock size={12} /> خودآزمایی قرارداد این نود
+              <span className="text-[8.5px] font-mono opacity-70" dir="ltr">§9</span>
+            </button>
+            <p className="text-[9px] text-ink-500 mt-1.5 leading-4">
+              یک نوشتن مجاز و دو تلاش نفوذ (حافظه‌ی سراسری و حافظه‌ی ایجنت دیگر) شبیه‌سازی می‌شود؛ نتیجه در کنسول رویدادها می‌آید.
+            </p>
           </Section>
         </>
       )}

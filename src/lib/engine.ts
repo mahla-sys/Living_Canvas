@@ -196,15 +196,15 @@ export const MemoryManager = {
   },
 
   /** Write Path §6.2 + conflict resolution §6.3 */
-  async write(api: EngineApi, agentId: string, content: string, confidence: number): Promise<boolean> {
+  async write(api: EngineApi, agentId: string, content: string, confidence: number, targetPath?: string): Promise<boolean> {
     const s = api.get();
     const node = getNode(s, agentId);
     const agent = node?.data.agent;
     if (!agent) return false;
-    const path = `memory/agents/${agentId}.md`;
-    // 1) access check
+    const path = targetPath ?? `memory/agents/${agentId}.md`;
+    // 1) access check against context_contract (§9)
     if (!agent.context_contract.allowed_write_paths.some((p) => path.startsWith(p))) {
-      emit(api, "validation.failed", `دسترسی نوشتن در ${path} برای ${agentId} رد شد`);
+      emit(api, "validation.failed", `دسترسی نوشتن در ${path} برای ${agentId} رد شد — خارج از allowed_write_paths`);
       return false;
     }
     // 2) lock check
@@ -238,9 +238,63 @@ export const MemoryManager = {
   },
 };
 
+/* ---------------- fallback probe (§12.6) ---------------- */
+
+export async function testFallback(api: EngineApi) {
+  const s = api.get();
+  if (s.settings.provider !== "deepseek" || !s.settings.apiKey.trim()) {
+    emit(api, "system", "تست Fallback: کلید API تنظیم نشده — شبیه‌ساز داخلی فعال است (حالت پیش‌فرض فاز ۱)");
+    toast(api, "info", "کلیدی تنظیم نشده؛ سیستم با شبیه‌ساز داخلی کار می‌کند.");
+    return;
+  }
+  emit(api, "system", "تست Fallback: فراخوانی واقعی DeepSeek شروع شد…");
+  try {
+    const text = await askModel(s.settings.apiKey.trim(), s.settings.model, [
+      { role: "user", content: "فقط با یک کلمه پاسخ بده: سلام" },
+    ]);
+    emit(api, "system", `تست Fallback موفق: مدل پاسخ داد — «${String(text).slice(0, 50)}»`);
+    toast(api, "success", "اتصال به DeepSeek برقرار است ✓");
+  } catch (err) {
+    emit(api, "system", `تست Fallback: «${String(err)}» — موتور در اجراها خودکار به شبیه‌ساز برمی‌گردد (§12.6)`);
+    toast(api, "warn", "اتصال برقرار نشد؛ اجراها بدون وقفه با شبیه‌ساز ادامه می‌یابند.");
+  }
+}
+
+/* ---------------- contract self-test (§9 verification) ---------------- */
+
+export async function contractSelfTest(api: EngineApi, preferNodeId?: string) {
+  const s = api.get();
+  const subject = (preferNodeId && getNode(s, preferNodeId)?.data.agent ? getNode(s, preferNodeId)! : s.nodes.find((n) => n.data.agent));
+  if (!subject?.data.agent) {
+    toast(api, "warn", "هیچ نود ایجنتی برای خودآزمایی پیدا نشد.");
+    return;
+  }
+  const id = subject.id;
+  const other = s.nodes.find((n) => n.data.agent && n.id !== id);
+  emit(api, "system", `خودآزمایی قرارداد زمینه (§9) شروع شد — سوژه: ${id}`);
+  await sleep(120);
+
+  const legit = await MemoryManager.write(api, id, api.get().memory.agents[id]?.body ?? "- خودآزمایی: محتوای حافظه حفظ شد.", 0.8);
+  await sleep(120);
+  const denyGlobal = await MemoryManager.write(api, id, "تلاش نوشتن خارج از قرارداد", 0.95, "memory/global.md");
+  await sleep(120);
+  const denyForeign = other
+    ? await MemoryManager.write(api, id, "تلاش نوشتن در حافظه‌ی ایجنت دیگر", 0.95, `memory/agents/${other.id}.md`)
+    : false;
+
+  const pass = legit && !denyGlobal && !denyForeign;
+  if (pass) {
+    emit(api, "system", `خودآزمایی موفق: نوشتن مجاز پذیرفته شد؛ ۲ تلاش خارج از قرارداد (global.md${other ? ` و حافظه‌ی ${other.id}` : ""}) رد شد ✓`);
+    toast(api, "success", "قرارداد زمینه سالم است — نفوذ خارج از مسیر مجاز رد شد.");
+  } else {
+    emit(api, "validation.failed", "خودآزمایی قرارداد شکست خورد — بررسی §9 و allowed_write_paths ضروری است");
+    toast(api, "error", "خودآزمایی شکست خورد! رفتار قرارداد مطابق §9 نیست.");
+  }
+}
+
 /* ---------------- outputs & validation (§3.6, §12.10) ---------------- */
 
-const FIELD_DESC: Record<string, string> = {
+export const FIELD_DESC: Record<string, string> = {
   summary: "خلاصه",
   problem_statement: "بیان دقیق مسئله",
   questions_asked: "پرسش‌های مطرح‌شده",
@@ -390,6 +444,13 @@ async function executeNode(api: EngineApi, nodeId: string) {
   const runId = s0.execution.run_id ?? uid("run");
   const delay = s0.settings.simDelay;
 
+  // cancellation guard — aborts the run if the user stopped it or restored a checkpoint (§12.5)
+  const aborted = () => api.get().execution.run_id !== runId;
+  const guard = async (ms: number) => {
+    await sleep(ms);
+    if (aborted()) throw new Error("__abort__");
+  };
+
   // lock §3.4
   patchNode(api, nodeId, { lock: { status: "locked", locked_by: runId, locked_at: nowIso() }, agent: agent ? { ...agent, status: "running" } : agent });
   emit(api, "lock.acquired", `نود ${nodeId} توسط ${runId} قفل شد`);
@@ -403,14 +464,14 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // step 1 — overview (§9)
     await appendLog(api, nodeId, "ابزار get_canvas_overview → خواندن canvas-overview.md");
-    await sleep(delay * 0.7);
+    await guard(delay * 0.7);
     steps++;
 
     // step 2 — brief
     if (agent) {
       const role = roleById(agent.role_id);
       await appendLog(api, nodeId, `ابزار get_agent_brief → نقش «${role.name}» بارگذاری شد (max_steps=${agent.max_steps})`);
-      await sleep(delay * 0.6);
+      await guard(delay * 0.6);
       steps++;
     }
 
@@ -420,7 +481,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
       const parts = await MemoryManager.read(api, nodeId);
       memoryTxt = parts.join("\n\n");
       await appendLog(api, nodeId, `ابزار read_memory → ${agent.context_contract.allowed_read_paths.length} مسیر مجاز خوانده شد`);
-      await sleep(delay * 0.6);
+      await guard(delay * 0.6);
       steps++;
     }
 
@@ -450,7 +511,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
         fields = simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner);
       }
     } else {
-      await sleep(delay * 1.4);
+      await guard(delay * 1.4);
       fields = simFields(agent?.role_id ?? "decision-maker", node.data.title, upstream, s0.canvas.owner);
     }
     steps++;
@@ -499,6 +560,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // checkpoint §10
     await takeSnapshot(api, `پایان «${node.data.title}»`, true);
+    if (aborted()) throw new Error("__abort__");
 
     // human-in-the-loop
     if (agent?.require_approval) {
@@ -507,6 +569,11 @@ async function executeNode(api: EngineApi, nodeId: string) {
       toast(api, "warn", "تصمیم این نود به تأیید شما نیاز دارد.");
     }
   } catch (err) {
+    if (String(err).includes("__abort__")) {
+      // run was cancelled mid-flight (stop / restore) — leave state to the canceller
+      emit(api, "system", `اجرای «${node.data.title}» به‌دلیل توقف یا بازگردانی لغو شد`);
+      return;
+    }
     const agentNow = getNode(api.get(), nodeId)?.data.agent;
     patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow });
     emit(api, "node.failed", `اجرای «${node.data.title}» شکست خورد: ${String(err)}`);
@@ -628,7 +695,7 @@ export async function resumeRun(api: EngineApi) {
 }
 
 export function rejectRun(api: EngineApi) {
-  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null } }));
+  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
   emit(api, "run.stopped", "تصمیم توسط کاربر رد شد — اجرا متوقف شد");
   toast(api, "info", "تصمیم رد شد و اجرا متوقف شد.");
   touch(api);
@@ -642,7 +709,8 @@ export function stopRun(api: EngineApi) {
     const ag = n?.data.agent;
     patchNode(api, cur, { lock: { status: "free", locked_by: null, locked_at: null }, agent: ag ? { ...ag, status: ag.status === "running" ? "idle" : ag.status } : ag });
   }
-  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null } }));
+  // invalidating run_id makes any in-flight node abort at its next guard (§12.5)
+  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
   emit(api, "run.stopped", "اجرا توسط کاربر متوقف شد");
   toast(api, "info", "اجرا متوقف شد.");
   touch(api);

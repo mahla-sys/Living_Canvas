@@ -20,7 +20,7 @@ import {
   createEdge as engCreateEdge, deleteEdge as engDeleteEdge,
   runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution,
   sendChat, takeSnapshot, restoreSnapshot, initWorkspace, resetWorkspace,
-  saveTemplate, loadTemplate, saveRoleFromNode,
+  saveTemplate, loadTemplate, saveRoleFromNode, contractSelfTest, testFallback,
   appendLog, type EngineApi,
 } from "./lib/engine";
 
@@ -68,6 +68,8 @@ interface Actions {
   saveTemplate: (name: string) => void;
   loadTemplate: (id: string) => void;
   saveRole: (nodeId: string) => void;
+  selfTest: (nodeId?: string) => void;
+  testFallback: () => void;
 }
 
 function initialState(): AppState {
@@ -220,6 +222,8 @@ function buildActions(a: EngineApi): Actions {
     saveTemplate: (name) => void saveTemplate(a, name),
     loadTemplate: (id) => void loadTemplate(a, id),
     saveRole: (nodeId) => void saveRoleFromNode(a, nodeId),
+    selfTest: (nodeId) => void contractSelfTest(a, nodeId),
+    testFallback: () => void testFallback(a),
   };
 }
 
