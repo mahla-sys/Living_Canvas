@@ -16,8 +16,9 @@ function renderErrorPanel(title: string, detail: string) {
           <h1 style="font-size:17px;margin:0;">${title}</h1>
         </div>
         <p style="font-size:12px;color:#8ba39d;line-height:2;margin:0 0 12px;">
-          خطای زیر رخ داده است. اگر فکر می‌کنی داده‌ی ذخیره‌شده خراب شده، دکمه‌ی بازیابی را بزن
-          (نودها و نقاشی‌ها پاک و بوم از نو ساخته می‌شود):
+          خطای زیر رخ داده است. اول «تازه‌کردن» را بزن؛ اگر باز هم تکرار شد و خطا درباره‌ی
+          <span style="color:#e8b04b"> IndexedDB یا JSON </span>
+          بود، دکمه‌ی بازیابی را بزن (نودها و نقاشی‌ها پاک و بوم از نو ساخته می‌شود).
         </p>
         <pre style="background:#12201e;border:1px solid #1e3230;border-radius:10px;padding:12px;font-size:10.5px;color:#e8b04b;direction:ltr;text-align:left;white-space:pre-wrap;word-break:break-word;max-height:160px;overflow:auto;font-family:'IBM Plex Mono',monospace;">${detail}</pre>
         <div style="display:flex;gap:10px;margin-top:16px;">

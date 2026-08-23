@@ -8,7 +8,7 @@ import "@xyflow/react/dist/style.css";
 import { useStore } from "../store";
 import { roleById, NODE_TYPE_LABEL, CANVAS_ID } from "../state";
 import type { RFNode, RFEdge } from "../state";
-import { faNum, uid, nowIso, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
+import { faNum, uid, nowIso, EMPTY_ARR, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
 import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash, INode, IChevD } from "./icons";
 
 /* ---------------- mini markdown ---------------- */
@@ -75,7 +75,7 @@ function shapeStyle(d: LCNodeData): React.CSSProperties {
 }
 
 function LcNode({ id, data, selected }: NodeProps<RFNode>) {
-  const logs = useStore((s) => s.logs[id] ?? []);
+  const logs = useStore((s): string[] => s.logs[id] ?? EMPTY_ARR);
   const outputs = useStore((s) => s.outputs[id]?.length ?? 0);
   const chatOpen = useStore((s) => s.ui.chatNodeId === id);
   const confidence = useStore((s) => s.memory.agents[id]?.confidence ?? 0.7);
