@@ -3,9 +3,9 @@
    checkpoints §10, persistence, DeepSeek provider
    ============================================================ */
 import {
-  storage, bus, uid, nowIso, nowStamp, sleep, debounce,
+  storage, bus, uid, nowIso, nowStamp, sleep, debounce, faNum,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  type BusEventType, type OutputEntry, type MemDoc, type ChatMsg,
+  type BusEventType, type OutputEntry, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
 } from "./core";
 import {
   ROOT, CANVAS_ID, buildSeed, emptyExecution, roleById,
@@ -196,15 +196,15 @@ export const MemoryManager = {
   },
 
   /** Write Path §6.2 + conflict resolution §6.3 */
-  async write(api: EngineApi, agentId: string, content: string, confidence: number): Promise<boolean> {
+  async write(api: EngineApi, agentId: string, content: string, confidence: number, targetPath?: string): Promise<boolean> {
     const s = api.get();
     const node = getNode(s, agentId);
     const agent = node?.data.agent;
     if (!agent) return false;
-    const path = `memory/agents/${agentId}.md`;
-    // 1) access check
+    const path = targetPath ?? `memory/agents/${agentId}.md`;
+    // 1) access check against context_contract (§9)
     if (!agent.context_contract.allowed_write_paths.some((p) => path.startsWith(p))) {
-      emit(api, "validation.failed", `دسترسی نوشتن در ${path} برای ${agentId} رد شد`);
+      emit(api, "validation.failed", `دسترسی نوشتن در ${path} برای ${agentId} رد شد — خارج از allowed_write_paths`);
       return false;
     }
     // 2) lock check
@@ -238,9 +238,63 @@ export const MemoryManager = {
   },
 };
 
+/* ---------------- fallback probe (§12.6) ---------------- */
+
+export async function testFallback(api: EngineApi) {
+  const s = api.get();
+  if (s.settings.provider !== "deepseek" || !s.settings.apiKey.trim()) {
+    emit(api, "system", "تست Fallback: کلید API تنظیم نشده — شبیه‌ساز داخلی فعال است (حالت پیش‌فرض فاز ۱)");
+    toast(api, "info", "کلیدی تنظیم نشده؛ سیستم با شبیه‌ساز داخلی کار می‌کند.");
+    return;
+  }
+  emit(api, "system", "تست Fallback: فراخوانی واقعی DeepSeek شروع شد…");
+  try {
+    const text = await askModel(s.settings.apiKey.trim(), s.settings.model, [
+      { role: "user", content: "فقط با یک کلمه پاسخ بده: سلام" },
+    ]);
+    emit(api, "system", `تست Fallback موفق: مدل پاسخ داد — «${String(text).slice(0, 50)}»`);
+    toast(api, "success", "اتصال به DeepSeek برقرار است ✓");
+  } catch (err) {
+    emit(api, "system", `تست Fallback: «${String(err)}» — موتور در اجراها خودکار به شبیه‌ساز برمی‌گردد (§12.6)`);
+    toast(api, "warn", "اتصال برقرار نشد؛ اجراها بدون وقفه با شبیه‌ساز ادامه می‌یابند.");
+  }
+}
+
+/* ---------------- contract self-test (§9 verification) ---------------- */
+
+export async function contractSelfTest(api: EngineApi, preferNodeId?: string) {
+  const s = api.get();
+  const subject = (preferNodeId && getNode(s, preferNodeId)?.data.agent ? getNode(s, preferNodeId)! : s.nodes.find((n) => n.data.agent));
+  if (!subject?.data.agent) {
+    toast(api, "warn", "هیچ نود ایجنتی برای خودآزمایی پیدا نشد.");
+    return;
+  }
+  const id = subject.id;
+  const other = s.nodes.find((n) => n.data.agent && n.id !== id);
+  emit(api, "system", `خودآزمایی قرارداد زمینه (§9) شروع شد — سوژه: ${id}`);
+  await sleep(120);
+
+  const legit = await MemoryManager.write(api, id, api.get().memory.agents[id]?.body ?? "- خودآزمایی: محتوای حافظه حفظ شد.", 0.8);
+  await sleep(120);
+  const denyGlobal = await MemoryManager.write(api, id, "تلاش نوشتن خارج از قرارداد", 0.95, "memory/global.md");
+  await sleep(120);
+  const denyForeign = other
+    ? await MemoryManager.write(api, id, "تلاش نوشتن در حافظه‌ی ایجنت دیگر", 0.95, `memory/agents/${other.id}.md`)
+    : false;
+
+  const pass = legit && !denyGlobal && !denyForeign;
+  if (pass) {
+    emit(api, "system", `خودآزمایی موفق: نوشتن مجاز پذیرفته شد؛ ۲ تلاش خارج از قرارداد (global.md${other ? ` و حافظه‌ی ${other.id}` : ""}) رد شد ✓`);
+    toast(api, "success", "قرارداد زمینه سالم است — نفوذ خارج از مسیر مجاز رد شد.");
+  } else {
+    emit(api, "validation.failed", "خودآزمایی قرارداد شکست خورد — بررسی §9 و allowed_write_paths ضروری است");
+    toast(api, "error", "خودآزمایی شکست خورد! رفتار قرارداد مطابق §9 نیست.");
+  }
+}
+
 /* ---------------- outputs & validation (§3.6, §12.10) ---------------- */
 
-const FIELD_DESC: Record<string, string> = {
+export const FIELD_DESC: Record<string, string> = {
   summary: "خلاصه",
   problem_statement: "بیان دقیق مسئله",
   questions_asked: "پرسش‌های مطرح‌شده",
@@ -390,6 +444,13 @@ async function executeNode(api: EngineApi, nodeId: string) {
   const runId = s0.execution.run_id ?? uid("run");
   const delay = s0.settings.simDelay;
 
+  // cancellation guard — aborts the run if the user stopped it or restored a checkpoint (§12.5)
+  const aborted = () => api.get().execution.run_id !== runId;
+  const guard = async (ms: number) => {
+    await sleep(ms);
+    if (aborted()) throw new Error("__abort__");
+  };
+
   // lock §3.4
   patchNode(api, nodeId, { lock: { status: "locked", locked_by: runId, locked_at: nowIso() }, agent: agent ? { ...agent, status: "running" } : agent });
   emit(api, "lock.acquired", `نود ${nodeId} توسط ${runId} قفل شد`);
@@ -403,14 +464,14 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // step 1 — overview (§9)
     await appendLog(api, nodeId, "ابزار get_canvas_overview → خواندن canvas-overview.md");
-    await sleep(delay * 0.7);
+    await guard(delay * 0.7);
     steps++;
 
     // step 2 — brief
     if (agent) {
       const role = roleById(agent.role_id);
       await appendLog(api, nodeId, `ابزار get_agent_brief → نقش «${role.name}» بارگذاری شد (max_steps=${agent.max_steps})`);
-      await sleep(delay * 0.6);
+      await guard(delay * 0.6);
       steps++;
     }
 
@@ -420,7 +481,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
       const parts = await MemoryManager.read(api, nodeId);
       memoryTxt = parts.join("\n\n");
       await appendLog(api, nodeId, `ابزار read_memory → ${agent.context_contract.allowed_read_paths.length} مسیر مجاز خوانده شد`);
-      await sleep(delay * 0.6);
+      await guard(delay * 0.6);
       steps++;
     }
 
@@ -450,7 +511,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
         fields = simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner);
       }
     } else {
-      await sleep(delay * 1.4);
+      await guard(delay * 1.4);
       fields = simFields(agent?.role_id ?? "decision-maker", node.data.title, upstream, s0.canvas.owner);
     }
     steps++;
@@ -499,6 +560,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // checkpoint §10
     await takeSnapshot(api, `پایان «${node.data.title}»`, true);
+    if (aborted()) throw new Error("__abort__");
 
     // human-in-the-loop
     if (agent?.require_approval) {
@@ -507,6 +569,11 @@ async function executeNode(api: EngineApi, nodeId: string) {
       toast(api, "warn", "تصمیم این نود به تأیید شما نیاز دارد.");
     }
   } catch (err) {
+    if (String(err).includes("__abort__")) {
+      // run was cancelled mid-flight (stop / restore) — leave state to the canceller
+      emit(api, "system", `اجرای «${node.data.title}» به‌دلیل توقف یا بازگردانی لغو شد`);
+      return;
+    }
     const agentNow = getNode(api.get(), nodeId)?.data.agent;
     patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow });
     emit(api, "node.failed", `اجرای «${node.data.title}» شکست خورد: ${String(err)}`);
@@ -628,7 +695,7 @@ export async function resumeRun(api: EngineApi) {
 }
 
 export function rejectRun(api: EngineApi) {
-  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null } }));
+  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
   emit(api, "run.stopped", "تصمیم توسط کاربر رد شد — اجرا متوقف شد");
   toast(api, "info", "تصمیم رد شد و اجرا متوقف شد.");
   touch(api);
@@ -642,7 +709,8 @@ export function stopRun(api: EngineApi) {
     const ag = n?.data.agent;
     patchNode(api, cur, { lock: { status: "free", locked_by: null, locked_at: null }, agent: ag ? { ...ag, status: ag.status === "running" ? "idle" : ag.status } : ag });
   }
-  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null } }));
+  // invalidating run_id makes any in-flight node abort at its next guard (§12.5)
+  api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
   emit(api, "run.stopped", "اجرا توسط کاربر متوقف شد");
   toast(api, "info", "اجرا متوقف شد.");
   touch(api);
@@ -774,6 +842,124 @@ export async function restoreSnapshot(api: EngineApi, id: string) {
   }
 }
 
+/* ---------------- freehand drawing layer (§2 strokes/) ---------------- */
+
+interface Box { minX: number; minY: number; maxX: number; maxY: number }
+
+function strokeBox(pts: StrokePoint[]): Box {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export interface StrokeCluster {
+  strokes: Stroke[];
+  box: Box;
+  cx: number;
+  cy: number;
+  order: number;
+}
+
+/** گروه‌بندی طرح‌های نزدیک به هم با union-find روی جعبه‌های محاطی */
+export function clusterStrokes(strokes: Stroke[], gap = 80): StrokeCluster[] {
+  const boxes = strokes.map((s) => strokeBox(s.points));
+  const parent = strokes.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      const touch = a.minX - gap < b.maxX && a.maxX + gap > b.minX && a.minY - gap < b.maxY && a.maxY + gap > b.minY;
+      if (touch) union(i, j);
+    }
+  }
+  const groups = new Map<number, number[]>();
+  strokes.forEach((_, i) => {
+    const root = find(i);
+    groups.set(root, [...(groups.get(root) ?? []), i]);
+  });
+  return [...groups.values()]
+    .map((idxs) => {
+      const box: Box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      for (const i of idxs) {
+        box.minX = Math.min(box.minX, boxes[i].minX);
+        box.minY = Math.min(box.minY, boxes[i].minY);
+        box.maxX = Math.max(box.maxX, boxes[i].maxX);
+        box.maxY = Math.max(box.maxY, boxes[i].maxY);
+      }
+      return {
+        strokes: idxs.map((i) => strokes[i]),
+        box,
+        cx: (box.minX + box.maxX) / 2,
+        cy: (box.minY + box.maxY) / 2,
+        order: Math.min(...idxs.map((i) => new Date(strokes[i].created_at).getTime())),
+      };
+    })
+    .sort((a, b) => a.order - b.order);
+}
+
+export async function addStroke(api: EngineApi, stroke: Stroke) {
+  api.set((st) => ({ strokes: [...st.strokes, stroke] }));
+  await storage.writeJson(`${ROOT}/strokes/${stroke.id}.json`, stroke);
+  emit(api, "stroke.created", `طرح ${stroke.id.slice(0, 16)}… در strokes/ ذخیره شد (${stroke.points.length} نقطه)`);
+}
+
+export async function removeStroke(api: EngineApi, id: string) {
+  api.set((st) => ({ strokes: st.strokes.filter((s) => s.id !== id) }));
+  await storage.deleteFile(`${ROOT}/strokes/${id}.json`);
+}
+
+export async function undoStroke(api: EngineApi) {
+  const s = api.get();
+  const last = s.strokes[s.strokes.length - 1];
+  if (!last) {
+    toast(api, "info", "طرحی برای بازگردانی نیست.");
+    return;
+  }
+  await removeStroke(api, last.id);
+  emit(api, "stroke.deleted", `آخرین طرح (${last.id.slice(0, 14)}…) بازگردانی شد`);
+}
+
+export async function clearStrokes(api: EngineApi) {
+  const s = api.get();
+  if (!s.strokes.length) return;
+  await Promise.all(s.strokes.map((st) => storage.deleteFile(`${ROOT}/strokes/${st.id}.json`)));
+  api.set({ strokes: [] });
+  emit(api, "strokes.cleared", `${s.strokes.length} طرح از لایه‌ی نقاشی پاک شد`);
+  toast(api, "info", "لایه‌ی نقاشی خالی شد.");
+}
+
+/** تبدیل طرح‌ها به گراف — هر خوشه یک نود، به ترتیب ترسیم */
+export async function convertStrokesToGraph(api: EngineApi, opts: { nodeType: NodeType; connect: boolean }) {
+  const s = api.get();
+  const clusters = clusterStrokes(s.strokes);
+  if (!clusters.length) {
+    toast(api, "warn", "هیچ طرحی برای تبدیل پیدا نشد — اول چیزی بکشید.");
+    return;
+  }
+  emit(api, "strokes.converted", `تبدیل شروع شد — ${clusters.length} خوشه شناسایی شد`);
+  const ids: string[] = [];
+  let i = 1;
+  for (const c of clusters) {
+    const title = `طرح ${faNum(i++)}`;
+    const id = await createNode(api, opts.nodeType, { x: c.cx - 40, y: c.cy - 32 }, {
+      title,
+      content: `این نود از لایه‌ی نقاشی تبدیل شده است.\n\n- مرکز خوشه: (${Math.round(c.cx)}, ${Math.round(c.cy)})\n- تعداد خطوط: ${c.strokes.length}`,
+    });
+    ids.push(id);
+  }
+  if (opts.connect && ids.length > 1) {
+    for (let k = 0; k < ids.length - 1; k++) await createEdge(api, ids[k], ids[k + 1]);
+  }
+  emit(api, "strokes.converted", `${clusters.length} نود «${opts.nodeType}» از طرح‌ها ساخته شد${opts.connect ? " و به ترتیب ترسیم به هم متصل شدند" : ""}`);
+  toast(api, "success", `${faNum(clusters.length)} نود از طرح‌ها ساخته شد — طرح‌ها به‌عنوان سند مرجع حفظ می‌شوند.`);
+}
+
 /* ---------------- node / edge mutations ---------------- */
 
 export async function createNode(
@@ -855,9 +1041,24 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
       execution: AppState["execution"];
     }>(`${ROOT}/state.json`);
     const graph = await storage.readJson<{ nodes: RFNode[]; edges: RFEdge[] }>(`${ROOT}/graph.json`);
+
+    // load the freehand drawing layer from individual stroke files (§2)
+    const strokes: Stroke[] = [];
+    try {
+      const files = await storage.listDirectory(`${ROOT}/strokes`);
+      for (const f of files) {
+        if (!f.endsWith(".json")) continue;
+        try {
+          const st = await storage.readJson<Stroke>(`${ROOT}/strokes/${f}`);
+          if (st?.points?.length) strokes.push(st);
+        } catch { /* skip corrupted stroke file */ }
+      }
+    } catch { /* strokes dir may be empty */ }
+    strokes.sort((a, b) => a.created_at.localeCompare(b.created_at));
+
     api.set({
       canvas: state.canvas, memory: state.memory, outputs: state.outputs ?? {}, chats: state.chats ?? {},
-      logs: state.logs ?? {}, snapshots: state.snapshots ?? [],
+      logs: state.logs ?? {}, snapshots: state.snapshots ?? [], strokes,
       nodes: graph.nodes.map((n) => ({
         ...n,
         data: { ...n.data, lock: { status: "free" as const, locked_by: null, locked_at: null } },
@@ -876,7 +1077,7 @@ export async function seedWorkspace(api: EngineApi) {
   const seed = buildSeed(s.settings.owner);
   api.set({
     canvas: seed.canvas, nodes: seed.nodes, edges: seed.edges, memory: seed.memory,
-    outputs: {}, chats: {}, logs: {}, snapshots: [], execution: emptyExecution(),
+    outputs: {}, chats: {}, logs: {}, snapshots: [], strokes: [], execution: emptyExecution(),
   });
   const st = api.get();
   const boot = async (path: string, content: string) => {
@@ -930,7 +1131,7 @@ export async function initWorkspace(api: EngineApi) {
 
 export async function resetWorkspace(api: EngineApi) {
   await storage.clear();
-  api.set({ booted: false, bootLines: [], events: [], toasts: [], snapshots: [], outputs: {}, chats: {}, logs: {}, templates: api.get().templates.filter((t) => t.builtin) });
+  api.set({ booted: false, bootLines: [], events: [], toasts: [], snapshots: [], outputs: {}, chats: {}, logs: {}, strokes: [], templates: api.get().templates.filter((t) => t.builtin) });
   await seedWorkspace(api);
   api.set({ booted: true });
   toast(api, "success", "فضای کار پاک و دوباره ساخته شد.");

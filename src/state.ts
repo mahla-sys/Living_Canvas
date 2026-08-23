@@ -5,7 +5,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type {
   LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode,
   AgentConfig, MemDoc, Settings, ExecutionState, BusEvent, Toast,
-  OutputEntry, ChatMsg, SnapshotMeta, EdgeType,
+  OutputEntry, ChatMsg, SnapshotMeta, EdgeType, Stroke,
 } from "./lib/core";
 
 export const CANVAS_ID = "nexus-edu-001";
@@ -124,6 +124,7 @@ export interface AppState {
   logs: Record<string, string[]>;
   snapshots: SnapshotMeta[];
   templates: TemplateInfo[];
+  strokes: Stroke[];
   execution: ExecutionState;
   events: BusEvent[];
   toasts: Toast[];

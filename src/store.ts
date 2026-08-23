@@ -8,7 +8,7 @@ import {
   storage, nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, toYaml, logText, frontmatter,
   nowIso,
 } from "./lib/core";
-import type { Settings, LCNodeData, LCEdgeData } from "./lib/core";
+import type { Settings, LCNodeData, LCEdgeData, Stroke, NodeType } from "./lib/core";
 import {
   ROOT, CANVAS_ID, defaultSettings, emptyExecution, makeNodeData, makeEdgeData, roleById, MODELS,
   builtinTemplateInfo,
@@ -20,7 +20,9 @@ import {
   createEdge as engCreateEdge, deleteEdge as engDeleteEdge,
   runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution,
   sendChat, takeSnapshot, restoreSnapshot, initWorkspace, resetWorkspace,
-  saveTemplate, loadTemplate, saveRoleFromNode,
+  saveTemplate, loadTemplate, saveRoleFromNode, contractSelfTest, testFallback,
+  addStroke as engAddStroke, removeStroke as engRemoveStroke, undoStroke as engUndoStroke,
+  clearStrokes as engClearStrokes, convertStrokesToGraph as engConvertStrokes,
   appendLog, type EngineApi,
 } from "./lib/engine";
 
@@ -68,6 +70,13 @@ interface Actions {
   saveTemplate: (name: string) => void;
   loadTemplate: (id: string) => void;
   saveRole: (nodeId: string) => void;
+  selfTest: (nodeId?: string) => void;
+  testFallback: () => void;
+  addStroke: (s: Stroke) => void;
+  removeStroke: (id: string) => void;
+  undoStroke: () => void;
+  clearStrokes: () => void;
+  convertStrokes: (opts: { nodeType: NodeType; connect: boolean }) => void;
 }
 
 function initialState(): AppState {
@@ -94,6 +103,7 @@ function initialState(): AppState {
     logs: {} as AppState["logs"],
     snapshots: [] as AppState["snapshots"],
     templates: [builtinTemplateInfo()],
+    strokes: [] as AppState["strokes"],
     execution: emptyExecution(),
     events: [] as AppState["events"],
     toasts: [] as AppState["toasts"],
@@ -220,6 +230,14 @@ function buildActions(a: EngineApi): Actions {
     saveTemplate: (name) => void saveTemplate(a, name),
     loadTemplate: (id) => void loadTemplate(a, id),
     saveRole: (nodeId) => void saveRoleFromNode(a, nodeId),
+    selfTest: (nodeId) => void contractSelfTest(a, nodeId),
+    testFallback: () => void testFallback(a),
+
+    addStroke: (s) => void engAddStroke(a, s),
+    removeStroke: (id) => void engRemoveStroke(a, id),
+    undoStroke: () => void engUndoStroke(a),
+    clearStrokes: () => void engClearStrokes(a),
+    convertStrokes: (opts) => void engConvertStrokes(a, opts),
   };
 }
 
@@ -239,6 +257,7 @@ export function buildFileContent(path: string): FileViewerState | null {
   const logMatch = path.match(/^logs\/([^/]+)\/(.+)\.log$/);
   const chatMatch = path.match(/^chats\/chat-(.+)\.md$/);
   const snapMatch = path.match(/^history\/(snapshot-.+)\.json$/);
+  const strokeMatch = path.match(/^strokes\/(.+)\.json$/);
 
   if (path === "manifest.json")
     content = JSON.stringify({ version: "1.0", canvas_id: s.canvasId, structure_version: "1.3", last_validated: nowIso().slice(0, 10) }, null, 2);
@@ -287,6 +306,9 @@ export function buildFileContent(path: string): FileViewerState | null {
     const rid = path.replace("library/roles/", "").replace(".json", "");
     const r = roleById(rid);
     content = JSON.stringify({ id: r.id, name: r.name, description: r.description, model: r.model, tools: r.tools, version: "1.0", default_output_contract: { format: "markdown", required_fields: r.required_fields, save_to: "outputs/{node_id}/" } }, null, 2);
+  } else if (strokeMatch) {
+    const st = s.strokes.find((x) => x.id === strokeMatch[1]);
+    content = st ? JSON.stringify(st, null, 2) : null;
   } else {
     const tplMatch = path.match(/^library\/templates\/([^/]+)\/template\.yaml$/);
     if (tplMatch) {

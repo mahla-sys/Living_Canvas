@@ -100,6 +100,7 @@ const TAG_COLOR: Record<string, string> = {
   "memory.updated": "#6fb3c7", "output.written": "#8fbf7f",
   "snapshot.saved": "#b98bc2", "snapshot.restored": "#b98bc2",
   "graph.saved": "#5f7b76", "file.written": "#5f7b76", "chat.message": "#6fb3c7",
+  "stroke.created": "#d9c9a3", "stroke.deleted": "#d9c9a3", "strokes.converted": "#b98bc2", "strokes.cleared": "#d9c9a3",
   "validation.failed": "#e06a4e", system: "#8ba39d",
 };
 
@@ -334,6 +335,12 @@ export function SettingsModal() {
                 />
               </label>
               <p className="text-[9.5px] text-ink-500 leading-4 flex gap-1.5"><IWarn size={11} className="shrink-0 mt-0.5 text-amber-lc" /> کلید فقط در localStorage مرورگر شما ذخیره می‌شود. در صورت خطای شبکه، موتور به‌صورت خودکار به شبیه‌ساز برمی‌گردد (§12.6).</p>
+              <button
+                onClick={() => actions.testFallback()}
+                className="w-full flex items-center justify-center gap-1.5 py-2 rounded-xl bg-ink-850 border border-ink-600 text-[11px] font-bold text-sky-lc hover:border-sky-lc/60 hover:bg-sky-lc/10 transition-all cursor-pointer active:scale-[0.99]"
+              >
+                <ITerminal size={12} /> تست واقعی اتصال و Fallback
+              </button>
             </div>
           )}
 

@@ -104,3 +104,18 @@ export const ILayers = (p: P) => (
 export const IGrip = (p: P) => (
   <svg {...base(p)}>{[6, 12, 18].map((y) => <g key={y}><circle cx="9" cy={y} r="1.1" fill="currentColor" stroke="none" /><circle cx="15" cy={y} r="1.1" fill="currentColor" stroke="none" /></g>)}</svg>
 );
+export const IPen = (p: P) => (
+  <svg {...base(p)}><path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5z" /><path d="M14.5 6l3 3" /></svg>
+);
+export const IHighlight = (p: P) => (
+  <svg {...base(p)}><path d="M5 19l1-3.5L15 6.5l3 3L9 18.5z" /><path d="M13 4.5l3 3" /><path d="M4 21h9" strokeOpacity=".5" /></svg>
+);
+export const IEraser = (p: P) => (
+  <svg {...base(p)}><path d="M7.5 19L4 15.5a1.5 1.5 0 0 1 0-2.1L13 4.5a1.5 1.5 0 0 1 2.1 0l4.4 4.4a1.5 1.5 0 0 1 0 2.1L12 18.5a1.5 1.5 0 0 1-1 .5z" /><path d="M9.5 8l6.5 6.5M7.5 19H20" /></svg>
+);
+export const IUndo = (p: P) => (
+  <svg {...base(p)}><path d="M8 5L4 9l4 4" /><path d="M4 9h9.5a6 6 0 0 1 0 12H9" /></svg>
+);
+export const IWand = (p: P) => (
+  <svg {...base(p)}><path d="M5 19L15.5 8.5M14 4l.8 2.2L17 7l-2.2.8L14 10l-.8-2.2L11 7l2.2-.8zM19 11l.6 1.6L21.2 13l-1.6.6L19 15.2l-.6-1.6L16.8 13l1.6-.4zM8 3.5l.6 1.5 1.5.6-1.5.6L8 7.7l-.6-1.5-1.5-.6 1.5-.6z" /></svg>
+);
