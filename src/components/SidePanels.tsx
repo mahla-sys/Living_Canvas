@@ -161,6 +161,7 @@ function FileTree() {
   const logs = useStore((s) => s.logs);
   const snapshots = useStore((s) => s.snapshots);
   const memory = useStore((s) => s.memory);
+  const strokes = useStore((s) => s.strokes);
 
   const agentIds = useMemo(() => nodes.filter((n) => n.data.agent).map((n) => n.id), [nodes]);
   const outputIds = Object.keys(outputs).filter((k) => outputs[k].length > 0);
@@ -235,8 +236,14 @@ function FileTree() {
         </Folder>
         <TemplatesSection />
       </Folder>
-      <Folder name="strokes">
-        <p className="text-[10.5px] text-ink-500 px-2 py-1">لایه‌ی نقاشی — فاز بعد</p>
+      <Folder name="strokes" badge={strokes.length} defaultOpen>
+        {strokes.length === 0 && (
+          <p className="text-[10.5px] text-ink-500 px-2 py-1 leading-5">لایه‌ی نقاشی خالی است — از دکمه‌ی «نقاشی روی بوم» در پایین بوم استفاده کنید.</p>
+        )}
+        {strokes.slice(0, 14).map((st) => (
+          <FileRow key={st.id} path={`strokes/${st.id}.json`} name={`${st.id.slice(0, 18)}….json`} />
+        ))}
+        {strokes.length > 14 && <p className="text-[10px] text-ink-500 px-2 py-1">… و {faNum(strokes.length - 14)} طرح دیگر</p>}
       </Folder>
       <p className="text-[10px] text-ink-500 px-2 pt-2 pb-1 flex items-center gap-1.5">
         <IDatabase size={11} />

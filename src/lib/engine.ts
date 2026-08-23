@@ -3,9 +3,9 @@
    checkpoints §10, persistence, DeepSeek provider
    ============================================================ */
 import {
-  storage, bus, uid, nowIso, nowStamp, sleep, debounce,
+  storage, bus, uid, nowIso, nowStamp, sleep, debounce, faNum,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  type BusEventType, type OutputEntry, type MemDoc, type ChatMsg,
+  type BusEventType, type OutputEntry, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
 } from "./core";
 import {
   ROOT, CANVAS_ID, buildSeed, emptyExecution, roleById,
@@ -842,6 +842,124 @@ export async function restoreSnapshot(api: EngineApi, id: string) {
   }
 }
 
+/* ---------------- freehand drawing layer (§2 strokes/) ---------------- */
+
+interface Box { minX: number; minY: number; maxX: number; maxY: number }
+
+function strokeBox(pts: StrokePoint[]): Box {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return { minX, minY, maxX, maxY };
+}
+
+export interface StrokeCluster {
+  strokes: Stroke[];
+  box: Box;
+  cx: number;
+  cy: number;
+  order: number;
+}
+
+/** گروه‌بندی طرح‌های نزدیک به هم با union-find روی جعبه‌های محاطی */
+export function clusterStrokes(strokes: Stroke[], gap = 80): StrokeCluster[] {
+  const boxes = strokes.map((s) => strokeBox(s.points));
+  const parent = strokes.map((_, i) => i);
+  const find = (i: number): number => (parent[i] === i ? i : (parent[i] = find(parent[i])));
+  const union = (a: number, b: number) => { parent[find(a)] = find(b); };
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      const touch = a.minX - gap < b.maxX && a.maxX + gap > b.minX && a.minY - gap < b.maxY && a.maxY + gap > b.minY;
+      if (touch) union(i, j);
+    }
+  }
+  const groups = new Map<number, number[]>();
+  strokes.forEach((_, i) => {
+    const root = find(i);
+    groups.set(root, [...(groups.get(root) ?? []), i]);
+  });
+  return [...groups.values()]
+    .map((idxs) => {
+      const box: Box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+      for (const i of idxs) {
+        box.minX = Math.min(box.minX, boxes[i].minX);
+        box.minY = Math.min(box.minY, boxes[i].minY);
+        box.maxX = Math.max(box.maxX, boxes[i].maxX);
+        box.maxY = Math.max(box.maxY, boxes[i].maxY);
+      }
+      return {
+        strokes: idxs.map((i) => strokes[i]),
+        box,
+        cx: (box.minX + box.maxX) / 2,
+        cy: (box.minY + box.maxY) / 2,
+        order: Math.min(...idxs.map((i) => new Date(strokes[i].created_at).getTime())),
+      };
+    })
+    .sort((a, b) => a.order - b.order);
+}
+
+export async function addStroke(api: EngineApi, stroke: Stroke) {
+  api.set((st) => ({ strokes: [...st.strokes, stroke] }));
+  await storage.writeJson(`${ROOT}/strokes/${stroke.id}.json`, stroke);
+  emit(api, "stroke.created", `طرح ${stroke.id.slice(0, 16)}… در strokes/ ذخیره شد (${stroke.points.length} نقطه)`);
+}
+
+export async function removeStroke(api: EngineApi, id: string) {
+  api.set((st) => ({ strokes: st.strokes.filter((s) => s.id !== id) }));
+  await storage.deleteFile(`${ROOT}/strokes/${id}.json`);
+}
+
+export async function undoStroke(api: EngineApi) {
+  const s = api.get();
+  const last = s.strokes[s.strokes.length - 1];
+  if (!last) {
+    toast(api, "info", "طرحی برای بازگردانی نیست.");
+    return;
+  }
+  await removeStroke(api, last.id);
+  emit(api, "stroke.deleted", `آخرین طرح (${last.id.slice(0, 14)}…) بازگردانی شد`);
+}
+
+export async function clearStrokes(api: EngineApi) {
+  const s = api.get();
+  if (!s.strokes.length) return;
+  await Promise.all(s.strokes.map((st) => storage.deleteFile(`${ROOT}/strokes/${st.id}.json`)));
+  api.set({ strokes: [] });
+  emit(api, "strokes.cleared", `${s.strokes.length} طرح از لایه‌ی نقاشی پاک شد`);
+  toast(api, "info", "لایه‌ی نقاشی خالی شد.");
+}
+
+/** تبدیل طرح‌ها به گراف — هر خوشه یک نود، به ترتیب ترسیم */
+export async function convertStrokesToGraph(api: EngineApi, opts: { nodeType: NodeType; connect: boolean }) {
+  const s = api.get();
+  const clusters = clusterStrokes(s.strokes);
+  if (!clusters.length) {
+    toast(api, "warn", "هیچ طرحی برای تبدیل پیدا نشد — اول چیزی بکشید.");
+    return;
+  }
+  emit(api, "strokes.converted", `تبدیل شروع شد — ${clusters.length} خوشه شناسایی شد`);
+  const ids: string[] = [];
+  let i = 1;
+  for (const c of clusters) {
+    const title = `طرح ${faNum(i++)}`;
+    const id = await createNode(api, opts.nodeType, { x: c.cx - 40, y: c.cy - 32 }, {
+      title,
+      content: `این نود از لایه‌ی نقاشی تبدیل شده است.\n\n- مرکز خوشه: (${Math.round(c.cx)}, ${Math.round(c.cy)})\n- تعداد خطوط: ${c.strokes.length}`,
+    });
+    ids.push(id);
+  }
+  if (opts.connect && ids.length > 1) {
+    for (let k = 0; k < ids.length - 1; k++) await createEdge(api, ids[k], ids[k + 1]);
+  }
+  emit(api, "strokes.converted", `${clusters.length} نود «${opts.nodeType}» از طرح‌ها ساخته شد${opts.connect ? " و به ترتیب ترسیم به هم متصل شدند" : ""}`);
+  toast(api, "success", `${faNum(clusters.length)} نود از طرح‌ها ساخته شد — طرح‌ها به‌عنوان سند مرجع حفظ می‌شوند.`);
+}
+
 /* ---------------- node / edge mutations ---------------- */
 
 export async function createNode(
@@ -923,9 +1041,24 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
       execution: AppState["execution"];
     }>(`${ROOT}/state.json`);
     const graph = await storage.readJson<{ nodes: RFNode[]; edges: RFEdge[] }>(`${ROOT}/graph.json`);
+
+    // load the freehand drawing layer from individual stroke files (§2)
+    const strokes: Stroke[] = [];
+    try {
+      const files = await storage.listDirectory(`${ROOT}/strokes`);
+      for (const f of files) {
+        if (!f.endsWith(".json")) continue;
+        try {
+          const st = await storage.readJson<Stroke>(`${ROOT}/strokes/${f}`);
+          if (st?.points?.length) strokes.push(st);
+        } catch { /* skip corrupted stroke file */ }
+      }
+    } catch { /* strokes dir may be empty */ }
+    strokes.sort((a, b) => a.created_at.localeCompare(b.created_at));
+
     api.set({
       canvas: state.canvas, memory: state.memory, outputs: state.outputs ?? {}, chats: state.chats ?? {},
-      logs: state.logs ?? {}, snapshots: state.snapshots ?? [],
+      logs: state.logs ?? {}, snapshots: state.snapshots ?? [], strokes,
       nodes: graph.nodes.map((n) => ({
         ...n,
         data: { ...n.data, lock: { status: "free" as const, locked_by: null, locked_at: null } },
@@ -944,7 +1077,7 @@ export async function seedWorkspace(api: EngineApi) {
   const seed = buildSeed(s.settings.owner);
   api.set({
     canvas: seed.canvas, nodes: seed.nodes, edges: seed.edges, memory: seed.memory,
-    outputs: {}, chats: {}, logs: {}, snapshots: [], execution: emptyExecution(),
+    outputs: {}, chats: {}, logs: {}, snapshots: [], strokes: [], execution: emptyExecution(),
   });
   const st = api.get();
   const boot = async (path: string, content: string) => {
@@ -998,7 +1131,7 @@ export async function initWorkspace(api: EngineApi) {
 
 export async function resetWorkspace(api: EngineApi) {
   await storage.clear();
-  api.set({ booted: false, bootLines: [], events: [], toasts: [], snapshots: [], outputs: {}, chats: {}, logs: {}, templates: api.get().templates.filter((t) => t.builtin) });
+  api.set({ booted: false, bootLines: [], events: [], toasts: [], snapshots: [], outputs: {}, chats: {}, logs: {}, strokes: [], templates: api.get().templates.filter((t) => t.builtin) });
   await seedWorkspace(api);
   api.set({ booted: true });
   toast(api, "success", "فضای کار پاک و دوباره ساخته شد.");

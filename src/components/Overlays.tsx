@@ -100,6 +100,7 @@ const TAG_COLOR: Record<string, string> = {
   "memory.updated": "#6fb3c7", "output.written": "#8fbf7f",
   "snapshot.saved": "#b98bc2", "snapshot.restored": "#b98bc2",
   "graph.saved": "#5f7b76", "file.written": "#5f7b76", "chat.message": "#6fb3c7",
+  "stroke.created": "#d9c9a3", "stroke.deleted": "#d9c9a3", "strokes.converted": "#b98bc2", "strokes.cleared": "#d9c9a3",
   "validation.failed": "#e06a4e", system: "#8ba39d",
 };
 

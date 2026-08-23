@@ -94,6 +94,22 @@ export interface SnapshotMeta {
   status: string;
 }
 
+/* ---------------- freehand drawing layer (§2 strokes/) ---------------- */
+
+export interface StrokePoint { x: number; y: number }
+export type StrokeTool = "pen" | "highlight";
+
+export interface Stroke {
+  id: string;
+  canvas_id: string;
+  tool: StrokeTool;
+  color: string;
+  width: number;
+  points: StrokePoint[];
+  author: string;
+  created_at: string;
+}
+
 export type BusEventType =
   | "node.created" | "node.updated" | "node.deleted"
   | "edge.created" | "edge.updated" | "edge.deleted"
@@ -101,6 +117,7 @@ export type BusEventType =
   | "run.started" | "run.paused" | "run.resumed" | "run.completed" | "run.stopped"
   | "graph.saved" | "lock.acquired" | "lock.released"
   | "memory.updated" | "output.written" | "snapshot.saved" | "snapshot.restored"
+  | "stroke.created" | "stroke.deleted" | "strokes.converted" | "strokes.cleared"
   | "chat.message" | "file.written" | "validation.failed" | "system";
 
 export interface BusEvent {
