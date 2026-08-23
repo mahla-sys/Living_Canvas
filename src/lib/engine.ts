@@ -9,8 +9,9 @@ import {
 } from "./core";
 import {
   ROOT, CANVAS_ID, buildSeed, emptyExecution, roleById,
-  makeAgentConfig, makeNodeData, makeEdgeData,
-  type AppState, type RFNode, type RFEdge,
+  makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc,
+  BUILTIN_TEMPLATE,
+  type AppState, type RFNode, type RFEdge, type TemplateSpec,
 } from "../state";
 
 export interface EngineApi {
@@ -929,8 +930,164 @@ export async function initWorkspace(api: EngineApi) {
 
 export async function resetWorkspace(api: EngineApi) {
   await storage.clear();
-  api.set({ booted: false, bootLines: [], events: [], toasts: [], snapshots: [], outputs: {}, chats: {}, logs: {} });
+  api.set({ booted: false, bootLines: [], events: [], toasts: [], snapshots: [], outputs: {}, chats: {}, logs: {}, templates: api.get().templates.filter((t) => t.builtin) });
   await seedWorkspace(api);
   api.set({ booted: true });
   toast(api, "success", "فضای کار پاک و دوباره ساخته شد.");
+}
+
+/* ============================================================
+   قالب‌ها و نقش‌ها — save_pipeline_template /
+   load_pipeline_template / save_role (§8, §13)
+   ============================================================ */
+
+function slugify(s: string): string {
+  const base = s.trim().toLowerCase().replace(/[^\w\u0600-\u06FF-]+/g, "-").replace(/^-+|-+$/g, "");
+  return base || `tpl-${Date.now().toString(36)}`;
+}
+
+/** ابزار save_pipeline_template — ذخیره‌ی کل گراف به‌عنوان قالب */
+export async function saveTemplate(api: EngineApi, name: string) {
+  const st = api.get();
+  if (!st.nodes.length) {
+    toast(api, "warn", "بوم خالی است — نودی برای ذخیره در قالب وجود ندارد.");
+    return;
+  }
+  if (st.execution.status === "running") {
+    toast(api, "warn", "در میانه‌ی اجرا نمی‌توان قالب ذخیره کرد.");
+    return;
+  }
+  const id = slugify(name);
+  const dir = `${ROOT}/library/templates/${id}`;
+  const spec: TemplateSpec & { structure_version: string; saved_at: string; saved_by: string } = {
+    template_id: id,
+    name: name.trim(),
+    description: `ذخیره‌شده از بوم «${st.canvas.title}» — ${st.nodes.length} نود و ${st.edges.length} یال`,
+    version: "1.0",
+    structure_version: "1.3",
+    saved_at: nowIso(),
+    saved_by: st.settings.owner,
+    nodes: st.nodes.map((n) => ({
+      id: n.id,
+      nodeType: n.data.nodeType,
+      title: n.data.title,
+      position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+      shape: n.data.shape,
+      color: n.data.color,
+      viewMode: n.data.viewMode,
+      content: n.data.content || null,
+      role: n.data.agent?.role_id ?? null,
+    })),
+    edges: st.edges.map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      edgeType: e.data?.edgeType ?? "flow",
+      label: e.data?.label ?? "",
+      line_style: e.data?.line_style ?? "solid",
+    })),
+  };
+
+  await storage.writeJson(`${dir}/template.json`, spec);
+  await storage.writeFile(`${dir}/template.yaml`, toYaml({
+    template_id: id, name: spec.name, version: "1.0",
+    description: spec.description, nodes: spec.nodes.length, edges: spec.edges.length, saved_at: spec.saved_at,
+  }));
+  for (const n of spec.nodes) await storage.writeJson(`${dir}/nodes/${n.id}.json`, n);
+  for (const e of spec.edges) await storage.writeJson(`${dir}/edges/${e.id}.json`, e);
+
+  const info = { id, name: spec.name, description: spec.description, nodes: spec.nodes.length, edges: spec.edges.length, builtin: false, saved_at: spec.saved_at };
+  api.set((s) => ({ templates: [...s.templates.filter((t) => t.id !== id), info] }));
+  emit(api, "system", `قالب «${spec.name}» در library/templates/${id}/ ذخیره شد`);
+  toast(api, "success", `قالب «${spec.name}» در کتابخانه ذخیره شد.`);
+}
+
+/** ابزار load_pipeline_template — بارگذاری قالب روی بوم */
+export async function loadTemplate(api: EngineApi, id: string) {
+  const st = api.get();
+  if (st.execution.status === "running" || st.execution.status === "waiting_approval") {
+    toast(api, "warn", "در میانه‌ی اجرا نمی‌توان قالب بارگذاری کرد.");
+    return;
+  }
+  let spec: TemplateSpec | null = null;
+  if (id === BUILTIN_TEMPLATE.template_id) spec = BUILTIN_TEMPLATE;
+  else spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${id}/template.json`).catch(() => null);
+  if (!spec) {
+    toast(api, "error", "فایل قالب پیدا نشد.");
+    return;
+  }
+  if (!window.confirm(`بوم فعلی با قالب «${spec.name}» جایگزین می‌شود. ادامه می‌دهید؟`)) return;
+
+  // پاک‌سازی آرته‌فکت‌های گراف قبلی
+  for (const n of st.nodes) await storage.deleteFile(`${ROOT}/nodes/${n.id}.md`).catch(() => undefined);
+  for (const e of st.edges) await storage.deleteFile(`${ROOT}/edges/${e.id}.yaml`).catch(() => undefined);
+
+  const owner = st.settings.owner;
+  const nodes: RFNode[] = (spec.nodes ?? []).map((sn) => {
+    const data = makeNodeData(sn.nodeType ?? "note", sn.title ?? "بدون عنوان", owner, {
+      shape: sn.shape, color: sn.color, viewMode: sn.viewMode, content: sn.content ?? "",
+      ...(sn.role ? { agent: makeAgentConfig(sn.id, sn.role) } : {}),
+    });
+    return { id: sn.id, type: "lc", position: { x: sn.position?.x ?? 120, y: sn.position?.y ?? 120 }, data } as RFNode;
+  });
+  const edges: RFEdge[] = (spec.edges ?? []).map((se) => ({
+    id: se.id, source: se.source, target: se.target, type: "lc",
+    data: makeEdgeData({ edgeType: se.edgeType ?? "flow", label: se.label ?? "", line_style: se.line_style ?? "solid" }),
+  } as RFEdge));
+
+  // ساخت حافظه‌ی اختصاصی برای ایجنت‌های جدید (§6)
+  const agents = { ...st.memory.agents };
+  for (const n of nodes) {
+    if (n.data.agent && !agents[n.id]) {
+      agents[n.id] = makeMemDoc(
+        `memory/agents/${n.id}.md`, `حافظه‌ی ایجنت ${n.data.title}`,
+        "- آخرین ورودی‌ها: —\n- تصمیم‌های گرفته‌شده: —\n- نکات مهم برای اجرای بعدی: —", 0.7, "agent"
+      );
+      await storage.writeFile(`${ROOT}/memory/agents/${n.id}.md`, memoryToMd(agents[n.id])).catch(() => undefined);
+    }
+  }
+
+  api.set({
+    nodes, edges,
+    memory: { ...st.memory, agents },
+    execution: emptyExecution(),
+    canvas: { ...st.canvas, template_id: id, template_version: spec.version ?? "1.0", updated_at: nowIso() },
+  });
+  for (const n of nodes) await writeNodeArtifact(api, n.id, true);
+  for (const e of edges) await writeEdgeArtifact(api, e.id, true);
+  touch(api);
+  emit(api, "system", `قالب «${spec.name}» بارگذاری شد — ${nodes.length} نود، ${edges.length} یال`);
+  toast(api, "success", `قالب «${spec.name}» روی بوم بارگذاری شد.`);
+}
+
+/** ابزار save_role — ذخیره‌ی نقش شخصی‌سازی‌شده‌ی یک ایجنت در کتابخانه */
+export async function saveRoleFromNode(api: EngineApi, nodeId: string) {
+  const st = api.get();
+  const n = st.nodes.find((x) => x.id === nodeId);
+  const agent = n?.data.agent;
+  if (!n || !agent) return;
+  const rid = slugify(`${n.data.title}`);
+  const base = roleById(agent.role_id);
+  const role = {
+    id: rid,
+    name: n.data.title,
+    description: `${base.name} — شخصی‌سازی‌شده از نود ${nodeId}`,
+    system_prompt: agent.system_prompt,
+    model: agent.model,
+    tools: agent.tools,
+    version: "1.0",
+    default_output_contract: {
+      format: agent.context_contract.output_contract.format,
+      required_fields: agent.context_contract.output_contract.required_fields,
+      validator: `schemas/${rid}.schema.json`,
+      save_to: "outputs/{node_id}/",
+    },
+    default_context_contract: {
+      allowed_read_paths: ["canvas-overview.md", "memory/agents/{node_id}.md"],
+      allowed_write_paths: ["outputs/{node_id}/", "memory/agents/{node_id}.md"],
+    },
+  };
+  await storage.writeJson(`${ROOT}/library/roles/${rid}.json`, role);
+  emit(api, "system", `نقش «${n.data.title}» در library/roles/${rid}.json ذخیره شد`);
+  toast(api, "success", "نقش ایجنت در کتابخانه ذخیره شد.");
 }

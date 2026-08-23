@@ -5,7 +5,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type {
   LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode,
   AgentConfig, MemDoc, Settings, ExecutionState, BusEvent, Toast,
-  OutputEntry, ChatMsg, SnapshotMeta,
+  OutputEntry, ChatMsg, SnapshotMeta, EdgeType,
 } from "./lib/core";
 
 export const CANVAS_ID = "nexus-edu-001";
@@ -32,6 +32,79 @@ export interface FileViewerState {
   lang: "md" | "yaml" | "json" | "log";
 }
 
+/* ---------------- templates (§13) ---------------- */
+
+export interface TemplateSpecNode {
+  id: string;
+  nodeType: NodeType;
+  title: string;
+  position: { x: number; y: number };
+  shape?: ShapeKind;
+  color?: string;
+  viewMode?: ViewMode;
+  content?: string | null;
+  role?: string | null;
+}
+export interface TemplateSpecEdge {
+  id: string;
+  source: string;
+  target: string;
+  edgeType?: EdgeType;
+  label?: string;
+  line_style?: LCEdgeData["line_style"];
+}
+export interface TemplateSpec {
+  template_id: string;
+  name: string;
+  description: string;
+  version: string;
+  nodes: TemplateSpecNode[];
+  edges: TemplateSpecEdge[];
+}
+export interface TemplateInfo {
+  id: string;
+  name: string;
+  description: string;
+  nodes: number;
+  edges: number;
+  builtin: boolean;
+  saved_at: string;
+}
+
+export const BUILTIN_TEMPLATE: TemplateSpec = {
+  template_id: "quick-pipeline",
+  name: "خط لوله‌ی سریع",
+  description: "چهار مرحله: فهم مسئله ← تحلیل ریسک ← طراحی راه‌حل ← جمع‌بندی",
+  version: "1.0",
+  nodes: [
+    { id: "tpl-001", nodeType: "agent", title: "فهم مسئله", position: { x: 80, y: 220 }, role: "understander", content: "مسئله را از ابهام بیرون بکش." },
+    { id: "tpl-002", nodeType: "agent", title: "تحلیل ریسک", position: { x: 440, y: 60 }, role: "risk-analyst", content: "ریسک‌ها را امتیازدهی کن." },
+    { id: "tpl-003", nodeType: "agent", title: "طراحی راه‌حل", position: { x: 800, y: 220 }, role: "solution-designer", content: "راه‌حل اجرایی در سه گام." },
+    { id: "tpl-004", nodeType: "agent", title: "جمع‌بندی", position: { x: 1160, y: 60 }, role: "decision-maker", content: "تصمیم نهایی با تأیید انسانی." },
+    { id: "tpl-005", nodeType: "output-box", title: "خروجی نهایی", position: { x: 1500, y: 220 }, content: "سند تحویل این‌جا جمع می‌شود." },
+  ],
+  edges: [
+    { id: "tpl-e1", source: "tpl-001", target: "tpl-002", label: "بیان مسئله" },
+    { id: "tpl-e2", source: "tpl-002", target: "tpl-003", label: "گزارش ریسک" },
+    { id: "tpl-e3", source: "tpl-003", target: "tpl-004", label: "پیشنهاد راه‌حل" },
+    { id: "tpl-e4", source: "tpl-004", target: "tpl-005", label: "تصمیم نهایی" },
+  ],
+};
+
+export const builtinTemplateInfo = (): TemplateInfo => ({
+  id: BUILTIN_TEMPLATE.template_id,
+  name: BUILTIN_TEMPLATE.name,
+  description: BUILTIN_TEMPLATE.description,
+  nodes: BUILTIN_TEMPLATE.nodes.length,
+  edges: BUILTIN_TEMPLATE.edges.length,
+  builtin: true,
+  saved_at: nowIsoLocal(),
+});
+
+function nowIsoLocal() {
+  return new Date().toISOString();
+}
+
 export interface AppState {
   booted: boolean;
   bootLines: { text: string; ok: boolean }[];
@@ -50,6 +123,7 @@ export interface AppState {
   chats: Record<string, ChatMsg[]>;
   logs: Record<string, string[]>;
   snapshots: SnapshotMeta[];
+  templates: TemplateInfo[];
   execution: ExecutionState;
   events: BusEvent[];
   toasts: Toast[];

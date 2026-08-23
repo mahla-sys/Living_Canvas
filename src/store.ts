@@ -11,6 +11,7 @@ import {
 import type { Settings, LCNodeData, LCEdgeData } from "./lib/core";
 import {
   ROOT, CANVAS_ID, defaultSettings, emptyExecution, makeNodeData, makeEdgeData, roleById, MODELS,
+  builtinTemplateInfo,
   type AppState, type RFNode, type RFEdge, type FileViewerState,
 } from "./state";
 import {
@@ -19,6 +20,7 @@ import {
   createEdge as engCreateEdge, deleteEdge as engDeleteEdge,
   runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution,
   sendChat, takeSnapshot, restoreSnapshot, initWorkspace, resetWorkspace,
+  saveTemplate, loadTemplate, saveRoleFromNode,
   appendLog, type EngineApi,
 } from "./lib/engine";
 
@@ -63,6 +65,9 @@ interface Actions {
   restore: (id: string) => void;
   dismissToast: (id: string) => void;
   saveSettingsLocal: () => void;
+  saveTemplate: (name: string) => void;
+  loadTemplate: (id: string) => void;
+  saveRole: (nodeId: string) => void;
 }
 
 function initialState(): AppState {
@@ -88,6 +93,7 @@ function initialState(): AppState {
     chats: {} as AppState["chats"],
     logs: {} as AppState["logs"],
     snapshots: [] as AppState["snapshots"],
+    templates: [builtinTemplateInfo()],
     execution: emptyExecution(),
     events: [] as AppState["events"],
     toasts: [] as AppState["toasts"],
@@ -210,6 +216,10 @@ function buildActions(a: EngineApi): Actions {
       useStore.setState((s) => ({ ui: { ...s.ui, historyOpen: false } }));
     },
     dismissToast: (id) => useStore.setState((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+
+    saveTemplate: (name) => void saveTemplate(a, name),
+    loadTemplate: (id) => void loadTemplate(a, id),
+    saveRole: (nodeId) => void saveRoleFromNode(a, nodeId),
   };
 }
 
@@ -277,6 +287,12 @@ export function buildFileContent(path: string): FileViewerState | null {
     const rid = path.replace("library/roles/", "").replace(".json", "");
     const r = roleById(rid);
     content = JSON.stringify({ id: r.id, name: r.name, description: r.description, model: r.model, tools: r.tools, version: "1.0", default_output_contract: { format: "markdown", required_fields: r.required_fields, save_to: "outputs/{node_id}/" } }, null, 2);
+  } else {
+    const tplMatch = path.match(/^library\/templates\/([^/]+)\/template\.yaml$/);
+    if (tplMatch) {
+      const t = s.templates.find((x) => x.id === tplMatch[1]);
+      if (t) content = toYaml({ template_id: t.id, name: t.name, version: "1.0", description: t.description, nodes: t.nodes, edges: t.edges, builtin: t.builtin, saved_at: t.saved_at });
+    }
   }
 
   if (content === null) return null;

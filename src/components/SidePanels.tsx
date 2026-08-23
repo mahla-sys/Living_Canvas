@@ -15,6 +15,7 @@ const ALL_TOOLS = ["read_memory", "write_memory", "chat_with_user", "write_outpu
 
 function Palette() {
   const actions = useStore((s) => s.actions);
+  const templates = useStore((s) => s.templates);
   return (
     <div className="p-3 space-y-2">
       <p className="text-[10.5px] text-ink-400 leading-5 px-1">
@@ -48,6 +49,32 @@ function Palette() {
           </div>
         </div>
       ))}
+
+      <div className="pt-3 mt-2 border-t border-ink-700">
+        <p className="text-[10px] font-bold text-ink-300 px-1 mb-2 flex items-center gap-1.5">
+          <IHistory size={11} className="text-plum" />
+          قالب‌های آماده <span className="font-mono text-ink-500 text-[8.5px]" dir="ltr">library/templates/</span>
+        </p>
+        {templates.map((t) => (
+          <div key={t.id} className="flex items-center gap-2 p-2 rounded-xl bg-ink-850 border border-ink-700 hover:border-plum/40 transition-colors mb-1.5 anim-rise">
+            <div className="min-w-0 flex-1">
+              <p className="text-[11.5px] font-bold text-ink-100 flex items-center gap-1.5">
+                {t.name}
+                {t.builtin && <span className="text-[8px] font-mono px-1 py-px rounded bg-plum/15 border border-plum/40 text-plum">داخلی</span>}
+              </p>
+              <p className="text-[9.5px] text-ink-400 mt-0.5">
+                {faNum(t.nodes)} نود · {faNum(t.edges)} یال
+              </p>
+            </div>
+            <button
+              onClick={() => actions.loadTemplate(t.id)}
+              className="shrink-0 text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-ink-800 border border-ink-600 text-plum hover:border-plum/60 hover:bg-plum/10 transition-all cursor-pointer active:scale-95"
+            >
+              بارگذاری
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -172,9 +199,7 @@ function FileTree() {
           <FileRow path="library/shapes/agent-card.json" />
           <FileRow path="library/shapes/hex-process.json" />
         </Folder>
-        <Folder name="templates" badge={1}>
-          <FileRow path="library/templates/quick-pipeline/template.yaml" />
-        </Folder>
+        <TemplatesSection />
       </Folder>
       <Folder name="strokes">
         <p className="text-[10.5px] text-ink-500 px-2 py-1">لایه‌ی نقاشی — فاز بعد</p>
@@ -184,6 +209,59 @@ function FileTree() {
         حافظه‌ی سراسری: اعتماد {faNum(Math.round(memory.global.confidence * 100) / 100)}
       </p>
     </div>
+  );
+}
+
+function TemplatesSection() {
+  const templates = useStore((s) => s.templates);
+  const actions = useStore((s) => s.actions);
+  const [name, setName] = useState("");
+  return (
+    <Folder name="templates" badge={templates.length} defaultOpen>
+      {templates.map((t) => (
+        <div key={t.id} className="group flex items-center gap-1 pe-1">
+          <div className="flex-1 min-w-0">
+            <FileRow path={`library/templates/${t.id}/template.yaml`} name={t.builtin ? `${t.name} ★` : t.name} />
+          </div>
+          <button
+            onClick={() => actions.loadTemplate(t.id)}
+            title="بارگذاری روی بوم"
+            className="shrink-0 text-[9.5px] font-bold px-1.5 py-0.5 rounded-md bg-ink-800 border border-ink-600 text-ink-300 opacity-0 group-hover:opacity-100 hover:border-plum/60 hover:text-plum transition-all cursor-pointer"
+          >
+            بارگذاری
+          </button>
+        </div>
+      ))}
+      <div className="flex items-center gap-1.5 px-1.5 pt-1.5 pb-1">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && name.trim()) {
+              actions.saveTemplate(name.trim());
+              setName("");
+            }
+          }}
+          placeholder="نام قالب جدید…"
+          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-ink-900 border border-ink-600 text-[10.5px] text-ink-100 focus:border-amber-lc/60 focus:outline-none transition-colors"
+        />
+        <button
+          onClick={() => {
+            if (name.trim()) {
+              actions.saveTemplate(name.trim());
+              setName("");
+            }
+          }}
+          disabled={!name.trim()}
+          className="shrink-0 text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-amber-lc text-ink-950 hover:brightness-110 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+        >
+          ذخیره
+        </button>
+      </div>
+      <p className="text-[9px] text-ink-500 px-2 pb-1 leading-4">
+        گراف فعلی بوم به‌عنوان قالب در library/templates/ ذخیره می‌شود (§13).
+      </p>
+    </Folder>
   );
 }
 
@@ -379,6 +457,13 @@ function NodeInspector({ node }: { node: RFNode }) {
               <span className={`w-8 h-4.5 rounded-full p-0.5 transition-colors ${agent.require_approval ? "bg-ember" : "bg-ink-600"}`} style={{ height: 18 }}>
                 <span className={`block w-3.5 h-3.5 rounded-full bg-ink-100 transition-transform ${agent.require_approval ? "-translate-x-3.5" : ""}`} />
               </span>
+            </button>
+            <button
+              onClick={() => actions.saveRole(node.id)}
+              className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-plum/10 border border-plum/40 text-plum text-[11px] font-bold hover:bg-plum/20 transition-colors cursor-pointer active:scale-[0.99]"
+            >
+              <ICheck size={12} /> ذخیره‌ی نقش در کتابخانه
+              <span className="text-[8.5px] font-mono opacity-70" dir="ltr">save_role</span>
             </button>
           </Section>
 
