@@ -3,15 +3,15 @@
    checkpoints §10, persistence, DeepSeek provider
    ============================================================ */
 import {
-  storage, bus, uid, nowIso, nowStamp, sleep, debounce, faNum,
+  storage, setStorage, HttpStorageAdapter, bus, uid, nowIso, nowStamp, sleep, debounce, faNum,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
   type BusEventType, type OutputEntry, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
 } from "./core";
 import {
-  ROOT, CANVAS_ID, buildSeed, emptyExecution, roleById,
+  ROOT, CANVAS_ID, APP_VERSION, buildSeed, emptyExecution, roleById,
   makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc,
-  BUILTIN_TEMPLATE,
-  type AppState, type RFNode, type RFEdge, type TemplateSpec,
+  BUILTIN_TEMPLATE, builtinTemplateInfo,
+  type AppState, type RFNode, type RFEdge, type TemplateSpec, type TemplateInfo,
 } from "../state";
 
 export interface EngineApi {
@@ -41,7 +41,22 @@ export function getNode(s: AppState, id: string) {
   return s.nodes.find((n) => n.id === id);
 }
 
-export function patchNode(api: EngineApi, id: string, data: Partial<RFNode["data"]>) {
+let lastLockToast = 0;
+
+/** ویرایش نود — در حالت قفلِ اجرا، ویرایش‌های کاربری رد می‌شوند (§12.5) */
+export function patchNode(api: EngineApi, id: string, data: Partial<RFNode["data"]>, internal = false) {
+  if (!internal) {
+    const n = getNode(api.get(), id);
+    if (n && n.data.lock.status === "locked" && (n.data.lock.locked_by ?? "").startsWith("run-")) {
+      emit(api, "system", `ویرایش «${n.data.title}» رد شد — نود در حال اجرا قفل است (§12.5)`);
+      const now = Date.now();
+      if (now - lastLockToast > 2500) {
+        lastLockToast = now;
+        toast(api, "warn", "این نود وسط اجرا قفل است — ویرایش تا پایان اجرا مجاز نیست (§12.5).");
+      }
+      return;
+    }
+  }
   api.set((st) => ({
     nodes: st.nodes.map((n) =>
       n.id === id ? { ...n, data: { ...n.data, ...data, updated_at: nowIso() } } : n
@@ -452,7 +467,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
   };
 
   // lock §3.4
-  patchNode(api, nodeId, { lock: { status: "locked", locked_by: runId, locked_at: nowIso() }, agent: agent ? { ...agent, status: "running" } : agent });
+  patchNode(api, nodeId, { lock: { status: "locked", locked_by: runId, locked_at: nowIso() }, agent: agent ? { ...agent, status: "running" } : agent }, true);
   emit(api, "lock.acquired", `نود ${nodeId} توسط ${runId} قفل شد`);
   emit(api, "node.started", `اجرای «${node.data.title}» شروع شد`);
   api.set((st) => ({ execution: { ...st.execution, current_node_id: nodeId } }));
@@ -551,7 +566,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
     }));
 
     // success
-    patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agent ? { ...agent, status: "done" } : agent });
+    patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agent ? { ...agent, status: "done" } : agent }, true);
     emit(api, "lock.released", `قفل ${nodeId} آزاد شد`);
     emit(api, "node.completed", `«${node.data.title}» با موفقیت کامل شد`);
     await appendLog(api, nodeId, "== پایان موفق ==");
@@ -575,7 +590,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
       return;
     }
     const agentNow = getNode(api.get(), nodeId)?.data.agent;
-    patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow });
+    patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow }, true);
     emit(api, "node.failed", `اجرای «${node.data.title}» شکست خورد: ${String(err)}`);
     await appendLog(api, nodeId, `خطا: ${String(err)}`);
     api.set((st) => ({ execution: { ...st.execution, status: "failed" } }));
@@ -604,7 +619,7 @@ async function collectToBox(api: EngineApi, boxId: string) {
     file: "final-package.md", type: "summary", description: "بسته‌ی نهایی خروجی‌های خط لوله", content,
   }];
   await writeOutputs(api, boxId, entries, true);
-  patchNode(api, boxId, { content: `بسته‌ی نهایی با ${parts.length} بخش در outputs/shared/${boxId}/ ذخیره شد.` });
+  patchNode(api, boxId, { content: `بسته‌ی نهایی با ${parts.length} بخش در outputs/shared/${boxId}/ ذخیره شد.` }, true);
   emit(api, "node.completed", `«${box.data.title}» ${parts.length} خروجی را جمع‌آوری کرد`);
   api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, boxId] } }));
   await takeSnapshot(api, "جمع‌آوری خروجی نهایی", true);
@@ -707,7 +722,7 @@ export function stopRun(api: EngineApi) {
   if (cur) {
     const n = getNode(s, cur);
     const ag = n?.data.agent;
-    patchNode(api, cur, { lock: { status: "free", locked_by: null, locked_at: null }, agent: ag ? { ...ag, status: ag.status === "running" ? "idle" : ag.status } : ag });
+    patchNode(api, cur, { lock: { status: "free", locked_by: null, locked_at: null }, agent: ag ? { ...ag, status: ag.status === "running" ? "idle" : ag.status } : ag }, true);
   }
   // invalidating run_id makes any in-flight node abort at its next guard (§12.5)
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
@@ -998,6 +1013,11 @@ export async function createNode(
 export async function deleteNode(api: EngineApi, id: string) {
   const n = getNode(api.get(), id);
   if (!n) return;
+  if (n.data.lock.status === "locked" && (n.data.lock.locked_by ?? "").startsWith("run-")) {
+    emit(api, "system", `حذف «${n.data.title}» رد شد — نود در حال اجرا قفل است (§12.5)`);
+    toast(api, "warn", "حذف نودِ در حال اجرا مجاز نیست (§12.5).");
+    return;
+  }
   const connected = api.get().edges.filter((e) => e.source === id || e.target === id);
   api.set((st) => ({
     nodes: st.nodes.filter((x) => x.id !== id),
@@ -1056,9 +1076,26 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
     } catch { /* strokes dir may be empty */ }
     strokes.sort((a, b) => a.created_at.localeCompare(b.created_at));
 
+    // restore saved pipeline templates from library/templates/ (§13)
+    const templates = [builtinTemplateInfo()];
+    try {
+      const dirs = await storage.listDirectory(`${ROOT}/library/templates`);
+      for (const d of dirs) {
+        const dir = d.replace(/\/$/, "");
+        const spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${dir}/template.json`).catch(() => null);
+        if (spec?.template_id && spec.template_id !== BUILTIN_TEMPLATE.template_id) {
+          templates.push({
+            id: spec.template_id, name: spec.name, description: spec.description,
+            nodes: spec.nodes?.length ?? 0, edges: spec.edges?.length ?? 0,
+            builtin: false, saved_at: (spec as TemplateSpec & { saved_at?: string }).saved_at ?? nowIso(),
+          });
+        }
+      }
+    } catch { /* no custom templates yet */ }
+
     api.set({
       canvas: state.canvas, memory: state.memory, outputs: state.outputs ?? {}, chats: state.chats ?? {},
-      logs: state.logs ?? {}, snapshots: state.snapshots ?? [], strokes,
+      logs: state.logs ?? {}, snapshots: state.snapshots ?? [], strokes, templates,
       nodes: graph.nodes.map((n) => ({
         ...n,
         data: { ...n.data, lock: { status: "free" as const, locked_by: null, locked_at: null } },
@@ -1086,7 +1123,7 @@ export async function seedWorkspace(api: EngineApi) {
     await sleep(46);
   };
 
-  await boot("manifest.json", JSON.stringify({ version: "1.0", canvas_id: st.canvasId, structure_version: "1.3", last_validated: nowIso().slice(0, 10) }, null, 2));
+  await boot("manifest.json", JSON.stringify({ version: "1.0", app_version: APP_VERSION, canvas_id: st.canvasId, structure_version: "1.3", last_validated: nowIso().slice(0, 10) }, null, 2));
   await boot("canvas.yaml", toYaml({ ...st.canvas, id: st.canvasId }));
   await boot("canvas-overview.md", overviewMd(st));
   for (const n of st.nodes) await boot(`nodes/${n.id}.md`, nodeToMarkdown(n.id, n.data));
@@ -1122,11 +1159,32 @@ export async function seedWorkspace(api: EngineApi) {
   emit(api, "system", "بوم جدید مقداردهی اولیه شد — ساختار §2 کامل است");
 }
 
+/** اگر backendUrl تنظیم شده باشد، StorageAdapter سروری را جایگزین IndexedDB می‌کند (§5.2) */
+async function maybeSwitchStorage(api: EngineApi) {
+  const url = api.get().settings.backendUrl?.trim();
+  if (!url) return;
+  const http = new HttpStorageAdapter(url, CANVAS_ID);
+  try {
+    const ok = await Promise.race([
+      http.exists("manifest.json").then(() => true),
+      sleep(2500).then(() => false),
+    ]);
+    if (!ok) throw new Error("timeout");
+    setStorage(http);
+    emit(api, "system", `StorageAdapter به سرور سوئیچ شد: ${url}`);
+    toast(api, "success", "اتصال به سرور برقرار شد — فایل‌ها روی فایل‌سیستم واقعی ذخیره می‌شوند.");
+  } catch {
+    emit(api, "validation.failed", `سرور ${url} پاسخ نداد — ادامه با IndexedDB محلی`);
+    toast(api, "error", "سرور در دسترس نبود؛ با ذخیره‌سازی محلی ادامه می‌دهیم.");
+  }
+}
+
 export async function initWorkspace(api: EngineApi) {
+  await maybeSwitchStorage(api);
   const ok = await hydrate(api);
   if (!ok) await seedWorkspace(api);
   api.set({ booted: true });
-  toast(api, "success", ok ? "بوم از حافظه‌ی IndexedDB بارگذاری شد." : "بوم جدید با ساختار فایل‌محور آماده شد.");
+  toast(api, "success", ok ? "بوم از حافظه‌ی ذخیره‌سازی بارگذاری شد." : "بوم جدید با ساختار فایل‌محور آماده شد.");
 }
 
 export async function resetWorkspace(api: EngineApi) {

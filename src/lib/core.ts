@@ -139,6 +139,7 @@ export interface Settings {
   model: string;
   owner: string;
   simDelay: number;
+  backendUrl: string;
 }
 
 export interface ExecutionState {
@@ -492,4 +493,73 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
   }
 }
 
-export const storage: StorageAdapter = new IndexedDBStorageAdapter();
+/* ---------------- server adapter (§5.2 / §7.2 — فاز ۲) ----------------
+ * همان رابط StorageAdapter روی HTTP؛ با پر کردن backendUrl در تنظیمات فعال می‌شود.
+ * قرارداد endpoints (FastAPI):
+ *   GET / PUT / DELETE  {base}/api/canvases/{id}/files/{path}
+ *   GET                 {base}/api/canvases/{id}/files?prefix=<dir>/  → JSON string[]
+ *   DELETE              {base}/api/canvases/{id}   (بازنشانی کامل بوم)
+ */
+export class HttpStorageAdapter implements StorageAdapter {
+  private cache = new LruCache(120);
+  constructor(private base: string, private canvasId: string) {}
+  private fileUrl(path: string) {
+    return `${this.base.replace(/\/$/, "")}/api/canvases/${this.canvasId}/files/${path.split("/").map(encodeURIComponent).join("/")}`;
+  }
+  async readFile(path: string): Promise<string> {
+    const hit = this.cache.get(path);
+    if (hit !== undefined) return hit;
+    const res = await fetch(this.fileUrl(path));
+    if (!res.ok) throw new Error(`ENOENT: ${path} (${res.status})`);
+    const text = await res.text();
+    this.cache.set(path, text);
+    return text;
+  }
+  async writeFile(path: string, content: string): Promise<void> {
+    this.cache.set(path, content);
+    const res = await fetch(this.fileUrl(path), { method: "PUT", body: content });
+    if (!res.ok) throw new Error(`write failed: ${path} (${res.status})`);
+  }
+  async listDirectory(path: string): Promise<string[]> {
+    try {
+      const res = await fetch(`${this.base.replace(/\/$/, "")}/api/canvases/${this.canvasId}/files?prefix=${encodeURIComponent(path.replace(/\/$/, "") + "/")}`);
+      if (!res.ok) return [];
+      return (await res.json()) as string[];
+    } catch {
+      return [];
+    }
+  }
+  async deleteFile(path: string): Promise<void> {
+    this.cache.del(path);
+    await fetch(this.fileUrl(path), { method: "DELETE" }).catch(() => undefined);
+  }
+  async exists(path: string): Promise<boolean> {
+    if (this.cache.get(path) !== undefined) return true;
+    try {
+      await this.readFile(path);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async readJson<T>(path: string): Promise<T> {
+    return JSON.parse(await this.readFile(path)) as T;
+  }
+  async writeJson<T>(path: string, data: T): Promise<void> {
+    await this.writeFile(path, JSON.stringify(data, null, 2));
+  }
+  async allPaths(): Promise<string[]> {
+    return this.listDirectory("");
+  }
+  async clear(): Promise<void> {
+    this.cache.clear();
+    await fetch(`${this.base.replace(/\/$/, "")}/api/canvases/${this.canvasId}`, { method: "DELETE" }).catch(() => undefined);
+  }
+}
+
+export let storage: StorageAdapter = new IndexedDBStorageAdapter();
+
+/** تعویض زنده‌ی آداپتر — importکننده‌ها به‌لطف live binding نسخه‌ی جدید را می‌بینند */
+export function setStorage(s: StorageAdapter) {
+  storage = s;
+}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { roleById, type RFNode } from "../state";
+import { roleById, APP_VERSION, type RFNode } from "../state";
 import { faNum, fmtClock, fmtDate, type BusEvent } from "../lib/core";
 import {
   IPlay, IStop, ICamera, IHistory, IGear, IChat, IX, ISend, ICheck, IWarn,
@@ -21,6 +21,7 @@ function Logo() {
 export function TopBar() {
   const canvas = useStore((s) => s.canvas);
   const saveState = useStore((s) => s.saveState);
+  const backendUrl = useStore((s) => s.settings.backendUrl);
   const execution = useStore((s) => s.execution);
   const actions = useStore((s) => s.actions);
   const running = execution.status === "running";
@@ -34,8 +35,11 @@ export function TopBar() {
         <div className="leading-none">
           <p className="font-display text-[19px] text-ink-50 tracking-wide">Living Canvas</p>
           <p className="text-[9px] text-ink-400 mt-0.5 flex items-center gap-1.5">
-            بوم زنده <span className="font-mono text-amber-lc/80" dir="ltr">v1.3</span>
-            <span className="w-1 h-1 rounded-full bg-ink-500" /> فاز ۱
+            بوم زنده
+            <span className="font-mono text-amber-lc/90 px-1 py-px rounded bg-amber-lc/10 border border-amber-lc/25" dir="ltr">v{APP_VERSION}</span>
+            <span className="w-1 h-1 rounded-full bg-ink-500" />
+            سند <span className="font-mono" dir="ltr">1.3</span>
+            <span className="w-1 h-1 rounded-full bg-sage" title="فاز ۱ بسته شد" />
           </p>
         </div>
       </div>
@@ -46,7 +50,11 @@ export function TopBar() {
         <p className="text-[13px] font-extrabold text-ink-100 truncate">{canvas.title}</p>
         <p className="text-[9.5px] text-ink-400 flex items-center gap-1.5 mt-0.5">
           <span className={`w-1.5 h-1.5 rounded-full ${saveState === "saving" ? "bg-amber-lc anim-blink" : "bg-sage"}`} />
-          {saveState === "saving" ? "در حال ذخیره روی IndexedDB…" : "ذخیره‌شده — StorageAdapter"}
+          {saveState === "saving"
+            ? "در حال ذخیره…"
+            : backendUrl?.trim()
+              ? "ذخیره‌شده — StorageAdapter سرور"
+              : "ذخیره‌شده — IndexedDB"}
           <span className="font-mono" dir="ltr">/{canvas.canvas_type}</span>
         </p>
       </div>
@@ -345,11 +353,25 @@ export function SettingsModal() {
           )}
 
           <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className="block text-[11px] font-bold text-ink-300 mb-1">مدل</span>
-              <input value={settings.model} dir="ltr" onChange={(e) => actions.updateSettings({ model: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-[12px] font-mono text-ink-100 focus:border-amber-lc/60 focus:outline-none" />
-            </label>
-            <label className="block">
+          <div className="col-span-2">
+            <span className="flex items-center gap-1.5 text-[11px] font-bold text-ink-300 mb-1">
+              <IDatabase size={11} className="text-sky-lc" /> سرور Backend — فاز ۲
+            </span>
+            <input
+              value={settings.backendUrl} dir="ltr"
+              onChange={(e) => actions.updateSettings({ backendUrl: e.target.value })}
+              placeholder="http://localhost:8000 — خالی = IndexedDB محلی"
+              className="w-full px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-[12px] font-mono text-ink-100 focus:border-amber-lc/60 focus:outline-none"
+            />
+            <p className="text-[9.5px] text-ink-500 leading-4 mt-1">
+              با پر کردن آدرس، همه‌ی خواندن/نوشتن‌ها از <span className="font-mono" dir="ltr">HttpStorageAdapter</span> به سرور FastAPI می‌رود (قرارداد §5.2). هنگام بارگذاری بعدی اعمال می‌شود؛ اگر سرور پاسخ ندهد، سیستم به‌صورت خودکار روی IndexedDB می‌ماند.
+            </p>
+          </div>
+
+          <label className="block">
+            <span className="block text-[11px] font-bold text-ink-300 mb-1">مدل</span>
+            <input value={settings.model} dir="ltr" onChange={(e) => actions.updateSettings({ model: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-[12px] font-mono text-ink-100 focus:border-amber-lc/60 focus:outline-none" />
+          </label>            <label className="block">
               <span className="block text-[11px] font-bold text-ink-300 mb-1">مالک بوم (owner)</span>
               <input value={settings.owner} onChange={(e) => actions.updateSettings({ owner: e.target.value })} className="w-full px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-[12px] text-ink-100 focus:border-amber-lc/60 focus:outline-none" />
             </label>
@@ -435,7 +457,9 @@ export function BootOverlay() {
           </span>
           <div>
             <p className="font-display text-[26px] text-ink-50 leading-8">Living Canvas</p>
-            <p className="text-[10.5px] text-ink-400">مقداردهی ساختار فایل‌محور — سند معماری v1.3</p>
+            <p className="text-[10.5px] text-ink-400">
+              مقداردهی ساختار فایل‌محور — سند معماری <span className="font-mono" dir="ltr">1.3</span> · انتشار <span className="font-mono text-amber-lc/80" dir="ltr">v{APP_VERSION}</span>
+            </p>
           </div>
         </div>
         <div className="rounded-xl bg-ink-900/80 border border-ink-700 p-3 min-h-[210px] max-h-[300px] overflow-hidden">

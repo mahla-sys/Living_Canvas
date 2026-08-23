@@ -8,6 +8,7 @@ import type {
   OutputEntry, ChatMsg, SnapshotMeta, EdgeType, Stroke,
 } from "./lib/core";
 
+export const APP_VERSION = "0.1.0"; // انتشار v0.1 — پایان رسمی فاز ۱ سند معماری 1.3
 export const CANVAS_ID = "nexus-edu-001";
 export const ROOT = `canvases/${CANVAS_ID}`;
 
@@ -310,9 +311,9 @@ export const emptyExecution = (): ExecutionState => ({
 export const defaultSettings = (): Settings => {
   try {
     const raw = localStorage.getItem("lc-settings");
-    if (raw) return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, ...JSON.parse(raw) };
+    if (raw) return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "", ...JSON.parse(raw) };
   } catch { /* ignore */ }
-  return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620 };
+  return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "" };
 };
 
 /* ---------------- palette ---------------- */

@@ -128,9 +128,24 @@ function buildActions(a: EngineApi): Actions {
     reset: () => resetWorkspace(a),
 
     onNodesChange: (changes) => {
-      const moved = changes.some((c) => c.type === "position" && "dragging" in c && c.dragging === false);
-      useStore.setState((s) => ({ nodes: applyNodeChanges(changes, s.nodes) }));
+      // نودهای قفل‌شده در اجرا نه حذف می‌شوند و نه جابجا (§12.5)
+      const locked = new Set(
+        a.get().nodes
+          .filter((n) => n.data.lock.status === "locked" && (n.data.lock.locked_by ?? "").startsWith("run-"))
+          .map((n) => n.id)
+      );
+      let blocked = false;
+      const filtered = changes.filter((c) => {
+        if ((c.type === "remove" || c.type === "position") && "id" in c && locked.has(c.id)) {
+          blocked = true;
+          return false;
+        }
+        return true;
+      });
+      const moved = filtered.some((c) => c.type === "position" && "dragging" in c && c.dragging === false);
+      useStore.setState((s) => ({ nodes: applyNodeChanges(filtered, s.nodes) }));
       if (moved) touch(a);
+      if (blocked) toast(a, "warn", "نود در حال اجرا قفل است — جابجایی و حذف تا پایان گام مجاز نیست (§12.5).");
     },
 
     onEdgesChange: (changes) => {
