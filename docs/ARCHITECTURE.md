@@ -1061,7 +1061,8 @@ Ordered by how much they will cost to fix later. **Retired in the post-review pa
 `MemoryManager.read` resolved only the five memory documents; `agent.tools` was decorative; `evalCondition` failed
 open; `risk_score` was hardcoded `5` for one role; `computeOrder` was a BFS that dropped disconnected nodes; the
 contract of `makeAgentConfig(...)` was replaced instead of merged; `validateOutput` could not fail; eleven unused
-npm dependencies and a 40 MB tracked snapshot; no CI.
+npm dependencies and a 40 MB tracked snapshot; nothing that ran automatically (the CI definition now exists at
+`ci/github-actions.yml` but is not wired up yet — §11.3).
 
 1. **`askModel` still hardcodes the endpoint and the sampling budget** (`https://api.deepseek.com/chat/completions`,
    `max_tokens: 900` while `AgentConfig`/UI carry 4000). More structurally: the model does not *choose* tools — the
@@ -1199,10 +1200,13 @@ npm run build       tsc --noEmit && vite build → ~524 kB js / 161 kB gzip (chu
 node scripts/check-english.mjs   English-only gate: scans `git ls-files`, exits 1 on any RTL/bidi character
 ```
 
-Those four checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**`. The workflow file is written
-and on disk at `.github/workflows/ci.yml`, **but it is not committed**: the agent's GitHub connection is not allowed to
-create files under `.github/workflows/`, so it needs one commit by a human with repo access. Until that commit exists
-there is no automation guarding `main` — the four commands above are the gate, run by hand. No lint step and no formatter config (§9.8) — adding
+Those four checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**`. The definition is committed as
+**`ci/github-actions.yml`** rather than under `.github/`, because the agent connection maintaining this branch may not
+create files in `.github/workflows/` (a GitHub App permission, not a code problem). Activating it is one human commit:
+`cp ci/github-actions.yml .github/workflows/ci.yml`. Until that lands there is no automation guarding `main`, so whoever
+merges runs the four commands by hand.
+
+No lint step and no formatter config (§9.8) — adding
 one is a decision, not a cleanup, because it would reformat 8.7k lines in one commit. If you add one, match the four
 conventions already in use: double quotes, semicolons, 2-space indent, ~120 column soft limit, `/* */` section
 banners inside long files.
