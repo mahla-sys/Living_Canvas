@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --font-display: "Lalezar", "Vazirmatn", sans-serif;
-  --font-body: "Vazirmatn", sans-serif;
-  --font-mono: "IBM Plex Mono", "Vazirmatn", monospace;
+  --font-display: "Space Grotesk", "Inter", ui-sans-serif, sans-serif;
+  --font-body: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
   --color-ink-950: #0b1312;
   --color-ink-900: #0f1a19;
@@ -224,15 +224,13 @@ body,
   stroke: #e8b04b !important;
 }
 
-/* ---------- markdown داخل نود (خروجی mdInline) ---------- */
-/* چون mdInline اول escape می‌کند، این‌ها تنها تگ‌های مجاز داخل Markdown نودند. */
+/* ---------- markdown inside a node (output of mdInline) ---------- */
+/* mdInline escapes first, so these are the only tags allowed inside node Markdown. */
 .lc-md-strong {
   color: var(--color-ink-50);
   font-weight: 700;
 }
 .lc-md-code {
-  direction: ltr;
-  unicode-bidi: embed;
   display: inline-block;
   font-family: var(--font-mono);
   font-size: 0.92em;
@@ -243,7 +241,7 @@ body,
   color: var(--color-sky-lc);
 }
 
-/* ---------- منوی نوار بالا (Export/Import) ---------- */
+/* ---------- top bar menu (Export/Import) ---------- */
 .lc-menu {
   position: absolute;
   inset-block-start: calc(100% + 6px);
@@ -294,7 +292,7 @@ body,
   color: var(--color-ink-500);
 }
 
-/* ---------- تراشه‌ی حالت ذخیره‌سازی ---------- */
+/* ---------- storage mode chip ---------- */
 .lc-storage-chip {
   display: inline-flex;
   align-items: center;
@@ -308,7 +306,7 @@ body,
   opacity: 0.85;
 }
 
-/* ---------- پیش‌نمایش Import ---------- */
+/* ---------- import preview ---------- */
 .lc-import-list {
   max-height: 168px;
   overflow: auto;
@@ -319,7 +317,6 @@ body,
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.9;
-  direction: ltr;
   text-align: left;
 }
 .lc-import-warn {

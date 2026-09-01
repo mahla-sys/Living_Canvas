@@ -1,8 +1,8 @@
 /* ============================================================
    Living Canvas — portability (Export/Import)
-   هر دو مسیر «فایل‌محور» هستند: باندل JSON دقیقاً همان فایل‌های §2 را
-   حمل می‌کند، نه یک state داخلی. Import هم اگر graph.json/state.json را
-   نداشته باشد، بوم را از nodes/*.md + edges/*.yaml + memory/*.md می‌سازد.
+   Both paths are file-first: the JSON bundle carries exactly the §2 files —
+   never an internal state object. On Import, if graph.json/state.json are missing,
+   the canvas is rebuilt from nodes/*.md + edges/*.yaml + memory/*.md.
    ============================================================ */
 import { storage, uid, nowIso, safeRelPath, extractFrontmatter, parseYaml, type StorageAdapter, type MemDoc } from "./core";
 import { ROOT, CANVAS_ID, APP_VERSION, makeNodeData, makeEdgeData } from "../state";
@@ -10,7 +10,7 @@ import type { LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode } from "./co
 
 export const BUNDLE_KIND = "living-canvas-export";
 export const BUNDLE_VERSION = 1;
-/** سقف ایمن برای حجم باندل — از قفل‌شدن تب با فایل چندصد‌مگابایتی جلوگیری می‌کند. */
+/** Safety ceiling for bundle size — prevents a multi-hundred-MB file from freezing the tab. */
 export const MAX_BUNDLE_BYTES = 32 * 1024 * 1024;
 
 export interface CanvasBundle {
@@ -20,7 +20,7 @@ export interface CanvasBundle {
   structure_version: string;
   canvas_id: string;
   exported_at: string;
-  /** کلید = مسیر منطقی کامل (`canvases/<id>/nodes/node-001.md`) */
+  /** key = full logical path (`canvases/<id>/nodes/node-001.md`) */
   files: Record<string, string>;
   stats: { files: number; bytes: number };
 }
@@ -29,7 +29,7 @@ export type CanvasFiles = Record<string, string>;
 
 /* ---------------- collect ---------------- */
 
-/** همه‌ی فایل‌های بوم را از StorageAdapter فعلی برمی‌دارد (§2). */
+/** Collects every canvas file from the current StorageAdapter (§2). */
 export async function collectCanvasFiles(
   opts?: { excludeRuntime?: boolean; adapter?: StorageAdapter; filter?: (path: string) => boolean }
 ): Promise<CanvasFiles> {
@@ -38,14 +38,14 @@ export async function collectCanvasFiles(
   const paths = await store.allPaths();
   for (const p of paths) {
     if (!p.startsWith(ROOT + "/")) continue;
-    if (opts?.filter && !opts.filter(p)) continue;   // بودجه‌ی خواندن در boot
+    if (opts?.filter && !opts.filter(p)) continue;   // boot-time read budget
     const isRuntimeCache = p === `${ROOT}/graph.json` || p === `${ROOT}/state.json`;
     if (opts?.excludeRuntime && isRuntimeCache) continue;
     try {
       const text = await store.readFile(p);
       out[p] = text;
     } catch {
-      /* فایل خوانده نشد — همان‌طور که hydrate رد می‌کند */
+      /* unreadable file — skipped the same way hydrate skips it */
     }
   }
   return out;
@@ -78,34 +78,34 @@ export interface ParseResult {
   files: CanvasFiles;
   canvasId: string | null;
   title: string | null;
-  /** مسیرهای رد شده (ناامن یا بیرون از ریشه) */
+  /** rejected paths (unsafe or outside the root) */
   skipped: { path: string; reason: string }[];
   error?: string;
   source: "bundle" | "raw-files";
 }
 
-/** ریشه‌ی مورد انتظار فایل‌ها؛ اگر باندل بدون پیشوند ساخته شده، خودمان وصل می‌کنیم. */
+/** Expected file root; if a bundle was built without the prefix we re-attach it. */
 function normalizePath(p: string): { path: string | null; reason?: string } {
   const rel = safeRelPath(p);
-  if (!rel) return { path: null, reason: "مسیر نامعتبر یا خطرناک (.. / مطلق / کاراکتر ممنوع)" };
+  if (!rel) return { path: null, reason: "unsafe or invalid path (.. / absolute / forbidden char)" };
   if (rel === ROOT || rel.startsWith(ROOT + "/")) return { path: rel };
-  if (rel.startsWith("canvases/")) return { path: null, reason: "مربوط به بوم دیگری است" };
+  if (rel.startsWith("canvases/")) return { path: null, reason: "belongs to a different canvas" };
   return { path: `${ROOT}/${rel}` };
 }
 
 export function parseBundleText(text: string): ParseResult {
   const empty: ParseResult = { ok: false, files: {}, canvasId: null, title: null, skipped: [], source: "bundle" };
   const trimmed = text.trim();
-  if (!trimmed) return { ...empty, error: "فایل خالی است" };
+  if (!trimmed) return { ...empty, error: "the file is empty" };
 
   let raw: unknown;
   try {
     raw = JSON.parse(trimmed);
   } catch {
-    return { ...empty, error: "این JSON معتبر نیست — فایل .livingcanvas.json را انتخاب کنید" };
+    return { ...empty, error: "not valid JSON — pick a .livingcanvas.json file" };
   }
 
-  // حالت ۲: کاربر مستقیماً خروجی `cat files.json` یا باندلِ بدون header داده
+  // mode 2: the user handed us a raw `cat files.json` map, or a bundle without a header
   const maybeBundle = raw as Partial<CanvasBundle> & { files?: unknown };
   const filesObj =
     maybeBundle && typeof maybeBundle === "object" && maybeBundle.files && typeof maybeBundle.files === "object"
@@ -113,14 +113,14 @@ export function parseBundleText(text: string): ParseResult {
       : raw && typeof raw === "object" && !Array.isArray(raw)
         ? (raw as Record<string, unknown>)
         : null;
-  if (!filesObj) return { ...empty, error: "ساختار فایل‌ها پیدا نشد" };
+  if (!filesObj) return { ...empty, error: "no file map found in this bundle" };
 
   const isLabeled = typeof maybeBundle?.kind === "string";
   if (isLabeled && maybeBundle!.kind !== BUNDLE_KIND) {
-    return { ...empty, error: `این فایل خروجی Living Canvas نیست (kind=${String(maybeBundle!.kind)})` };
+    return { ...empty, error: `not a Living Canvas export (kind=${String(maybeBundle!.kind)})` };
   }
   if (isLabeled && typeof maybeBundle!.version === "number" && maybeBundle!.version > BUNDLE_VERSION) {
-    return { ...empty, error: `نسخه‌ی باندل جدیدتر است (${maybeBundle!.version} > ${BUNDLE_VERSION}) — اول برنامه را به‌روز کنید` };
+    return { ...empty, error: `bundle version is newer (${maybeBundle!.version} > ${BUNDLE_VERSION}) — update the app first` };
   }
 
   const files: CanvasFiles = {};
@@ -128,19 +128,19 @@ export function parseBundleText(text: string): ParseResult {
   for (const [p, c] of Object.entries(filesObj)) {
     const n = normalizePath(p);
     if (!n.path) {
-      skipped.push({ path: p, reason: n.reason ?? "رد شد" });
+      skipped.push({ path: p, reason: n.reason ?? "rejected" });
       continue;
     }
     if (typeof c !== "string") {
-      skipped.push({ path: p, reason: "محتوا رشته نیست (فایل باینری پشتیبانی نمی‌شود)" });
+      skipped.push({ path: p, reason: "content is not a string (binary files are unsupported)" });
       continue;
     }
     files[n.path] = c;
   }
 
-  if (!Object.keys(files).length) return { ...empty, files, skipped, error: "هیچ فایل معتبری در باندل نبود" };
+  if (!Object.keys(files).length) return { ...empty, files, skipped, error: "the bundle contains no valid file" };
   if (!files[`${ROOT}/manifest.json`]) {
-    skipped.push({ path: "manifest.json", reason: "غایب — بوم‌های Living Canvas این فایل را دارند (§3.1)" });
+    skipped.push({ path: "manifest.json", reason: "missing — Living Canvas canvases have this file (§3.1)" });
   }
 
   let canvasId: string | null = typeof maybeBundle?.canvas_id === "string" ? maybeBundle.canvas_id : null;
@@ -151,7 +151,7 @@ export function parseBundleText(text: string): ParseResult {
       const m = JSON.parse(manifest) as { canvas_id?: unknown };
       if (typeof m.canvas_id === "string") canvasId = m.canvas_id;
     } catch {
-      skipped.push({ path: "manifest.json", reason: "JSON نامعتبر" });
+      skipped.push({ path: "manifest.json", reason: "invalid JSON" });
     }
   }
   const canvasYaml = files[`${ROOT}/canvas.yaml`];
@@ -163,7 +163,7 @@ export function parseBundleText(text: string): ParseResult {
   return { ok: true, files, canvasId, title, skipped, source: isLabeled ? "bundle" : "raw-files" };
 }
 
-/* ---------------- file-first re-hydration (بدون graph.json/state.json) ---------------- */
+/* ---------------- file-first re-hydration (without graph.json/state.json) ---------------- */
 
 const str = (v: unknown, max = 4000): string | null => (typeof v === "string" && v.length > 0 && v.length <= max ? v : null);
 
@@ -177,13 +177,13 @@ export interface DerivedNodeDoc {
   position: { x: number; y: number };
 }
 
-/** `nodes/<id>.md` → دادهٔ نود (§3.4). فایل‌های خراب را با null رد می‌کنیم. */
+/** `nodes/<id>.md` → node data (§3.4). Broken files are rejected with null. */
 export function parseNodeDoc(path: string, md: string): DerivedNodeDoc | null {
   const id = safeRelPath(path)?.match(/nodes\/([^/]+)\.md$/)?.[1];
   if (!id) return null;
   const fmBlock = extractFrontmatter(md);
   const body = fmBlock ? fmBlock.body.trim() : md.trim();
-  if (!fmBlock && !body) return null; // فایل خالی = قابل‌خواندن نیست، نه یک نود خالی
+  if (!fmBlock && !body) return null; // an empty file is unreadable, not an empty node
   const y = fmBlock ? parseYaml(fmBlock.yaml) : null;
   const owner = "import";
   const title = (y && str(y.title)) || body.match(/^#\s+(.+)$/m)?.[1]?.trim() || id;
@@ -239,7 +239,7 @@ export function parseNodeDoc(path: string, md: string): DerivedNodeDoc | null {
       if (m) a.model = m;
       if (tools?.length) a.tools = tools;
       const st = str(agent?.status);
-      // وضعیت اجرا از فایل بازگردانی نمی‌شود مگر «done» باشد (بقیه یعنی اجرا نیمه‌کاره متوقف شده)
+      // run status is restored from files only when it was "done" (anything else means an interrupted run)
       a.status = st === "done" ? "done" : "idle";
       if (typeof agent?.max_steps === "number") a.max_steps = Math.min(64, Math.max(1, agent.max_steps as number));
       if (typeof agent?.max_tokens === "number") a.max_tokens = Math.min(200000, Math.max(128, agent.max_tokens as number));
@@ -256,7 +256,7 @@ export function parseNodeDoc(path: string, md: string): DerivedNodeDoc | null {
   return { id, data, position: { x: 120, y: 120 } };
 }
 
-/** `edges/<id>.yaml` → دادهٔ یال (§3.5). */
+/** `edges/<id>.yaml` → edge data (§3.5). */
 export function parseEdgeDoc(path: string, text: string): { id: string; source: string; target: string; data: LCEdgeData } | null {
   const id = safeRelPath(path)?.match(/edges\/([^/]+)\.yaml$/)?.[1];
   if (!id) return null;
@@ -296,7 +296,7 @@ const GLOBAL_MEM: Record<string, keyof import("../state").AppState["memory"]> = 
   "memory/user.md": "user",
 };
 
-/** `memory/**\/.md` → اسناد حافظه (§3.7). فایل خراب = حذفش کن، seed جایگزین می‌شود. */
+/** `memory/**\/.md` → memory docs (§3.7). A broken file is dropped; the seed replaces it. */
 export function parseMemoryDoc(path: string, md: string): MemDoc | null {
   const fm = extractFrontmatter(md);
   const y = fm ? parseYaml(fm.yaml) : null;
@@ -307,7 +307,7 @@ export function parseMemoryDoc(path: string, md: string): MemDoc | null {
   const src = str(y?.source);
   return {
     path: rel,
-    title: (y && str(y.title)) || body.match(/^#\s+(.+)$/m)?.[1]?.trim() || "حافظه",
+    title: (y && str(y.title)) || body.match(/^#\s+(.+)$/m)?.[1]?.trim() || "memory",
     body,
     updated_at: (y && str(y.updated_at)) ?? nowIso(),
     last_accessed: (y && str(y.last_accessed)) ?? nowIso(),
@@ -328,8 +328,8 @@ export interface DerivedCanvas {
 }
 
 /**
- * بازسازی بوم *فقط از فایل‌ها* — همان چیزی که نبودش باعث شده بود
- * Exportِ پوشه‌ای بعد از رفرش داده را به seed برگرداند.
+ * Rebuilds the canvas *from files only* — the absence of which made a folder
+ * Export fall back to the seed after a refresh.
  */
 export function deriveCanvasFromFiles(files: CanvasFiles): DerivedCanvas {
   const d: DerivedCanvas = {
@@ -371,7 +371,7 @@ export function deriveCanvasFromFiles(files: CanvasFiles): DerivedCanvas {
       else d.unreadable.push(rel);
     }
   }
-  // یال‌های مرجع‌به‌نودناموجود را نگه نمی‌داریم (React Flow با آن‌ها crash می‌کند)
+  // edges referencing a missing node are dropped (React Flow crashes on them)
   const ids = new Set(d.nodes.map((n) => n.id));
   d.edges = d.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
   return d;
@@ -379,7 +379,7 @@ export function deriveCanvasFromFiles(files: CanvasFiles): DerivedCanvas {
 
 /* ---------------- browser IO (download / file picker) ---------------- */
 
-/** دانلود با نام امن؛ اگر فایل موجود باشد با `-2` و … اداده می‌شود (توسط caller قابل‌فعال‌سازی). */
+/** Download under a safe name; if it exists the caller can append `-2`, `-3`, … */
 export function suggestFileName(canvasId: string, ext: string, taken?: Set<string>): string {
   const base = safeRelPath(canvasId)?.replace(/\//g, "-") ?? "canvas";
   if (!taken || !taken.has(`${base}.${ext}`)) return `${base}.${ext}`;
@@ -407,21 +407,21 @@ export function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const fr = new FileReader();
     fr.onload = () => resolve(String(fr.result ?? ""));
-    fr.onerror = () => reject(fr.error ?? new Error("خواندن فایل ناموفق بود"));
+    fr.onerror = () => reject(fr.error ?? new Error("could not read the file"));
     fr.readAsText(file, "utf-8");
   });
 }
 
 /* ---------------- storage IO ---------------- */
 
-/** نوشتن فایل‌ها روی StorageAdapter فعال؛ با replace=true اول پاک می‌کند. */
+/** Writes files into the active StorageAdapter; with replace=true it clears first. */
 export async function installFiles(files: CanvasFiles, opts?: { replace?: boolean; adapter?: StorageAdapter }): Promise<{ written: number }> {
   const target: StorageAdapter = opts?.adapter ?? storage;
   const replace = opts?.replace !== false;
   if (replace) await target.clear();
   const entries = Object.entries(files);
   for (const [p, c] of entries) await target.writeFile(p, c);
-  // حذف فایل‌های بی‌ربط که در جایگزینی کامل باقی مانده‌اند
+  // remove unrelated files left behind by a full replace
   if (!opts?.adapter) {
     const keep = new Set(entries.map(([p]) => p));
     for (const p of await storage.allPaths()) {
@@ -431,7 +431,7 @@ export async function installFiles(files: CanvasFiles, opts?: { replace?: boolea
   return { written: entries.length };
 }
 
-/** حجم تقریبی باندل برای نمایش در UI. */
+/** Approximate bundle size, for display in the UI. */
 export function bundleBytes(files: CanvasFiles): number {
   let n = 0;
   for (const c of Object.values(files)) n += c.length;

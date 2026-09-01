@@ -15,15 +15,15 @@ export default function App() {
     <div className="h-full flex flex-col bg-ink-950 text-ink-100 overflow-hidden" style={{ fontFamily: "var(--font-body)" }}>
       <TopBar />
       <div className="flex-1 flex min-h-0">
-        {/* در RTL اولین فرزند سمت راست قرار می‌گیرد: اینسپکتور راست، کتابخانه چپ */}
-        <RightPanel />
+        {/* LTR order: library on the left, canvas in the middle, inspector on the right */}
+        <LeftPanel />
         <main className="flex-1 flex flex-col min-w-0">
           <div className="flex-1 min-h-0">
             <CanvasArea />
           </div>
           <ActivityConsole />
         </main>
-        <LeftPanel />
+        <RightPanel />
       </div>
 
       <ChatPanel />

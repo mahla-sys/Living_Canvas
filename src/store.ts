@@ -73,7 +73,7 @@ interface Actions {
   saveTemplate: (name: string) => void;
   loadTemplate: (id: string) => void;
   saveRole: (nodeId: string) => void;
-  /** حالت ذخیره‌سازی فعال: idb | fs | http | memory */
+  /** active storage mode: idb | fs | http | memory */
   storageMode: () => "idb" | "fs" | "http" | "memory";
   flushSave: () => Promise<void>;
   reloadFromDisk: () => Promise<void>;
@@ -86,7 +86,7 @@ interface Actions {
   previewImport: (text: string) => Promise<ImportPreview & { files: CanvasFiles }>;
   commitImport: (files: CanvasFiles, replace?: boolean) => Promise<void>;
   setPortOpen: (v: boolean) => void;
-  /** بازکردن محتوای واقعی یک فایل از StorageAdapter (حالت پوشه‌ی زنده). */
+  /** opens the real content of a file from the StorageAdapter (live folder mode). */
   openStorageFile: (path: string) => Promise<void>;
   selfTest: (nodeId?: string) => void;
   testFallback: () => void;
@@ -147,7 +147,7 @@ function buildActions(a: EngineApi): Actions {
     reset: () => resetWorkspace(a),
 
     onNodesChange: (changes) => {
-      // نودهای قفل‌شده در اجرا نه حذف می‌شوند و نه جابجا (§12.5)
+      // nodes locked by a run are neither deleted nor moved (§12.5)
       const locked = new Set(
         a.get().nodes
           .filter((n) => n.data.lock.status === "locked" && (n.data.lock.locked_by ?? "").startsWith("run-"))
@@ -164,7 +164,7 @@ function buildActions(a: EngineApi): Actions {
       const moved = filtered.some((c) => c.type === "position" && "dragging" in c && c.dragging === false);
       useStore.setState((s) => ({ nodes: applyNodeChanges(filtered, s.nodes) }));
       if (moved) touch(a);
-      if (blocked) toast(a, "warn", "نود در حال اجرا قفل است — جابجایی و حذف تا پایان گام مجاز نیست (§12.5).");
+      if (blocked) toast(a, "warn", "This node is locked by a running step — moving or deleting it is not allowed (§12.5).");
     },
 
     onEdgesChange: (changes) => {
@@ -172,7 +172,7 @@ function buildActions(a: EngineApi): Actions {
       useStore.setState((s) => ({ edges: applyEdgeChanges(changes, s.edges) }));
       for (const id of removed) {
         void storage.deleteFile(`${ROOT}/edges/${id}.yaml`);
-        emit(a, "edge.deleted", `یال ${id} حذف شد`);
+        emit(a, "edge.deleted", `Edge ${id} deleted`);
       }
       if (removed.length) touch(a);
     },
@@ -192,7 +192,7 @@ function buildActions(a: EngineApi): Actions {
     updateNodeData: (id, patch) => {
       patchNode(a, id, patch);
       void writeNodeArtifact(a, id, true);
-      emit(a, "node.updated", `نود ${id} ویرایش شد`);
+      emit(a, "node.updated", `Node ${id} edited`);
       touch(a);
     },
 
@@ -201,7 +201,7 @@ function buildActions(a: EngineApi): Actions {
       if (!n?.data.agent) return;
       patchNode(a, id, { agent: { ...n.data.agent, ...patch } });
       void writeNodeArtifact(a, id, true);
-      emit(a, "node.updated", `پیکربندی ایجنت ${id} تغییر کرد`);
+      emit(a, "node.updated", `Agent config of ${id} changed`);
       touch(a);
     },
 
@@ -212,7 +212,7 @@ function buildActions(a: EngineApi): Actions {
         edges: s.edges.map((e) => (e.id === id && e.data ? { ...e, data: { ...e.data, ...patch } } : e)),
       }));
       void writeEdgeArtifact(a, id, true);
-      emit(a, "edge.updated", `یال ${id} ویرایش شد`);
+      emit(a, "edge.updated", `Edge ${id} edited`);
       touch(a);
     },
 
@@ -236,9 +236,9 @@ function buildActions(a: EngineApi): Actions {
     saveSettingsLocal: () => {
       try {
         localStorage.setItem("lc-settings", JSON.stringify(a.get().settings));
-        toast(a, "success", "تنظیمات ذخیره شد.");
+        toast(a, "success", "Settings saved.");
       } catch {
-        toast(a, "error", "ذخیره‌ی تنظیمات ناموفق بود.");
+        toast(a, "error", "Saving settings failed.");
       }
     },
 
@@ -254,7 +254,7 @@ function buildActions(a: EngineApi): Actions {
     stop: () => stopRun(a),
     resetRun: () => resetExecution(a),
     chat: (id, text) => void sendChat(a, id, text),
-    snapshot: () => void takeSnapshot(a, "چک‌پوینت دستی"),
+    snapshot: () => void takeSnapshot(a, "Manual checkpoint"),
     restore: (id) => {
       void restoreSnapshot(a, id);
       useStore.setState((s) => ({ ui: { ...s.ui, historyOpen: false } }));
@@ -292,7 +292,7 @@ function buildActions(a: EngineApi): Actions {
         const lang = path.endsWith(".json") ? "json" : path.endsWith(".yaml") ? "yaml" : path.endsWith(".log") ? "log" : "md";
         useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: { path, content, lang } } }));
       } catch {
-        useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: { path, content: "— فایل خوانده نشد —", lang: "md" } } }));
+        useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: { path, content: "— file could not be read —", lang: "md" } } }));
       }
     },
   };
@@ -324,8 +324,8 @@ export function buildFileContent(path: string): FileViewerState | null {
     const done = s.execution.completed.length;
     const last = done ? s.nodes.find((n) => n.id === s.execution.completed[done - 1]) : null;
     content = frontmatter(
-      { canvas_id: s.canvasId, title: s.canvas.title, last_updated: nowIso(), summary: `بوم «${s.canvas.title}» — وضعیت اجرا: ${s.execution.status}`, current_step: last?.data.title ?? "—", node_count: s.nodes.length, edge_count: s.edges.length },
-      `# خلاصه‌ی بوم\n\nایجنت‌ها به‌جای خواندن کل بوم، اول این فایل را می‌خوانند.\n\n- اجرا: **${s.execution.status}**\n- نودها: ${s.nodes.length} — یال‌ها: ${s.edges.length}`
+      { canvas_id: s.canvasId, title: s.canvas.title, last_updated: nowIso(), summary: `Canvas "${s.canvas.title}" — run status: ${s.execution.status}`, current_step: last?.data.title ?? "—", node_count: s.nodes.length, edge_count: s.edges.length },
+      `# Canvas summary\n\nAgents read this file before reading the whole canvas.\n\n- run: **${s.execution.status}**\n- nodes: ${s.nodes.length} — edges: ${s.edges.length}`
     );
   } else if (path === "graph.json")
     content = JSON.stringify({
@@ -358,7 +358,7 @@ export function buildFileContent(path: string): FileViewerState | null {
     if (msgs && n) content = chatToMd(chatMatch[1], n.data.title, msgs);
   } else if (snapMatch) {
     const meta = s.snapshots.find((m) => m.id === snapMatch[1]);
-    content = meta ? JSON.stringify({ note: "محتوای کامل چک‌پوینت در IndexedDB ذخیره است", id: meta.id, at: meta.at, label: meta.label, status: meta.status, node_count: meta.node_count }, null, 2) : null;
+    content = meta ? JSON.stringify({ note: "the full checkpoint payload lives in IndexedDB", id: meta.id, at: meta.at, label: meta.label, status: meta.status, node_count: meta.node_count }, null, 2) : null;
   } else if (path.startsWith("library/roles/")) {
     const rid = path.replace("library/roles/", "").replace(".json", "");
     const r = roleById(rid);

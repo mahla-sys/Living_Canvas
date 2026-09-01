@@ -1,6 +1,6 @@
 /* ============================================================
-   test-helpers — فقط برای تست. انطباق API ساده با سریال‌سازهای واقعی core.ts
-   تا تست‌ها خودشان serialiser دست‌ساز نداشته باشند (وگرنه باگ را می‌پوشانند).
+   test-helpers — test-only. Thin wrappers over the REAL serialisers in core.ts
+   so tests never ship a hand-made serialiser (which would hide the very bug we test for).
    ============================================================ */
 import {
   nodeToMarkdown as coreNodeToMarkdown,
@@ -31,7 +31,7 @@ type NodeShim = {
   agent?: Partial<NonNullable<LCNodeData["agent"]>> | null;
 };
 
-/** فایل Markdown یک نود را با همان تابع تولیدِ واقعی می‌سازد. */
+/** Builds a node Markdown file with the same production serialiser. */
 export function nodeToMarkdown(id: string, shim: NodeShim = {}): string {
   const base = makeNodeData(shim.nodeType ?? "note", shim.title ?? id, "test");
   const data: LCNodeData = {
@@ -46,11 +46,11 @@ export function nodeToMarkdown(id: string, shim: NodeShim = {}): string {
   return coreNodeToMarkdown(id, data, shim.position ?? null);
 }
 
-/** سند حافظه با مقادیر پیش‌فرض. */
+/** Memory document with defaults filled in. */
 export function memoryToMd(doc: Partial<MemDoc> & { body: string }): string {
   const full: MemDoc = {
     path: doc.path ?? "memory/global.md",
-    title: doc.title ?? "حافظه",
+    title: doc.title ?? "memory",
     body: doc.body,
     updated_at: doc.updated_at ?? "2026-09-01T10:00:00.000Z",
     last_accessed: doc.last_accessed ?? "2026-09-01T10:00:00.000Z",

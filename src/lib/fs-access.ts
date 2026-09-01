@@ -1,11 +1,11 @@
 /* ============================================================
-   Living Canvas — File System Access StorageAdapter (سند §5.1)
-   فضای کاری واقعی روی دیسک: پوشه‌ای که کاربر انتخاب می‌کند عیناً
-   درخت §2 می‌شود؛ فایل‌ها با Git و Obsidian قابل‌مشاهده‌اند.
+   Living Canvas — File System Access StorageAdapter (doc §5.1)
+   A real workspace on disk: the folder the user picks becomes the §2 tree
+   verbatim, so the files stay readable by Git and Obsidian.
    ============================================================ */
 import { safeRelPath, listChildren, type StorageAdapter } from "./core";
 
-/** DOM FileSystemDirectoryHandle — type بومی TS فقط خواندنی است، پس اینجا wrapper خودمان را داریم. */
+/** DOM FileSystemDirectoryHandle — the native TS type is readonly, so we keep our own structural wrapper. */
 export interface FsDirHandle {
   name: string;
   kind: "directory";
@@ -28,20 +28,20 @@ type PickerWindow = Window & {
   showDirectoryPicker?: (opts?: { id?: string; mode?: "read" | "readwrite"; startIn?: unknown }) => Promise<FsDirHandle>;
 };
 
-/** آیا مرورگر File System Access API را دارد؟ (Chromium بله، Firefox/Safari فعلاً نه) */
+/** Does this browser have the File System Access API? (Chromium yes, Firefox/Safari not yet) */
 export function isFsAccessSupported(): boolean {
   return typeof window !== "undefined" && typeof (window as PickerWindow).showDirectoryPicker === "function";
 }
 
-/** انتخاب پوشه با اجازه‌ی نوشتن. AbortError اگر کاربر کنسل کند. */
+/** Pick a folder with write permission. Throws AbortError when the user cancels. */
 export async function pickCanvasDirectory(id = "living-canvas-workspace"): Promise<FsDirHandle> {
   const w = window as PickerWindow;
   if (typeof w.showDirectoryPicker !== "function") {
-    throw new Error("این مرورگر File System Access API را پشتیبانی نمی‌کند");
+    throw new Error("This browser does not support the File System Access API");
   }
   const dir = await w.showDirectoryPicker({ id, mode: "readwrite" });
   const granted = await ensurePermission(dir, "readwrite");
-  if (!granted) throw new Error("اجازه‌ی نوشتن روی پوشه داده نشد");
+  if (!granted) throw new Error("Write permission for the folder was not granted");
   return dir;
 }
 
@@ -50,19 +50,19 @@ export async function ensurePermission(dir: FsDirHandle, mode: "read" | "readwri
     const opts = { mode };
     if (typeof dir.queryPermission === "function" && (await dir.queryPermission(opts)) === "granted") return true;
     if (typeof dir.requestPermission === "function") return (await dir.requestPermission(opts)) === "granted";
-    return true; // مرورگرهایی که API را native دارند معمولاً از قبل granted‌اند
+    return true; // browsers with a native API usually have the handle granted already
   } catch {
     return false;
   }
 }
 
-/** هندل پوشه را می‌خواند (برای نمایش نام در TopBar). */
+/** Reads the folder handle (to show its name in the TopBar). */
 export const dirName = (dir: FsDirHandle | null): string | null => dir?.name ?? null;
 
 /**
- * مسیر منطقی بوم (مثل `canvases/nexus-edu-001/nodes/node-001.md`) را به مسیر نسبی
- * داخل پوشهٔ انتخاب‌شده نگاشت می‌کند: `nodes/node-001.md`.
- * مسیرهای بیرون از ریشه، `..` و نام‌های نامعتبر را رد می‌کند.
+ * Maps a logical canvas path (e.g. `canvases/nexus-edu-001/nodes/node-001.md`) to a path
+ * relative to the picked folder: `nodes/node-001.md`.
+ * Rejects anything outside the root, `..`, and invalid names.
  */
 export function toRelativePath(logicalPath: string, rootPrefix: string): string | null {
   const clean = safeRelPath(logicalPath);
@@ -76,7 +76,7 @@ export function toRelativePath(logicalPath: string, rootPrefix: string): string 
   return clean;
 }
 
-/** پیمایش/ساخت پوشه‌های میانی و برگرداندن هندل فایل. */
+/** Walks/creates the intermediate folders and returns the file handle. */
 async function resolveFile(dir: FsDirHandle, rel: string, create: boolean): Promise<FsFileHandle | null> {
   const parts = rel.split("/");
   const name = parts.pop()!;
@@ -106,8 +106,8 @@ async function resolveDir(dir: FsDirHandle, rel: string, create: boolean): Promi
 }
 
 /**
- * پیمایش بازگشتی — فقط فایل‌ها را برمی‌گرداند (پوشه‌ها واسطه‌اند، نه داده).
- * maxDepth هم از حلقه‌ی سمبولیک و هم از انفجار عمق جلوگیری می‌کند.
+ * Recursive walk — returns files only (folders are plumbing, not data).
+ * maxDepth guards against both symlink cycles and depth blow-ups.
  */
 export async function walkDir(dir: FsDirHandle, prefix = "", maxDepth = 8): Promise<Record<string, FsFileHandle>> {
   const out: Record<string, FsFileHandle> = {};
@@ -121,13 +121,13 @@ export async function walkDir(dir: FsDirHandle, prefix = "", maxDepth = 8): Prom
 }
 
 /**
- * StorageAdapter روی یک FileSystemDirectoryHandle.
- * `rootPrefix` ریشه‌ی منطقی است تا فایل‌ها بدون پوشه‌ی تودرتو نوشته شوند (§2).
+ * StorageAdapter over a FileSystemDirectoryHandle.
+ * `rootPrefix` is the logical root, so files land without a nested folder (§2).
  */
 export class FsAccessStorageAdapter implements StorageAdapter {
   private cache = new Map<string, string>();
 
-  /** برچسب نوع آداپتر — `storageMode()` در core با همین تشخیص می‌دهد (بدون import متقابل). */
+  /** adapter kind label — lets core.storageMode() detect it without a circular import */
   readonly adapterKind = "fs" as const;
 
   constructor(
@@ -181,7 +181,7 @@ export class FsAccessStorageAdapter implements StorageAdapter {
     try {
       await parent.removeEntry(name);
     } catch {
-      /*文件或不存在 — مثل IndexedDB adapter بی‌صدا رد می‌شویم */
+      /* missing file — skipped silently, like the IndexedDB adapter */
     }
   }
 
@@ -203,7 +203,7 @@ export class FsAccessStorageAdapter implements StorageAdapter {
     await this.writeFile(path, JSON.stringify(data, null, 2));
   }
 
-  /** بچه‌های مستقیم: فایل‌ها با نام، زیرپوشه‌ها با «/» انتهایی (§قرارداد listDirectory). */
+  /** direct children: files bare, subfolders with a trailing "/" (§listDirectory contract) */
   async listDirectory(dir: string): Promise<string[]> {
     let rel = "";
     if (dir && dir !== "." && dir !== "") {
@@ -221,17 +221,17 @@ export class FsAccessStorageAdapter implements StorageAdapter {
     return [...out].sort();
   }
 
-  /** فهرست کامل مسیرهای منطقی (برای allPaths/hydrate و Export). */
+  /** full list of logical paths (backs allPaths/hydrate and Export). */
   async allPaths(): Promise<string[]> {
     const flat = await walkDir(this.dir);
     const prefix = this.rootPrefix.replace(/^\/+|\/+$/g, "");
     const paths = Object.keys(flat)
-      .filter((p) => !p.startsWith(".")) // فایل‌های مخفی سیستمی را جزو فایل‌های بوم نمی‌شماریم
+      .filter((p) => !p.startsWith(".")) // dotfiles are not canvas files
       .map((p) => (prefix ? `${prefix}/${p}` : p));
     return [...new Set(paths)].sort();
   }
 
-  /** فقط پوشه‌ی بوم را خالی می‌کند، نه کل دیسک. */
+  /** empties the canvas folder only — never the whole disk. */
   async clear(): Promise<void> {
     this.cache.clear();
     for (const p of await this.allPaths()) await this.deleteFile(p);
@@ -239,8 +239,8 @@ export class FsAccessStorageAdapter implements StorageAdapter {
 }
 
 /**
- * رویتِ محدودِ فایل‌سیستم: برای Import از پوشه‌ای که کاربر *فقط خوانده* —
- * ورودی‌ها از walkDir می‌آیند و هیچ نوشتنی انجام نمی‌شود.
+ * Read-only filesystem view: used to import from a folder the user opened *read-only* —
+ * input comes from walkDir and nothing is ever written.
  */
 export async function readCanvasFromDirectory(dir: FsDirHandle, rootPrefix = ""): Promise<Record<string, string>> {
   const flat = await walkDir(dir);
@@ -249,17 +249,17 @@ export async function readCanvasFromDirectory(dir: FsDirHandle, rootPrefix = "")
     if (rel.startsWith(".")) continue;
     try {
       const f = await (handle as FsFileHandle).getFile();
-      // فایل‌های بیش از ۲MB (احتمالاً asset باینری) وارد state نمی‌شوند؛ مسیرشان گزارش می‌ماند
+      // files above 2MB (probably binary assets) never enter the state; their path is still reported
       if (f.size > 2 * 1024 * 1024) continue;
       out[rootPrefix ? `${rootPrefix}/${rel}` : rel] = await f.text();
     } catch {
-      /* فایل خوانده نشد (قفل/بزرگ) — رد */
+      /* unreadable (locked / too large) — skipped */
     }
   }
   return out;
 }
 
-/** نوشتن مجموعه‌ای از فایل‌های منطقی به یک پوشه، با بازگرداندن آمار. */
+/** Writes a set of logical files into a folder and returns stats. */
 export async function writeFilesToDirectory(
   dir: FsDirHandle,
   files: Record<string, string>,
@@ -274,8 +274,8 @@ export async function writeFilesToDirectory(
   for (const [logicalPath, content] of entries) {
     n++;
     const stripped = prefix && logicalPath.startsWith(prefix + "/") ? logicalPath.slice(prefix.length + 1) : logicalPath;
-    // بعد از کم‌کردن پیشوند هم باید دوباره validate شود، وگرنه `canvases/x/../evil.md`
-    // از تله‌ی prefix فرار می‌کند و بیرون پوشه نوشته می‌شود.
+    // re-validate AFTER stripping the prefix, otherwise `canvases/x/../evil.md`
+    // escapes the prefix trap and lands outside the folder.
     const rel = safeRelPath(stripped);
     if (!rel) {
       failed.push(logicalPath);
@@ -300,8 +300,8 @@ export async function writeFilesToDirectory(
 }
 
 /**
- * ساخت اسکلت §2 داخل یک پوشه (برای پوشه‌ی خالی یا تازه از Git).
- * بی‌ضرر است: اگر پوشه‌ها باشند چیزی عوض نمی‌شود.
+ * Creates the §2 skeleton inside a folder (empty one or a fresh Git clone).
+ * Harmless by design: existing folders change nothing.
  */
 export const CANVAS_SUBDIRS = [
   "nodes", "edges", "strokes", "chats", "outputs", "memory/agents",
@@ -327,7 +327,7 @@ export async function ensureStructure(dir: FsDirHandle, relRoot = ""): Promise<s
   return made;
 }
 
-/** بازگرداندن children یک پوشه به صورت خام — برای تست و برای File Tree در حالت پوشه. */
+/** Raw directory children — used by tests and by the File Tree in folder mode. */
 export async function immediateChildren(dir: FsDirHandle, rel = ""): Promise<string[]> {
   const target = rel ? await resolveDir(dir, rel, false) : dir;
   if (!target) return [];
@@ -336,5 +336,5 @@ export async function immediateChildren(dir: FsDirHandle, rel = ""): Promise<str
   return names.sort();
 }
 
-/** کمک‌تابع برای هماهنگی با قرارداد core.listDirectory (در تست‌ها استفاده می‌شود). */
+/** Helper that matches the core.listDirectory contract (used by tests). */
 export const childrenFromPaths = (paths: Iterable<string>, dir: string) => listChildren(paths, dir);

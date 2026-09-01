@@ -1,52 +1,68 @@
-# Living Canvas — بوم زنده
+# Living Canvas
 
-بوم بی‌نهایتِ فایل‌محور برای فکر کردن، طراحی و اجرای سیستم‌ها: هر نود، یال، حافظه و خروجی یک فایل مستقل است و انسان و AI روی یک بوم کار می‌کنند.
+A single-page canvas (React + React Flow + zustand) where the artifact is a graph of nodes and edges, and
+the **storage substrate is a folder of plain text files** — Markdown per node, YAML per edge, Markdown per
+memory, JSON for machine caches. Agent pipelines live on the canvas: nodes are roles, edges are data flows
+with conditions, a lightweight executor runs them and writes its outputs back into the same tree.
 
-**وضعیت:** فاز ۱ (هستهٔ بوم + ایجنت‌ها + حافظه + چک‌پوینت) تمام شده — نسخهٔ `0.1.x`، همراه با الحاقیهٔ ۱.۴ که سند را با کد هم‌راستا می‌کند.
+The consequence that defines the design: **you can open the canvas folder in Obsidian or edit it with Git,
+and the app reads your edits back.** Files are the source of truth; in-memory state is a cache of them.
 
-## اجرا
+> Everything in this repository is English — code, comments, UI strings, tests, docs. The UI is LTR.
+
+---
+
+## Run it
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
-npm run typecheck  # tsc --noEmit
-npm test           # vitest run (۶۱ تست)
-npm run build      # خروجی dist/
+npm run dev         # http://localhost:3000  (binds 0.0.0.0, accepts any host for sandboxed previews)
+npm test            # vitest run — 5 files / 63 tests, no jsdom, no extra config file
+npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
+npm run build
 ```
 
-## مستندات
+## Read it
 
-| سند | نقش |
-|---|---|
-| `Living_Canvas-main/# سند معماری Living Canvas — نسخه 1.3.md` | مرجع اصلی + **الحاقیهٔ ۱.۴** (مقدم بر متن ۱.۳ در صورت تناقض) |
-| `Living_Canvas-main/(UI UX Spec) — Living Canvas.md` | رابط کاربری — پیش‌نویس، پیاده‌سازی نشده |
-| `Living_Canvas-main/Living canvas + Nexus + City AI.md` | چشم‌انداز Nexus/شهر زنده — **منسوخ در مواردی که با v1.3 فرق دارد** (انواع نود/یال، ساختار `/projects`) |
-
-## معماری در یک نگاه
+**[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)** is the canonical document, and it is written to be
+sufficient on its own: five invariants, the layer map, every module's API, every file format byte for byte,
+every control flow, the test strategy, the debt list, and the open design questions. It is structured as a
+tree — trunk (what and why) → branches (modules) → twigs (formats and flows) — so you can stop reading at
+whichever level you need.
 
 ```
-src/lib/core.ts      تایپ‌ها، Event Bus، سریال‌ساز YAML/Markdown، StorageAdapter (IndexedDB / HTTP / حافظه)
-src/lib/fs-access.ts StorageAdapter روی File System Access API — «حالت پوشه‌ی زنده»
-src/lib/portable.ts  Export/Import فایل‌محور + بازسازی بوم از خودِ فایل‌ها
-src/lib/engine.ts    MemoryManager (§6)، Executor (§7)، چک‌پوینت (§10)، ذخیره‌سازی debounce
-src/store.ts         Zustand store — اکشن‌های UI
-src/components/      CanvasArea (React Flow + لایه‌ی نقاشی)، SidePanels، Overlays
+src/
+├── main.tsx · App.tsx           boot, error surface, layout
+├── state.ts                     constants, types, factories, seed data
+├── store.ts                     zustand store + the actions façade (the only UI-facing API)
+├── lib/core.ts                  types · YAML · frontmatter · StorageAdapter ×4 · HTML safety
+├── lib/engine.ts                behaviour: events · files · memory · execution · strokes · portability
+├── lib/portable.ts              the export bundle + rebuilding a canvas from its files
+├── lib/fs-access.ts             the File System Access adapter (a real folder on disk)
+├── lib/__tests__/               63 regression tests
+└── components/                  CanvasArea · SidePanels · Overlays · icons
 ```
 
-سه اصل اجرایی که در کد گارانتی شده‌اند (تست دارند):
+## The three guarantees
 
-1. **`state.json` کش است، نه منبع حقیقت.** بوم بدون آن هم از `nodes/*.md` + `edges/*.yaml` + `memory/*.md` بازسازی می‌شود؛ ویرایش دستی در Obsidian/Git بعد از رفرش باقی می‌ماند.
-2. **قرارداد §9 روی نوشتن اعمال می‌شود** (`allowed_write_paths` + قفل نود + تعارض `confidence`). خواندنِ خروجی نود بالادست هنوز از این قرارداد عبور نمی‌کند — باز هم مسیر باز است.
-3. **هر متنی که AI می‌تواند تولید کند، پیش از رندر escape می‌شود** (`mdInline`؛ تنها `strong/em/code` مجازند).
+1. **A canvas can be rebuilt from `canvases/<id>/**` alone** — no `graph.json`, no `state.json`. Tested.
+2. **Text that can come from a user or a model is escaped before it is rendered.** The only tags that can
+   exist in rendered node Markdown are `strong`, `em`, `code`. Tested.
+3. **A lock is a moment of execution, never data.** Locks are written to files, and never restored on load.
+   Tested.
 
-## Export / Import
+## Portability
 
-- **دانلود فایل بوم** → یک `<canvas-id>.livingcanvas.json` شامل تمام فایل‌های §2 (با اعتبارسنجی مسیر، نسخه، و پیش‌نمایش قبل از جایگزینی).
-- **کپی در یک پوشه** / **بارگذاری از پوشه** → درخت واقعی فایل‌ها روی دیسک.
-- **حالت پوشه‌ی زنده** (Chrome/Edge): یک بار پوشه انتخاب می‌کنی؛ از آن به بعد هر تغییر عیناً روی دیسک نوشته می‌شود — Git و Obsidian روی همان پوشه کار می‌کنند و «بازخوانی از دیسک» تغییرات بیرونی را برمی‌دارد.
+| mode | works in | what it does |
+|---|---|---|
+| **Live folder** (File System Access) | Chrome, Edge | attach a real folder: the picked directory *is* `canvases/<id>/`; every write lands on disk, synchronously; the File Tree shows the folder, not the state; `ensureStructure` builds the skeleton in an empty or freshly cloned folder |
+| **Bundle** `.livingcanvas.json` | any browser | every file of the tree inside one JSON, with version and canvas-id guards, a preview before apply, and a per-file reason for anything skipped |
+| **HTTP adapter** | phase 2 | the same `StorageAdapter` over a FastAPI backend — implemented in the client, no server in this repo yet |
 
-## نکات شناخته‌شده
+## Legacy material
 
-- ذخیره‌سازی پیش‌فرض IndexedDB است؛ تا وقتی به پوشه وصل نشوی یا export نگیری، داده در همین مرورگر است.
-- `HttpStorageAdapter` برای فاز ۲ (FastAPI) آماده است ولی کلید API فعلاً در `localStorage` مرورگر می‌ماند — برای استقرار عمومی باید به پروکسی بک‌اند منتقل شود.
-- اعتبارسنجی خروجی فعلاً «وجود فایل‌های الزامی» است؛ JSON Schema واقعی (`schemas/*.schema.json`) هنوز نوشته نشده.
+`Living_Canvas-main/` is the original snapshot of the project (its own `src/` and three long Persian design
+documents: architecture, UI/UX spec, Nexus+City concept). It is **not built and not canonical**; `docs/ARCHITECTURE.md`
+supersedes it, and §11.1 of that document maps every `§` reference in the code comments to the section that
+now explains it. Trimming the snapshot (and the 40 MB `Living_Canvas-main.zip`) out of git is an open
+housekeeping decision, not a code one.

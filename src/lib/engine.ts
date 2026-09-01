@@ -3,7 +3,7 @@
    checkpoints §10, persistence, DeepSeek provider
    ============================================================ */
 import {
-  storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, sleep, debounce, faNum,
+  storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
   type BusEventType, type OutputEntry, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
 } from "./core";
@@ -51,16 +51,16 @@ export function getNode(s: AppState, id: string) {
 
 let lastLockToast = 0;
 
-/** ویرایش نود — در حالت قفلِ اجرا، ویرایش‌های کاربری رد می‌شوند (§12.5) */
+/** Node edit — while a run holds the lock, user edits are rejected (§12.5) */
 export function patchNode(api: EngineApi, id: string, data: Partial<RFNode["data"]>, internal = false) {
   if (!internal) {
     const n = getNode(api.get(), id);
     if (n && n.data.lock.status === "locked" && (n.data.lock.locked_by ?? "").startsWith("run-")) {
-      emit(api, "system", `ویرایش «${n.data.title}» رد شد — نود در حال اجرا قفل است (§12.5)`);
+      emit(api, "system", `Edit of “${n.data.title}” was rejected — the node is locked by a run (§12.5)`);
       const now = Date.now();
       if (now - lastLockToast > 2500) {
         lastLockToast = now;
-        toast(api, "warn", "این نود وسط اجرا قفل است — ویرایش تا پایان اجرا مجاز نیست (§12.5).");
+        toast(api, "warn", "This node is locked mid-run — editing is not allowed until the run ends (§12.5).");
       }
       return;
     }
@@ -76,20 +76,20 @@ export async function writeNodeArtifact(api: EngineApi, id: string, quiet = fals
   const n = getNode(api.get(), id);
   if (!n) return;
   await storage.writeFile(nodePath(id), nodeToMarkdown(id, n.data, n.position));
-  if (!quiet) emit(api, "file.written", `nodes/${id}.md نوشته شد`);
+  if (!quiet) emit(api, "file.written", `nodes/${id}.md written`);
 }
 
 export async function writeEdgeArtifact(api: EngineApi, id: string, quiet = false) {
   const e = api.get().edges.find((x) => x.id === id);
   if (!e || !e.data) return;
   await storage.writeFile(edgePath(id), edgeToYaml(id, e.source, e.target, e.data));
-  if (!quiet) emit(api, "file.written", `edges/${id}.yaml نوشته شد`);
+  if (!quiet) emit(api, "file.written", `edges/${id}.yaml written`);
 }
 
 /* ---------------- logs ---------------- */
 
 export async function appendLog(api: EngineApi, nodeId: string, line: string) {
-  const stamp = new Date().toLocaleTimeString("fa-IR");
+  const stamp = fmtClock(nowIso());
   api.set((st) => {
     const arr = [...(st.logs[nodeId] ?? []), `[${stamp}] ${line}`].slice(-120);
     return { logs: { ...st.logs, [nodeId]: arr } };
@@ -106,8 +106,8 @@ function overviewMd(s: AppState): string {
   const currentStep =
     s.execution.status === "running" || s.execution.status === "waiting_approval"
       ? s.execution.current_node_id ?? "—"
-      : last ? last.data.title : "آغاز نشده";
-  const summary = `بوم «${s.canvas.title}» یک خط لوله‌ی عامل‌محور با ${s.nodes.filter((n) => n.data.nodeType === "agent").length} ایجنت است. وضعیت اجرا: ${s.execution.status}.`;
+      : last ? last.data.title : "not started";
+  const summary = `The canvas “${s.canvas.title}” is an agent-driven pipeline with ${s.nodes.filter((n) => n.data.nodeType === "agent").length} agents. Run status: ${s.execution.status}.`;
   return frontmatter(
     {
       canvas_id: s.canvasId,
@@ -118,7 +118,7 @@ function overviewMd(s: AppState): string {
       node_count: s.nodes.length,
       edge_count: s.edges.length,
     },
-    `# خلاصه‌ی بوم\n\n${summary}\n\nایجنت‌ها به‌جای خواندن کل بوم، اول این فایل را می‌خوانند.\n\n## وضعیت\n- اجرا: **${s.execution.status}**\n- گام فعلی: ${currentStep}\n- نودها: ${s.nodes.length} — یال‌ها: ${s.edges.length}`
+    `# Canvas summary\n\n${summary}\n\nAgents read this file before reading the whole canvas.\n\n## Status\n- run: **${s.execution.status}**\n- current step: ${currentStep}\n- nodes: ${s.nodes.length} — edges: ${s.edges.length}`
   );
 }
 
@@ -167,12 +167,12 @@ async function saveNow(api: EngineApi) {
   await writeCore(api.get());
   api.set({ saveState: "saved" });
   const s = api.get();
-  emit(api, "graph.saved", `graph.json ذخیره شد — ${s.nodes.length} نود، ${s.edges.length} یال`);
+  emit(api, "graph.saved", `graph.json saved — ${s.nodes.length} nodes, ${s.edges.length} edges`);
 }
 
 /**
- * ذخیرهٔ debounce‌شده (§5.2). هر نوشتن روی زنجیره نشسته تا flush بتواند
- * واقعاً منتظر تمام نوشتن‌های معوق بمانده — قبل از Export و قبل از رفرش.
+ * debounced save (§5.2). every write sits on the chain so flush can actually
+ * wait for all pending writes — before an Export and before a reload.
  */
 const debouncedSave = debounce((api: EngineApi) => {
   saveChain = saveChain.then(() => saveNow(api)).catch(() => undefined);
@@ -183,7 +183,7 @@ export function touch(api: EngineApi) {
   debouncedSave(api);
 }
 
-/** صبر کردن تا هر نوشتن معوق روی StorageAdapter بنشیند. Export همیشه اول این را صدا می‌زند. */
+/** Waits until every pending write has landed on the StorageAdapter. Export always calls this first. */
 export async function flushPending(): Promise<void> {
   debouncedSave.flush();
   await saveChain;
@@ -243,27 +243,27 @@ export const MemoryManager = {
     const path = targetPath ?? `memory/agents/${agentId}.md`;
     // 1) access check against context_contract (§9)
     if (!agent.context_contract.allowed_write_paths.some((p) => path.startsWith(p))) {
-      emit(api, "validation.failed", `دسترسی نوشتن در ${path} برای ${agentId} رد شد — خارج از allowed_write_paths`);
+      emit(api, "validation.failed", `write to ${path} denied for ${agentId} — outside allowed_write_paths`);
       return false;
     }
     // 2) lock check
     if (node!.data.lock.status === "locked" && node!.data.lock.locked_by && !node!.data.lock.locked_by.startsWith("run-")) {
-      emit(api, "system", `نوشتن حافظه رد شد — نود توسط ${node!.data.lock.locked_by} قفل است`);
+      emit(api, "system", `memory write rejected — node is locked by ${node!.data.lock.locked_by}`);
       return false;
     }
     const prev = s.memory.agents[agentId];
     // 3/4) confidence conflict
     if (prev && prev.confidence > confidence) {
-      emit(api, "memory.updated", `تعارض حافظه در ${path} — اطلاعات قبلی (اعتماد ${prev.confidence}) حفظ شد`);
-      toast(api, "warn", "تعارض حافظه: اطلاعات قبلی اعتماد بالاتری داشت و حفظ شد.");
+      emit(api, "memory.updated", `memory conflict at ${path} — previous entry (confidence ${prev.confidence}) kept`);
+      toast(api, "warn", "Memory conflict: the previous entry had higher confidence and was kept.");
       return false;
     }
     if (prev && prev.confidence === confidence && prev.body.trim() !== content.trim()) {
-      emit(api, "memory.updated", `تعارض هم‌تراز در ${path} — در نسخه‌ی بعدی از کاربر پرسیده می‌شود؛ فعلاً جایگزین شد`);
+      emit(api, "memory.updated", `equal-weight conflict at ${path} — the user is asked in a later version; replaced for now`);
     }
     const fresh: MemDoc = {
       path,
-      title: prev?.title ?? `حافظه‌ی ایجنت ${node!.data.title}`,
+      title: prev?.title ?? `Memory of ${node!.data.title}`,
       body: content,
       updated_at: nowIso(),
       last_accessed: nowIso(),
@@ -272,7 +272,7 @@ export const MemoryManager = {
     };
     api.set((st) => ({ memory: { ...st.memory, agents: { ...st.memory.agents, [agentId]: fresh } } }));
     await storage.writeFile(`${ROOT}/${path}`, memoryToMd(fresh));
-    emit(api, "memory.updated", `${path} به‌روزرسانی شد (اعتماد ${confidence})`);
+    emit(api, "memory.updated", `${path} updated (confidence ${confidence})`);
     return true;
   },
 };
@@ -282,20 +282,20 @@ export const MemoryManager = {
 export async function testFallback(api: EngineApi) {
   const s = api.get();
   if (s.settings.provider !== "deepseek" || !s.settings.apiKey.trim()) {
-    emit(api, "system", "تست Fallback: کلید API تنظیم نشده — شبیه‌ساز داخلی فعال است (حالت پیش‌فرض فاز ۱)");
-    toast(api, "info", "کلیدی تنظیم نشده؛ سیستم با شبیه‌ساز داخلی کار می‌کند.");
+    emit(api, "system", "fallback test: no API key configured — internal simulator is active (phase 1 default)");
+    toast(api, "info", "No key configured; the system runs on the internal simulator.");
     return;
   }
-  emit(api, "system", "تست Fallback: فراخوانی واقعی DeepSeek شروع شد…");
+  emit(api, "system", "fallback test: calling DeepSeek for real…");
   try {
     const text = await askModel(s.settings.apiKey.trim(), s.settings.model, [
-      { role: "user", content: "فقط با یک کلمه پاسخ بده: سلام" },
+      { role: "user", content: "Answer in one word: hello" },
     ]);
-    emit(api, "system", `تست Fallback موفق: مدل پاسخ داد — «${String(text).slice(0, 50)}»`);
-    toast(api, "success", "اتصال به DeepSeek برقرار است ✓");
+    emit(api, "system", `fallback test passed — model answered “${String(text).slice(0, 50)}”`);
+    toast(api, "success", "DeepSeek connection is up ✓");
   } catch (err) {
-    emit(api, "system", `تست Fallback: «${String(err)}» — موتور در اجراها خودکار به شبیه‌ساز برمی‌گردد (§12.6)`);
-    toast(api, "warn", "اتصال برقرار نشد؛ اجراها بدون وقفه با شبیه‌ساز ادامه می‌یابند.");
+    emit(api, "system", `fallback test: “${String(err)}” — runs fall back to the simulator automatically (§12.6)`);
+    toast(api, "warn", "Connection failed; runs continue on the simulator without interruption.");
   }
 }
 
@@ -305,43 +305,43 @@ export async function contractSelfTest(api: EngineApi, preferNodeId?: string) {
   const s = api.get();
   const subject = (preferNodeId && getNode(s, preferNodeId)?.data.agent ? getNode(s, preferNodeId)! : s.nodes.find((n) => n.data.agent));
   if (!subject?.data.agent) {
-    toast(api, "warn", "هیچ نود ایجنتی برای خودآزمایی پیدا نشد.");
+    toast(api, "warn", "No agent node available to self-test.");
     return;
   }
   const id = subject.id;
   const other = s.nodes.find((n) => n.data.agent && n.id !== id);
-  emit(api, "system", `خودآزمایی قرارداد زمینه (§9) شروع شد — سوژه: ${id}`);
+  emit(api, "system", `context contract self-test started (§9) — subject: ${id}`);
   await sleep(120);
 
-  const legit = await MemoryManager.write(api, id, api.get().memory.agents[id]?.body ?? "- خودآزمایی: محتوای حافظه حفظ شد.", 0.8);
+  const legit = await MemoryManager.write(api, id, api.get().memory.agents[id]?.body ?? "- self-test: memory content preserved.", 0.8);
   await sleep(120);
-  const denyGlobal = await MemoryManager.write(api, id, "تلاش نوشتن خارج از قرارداد", 0.95, "memory/global.md");
+  const denyGlobal = await MemoryManager.write(api, id, "attempt to write outside the contract", 0.95, "memory/global.md");
   await sleep(120);
   const denyForeign = other
-    ? await MemoryManager.write(api, id, "تلاش نوشتن در حافظه‌ی ایجنت دیگر", 0.95, `memory/agents/${other.id}.md`)
+    ? await MemoryManager.write(api, id, 'attempt to write in another agent\'s memory', 0.95, `memory/agents/${other.id}.md`)
     : false;
 
   const pass = legit && !denyGlobal && !denyForeign;
   if (pass) {
-    emit(api, "system", `خودآزمایی موفق: نوشتن مجاز پذیرفته شد؛ ۲ تلاش خارج از قرارداد (global.md${other ? ` و حافظه‌ی ${other.id}` : ""}) رد شد ✓`);
-    toast(api, "success", "قرارداد زمینه سالم است — نفوذ خارج از مسیر مجاز رد شد.");
+    emit(api, "system", `self-test passed: the allowed write was accepted; 2 out-of-contract attempts (global.md${other ? ` and the memory of ${other.id}` : ""}) were rejected ✓`);
+    toast(api, "success", "Context contract is sound — writes outside the allowed path were rejected.");
   } else {
-    emit(api, "validation.failed", "خودآزمایی قرارداد شکست خورد — بررسی §9 و allowed_write_paths ضروری است");
-    toast(api, "error", "خودآزمایی شکست خورد! رفتار قرارداد مطابق §9 نیست.");
+    emit(api, "validation.failed", "contract self-test FAILED — §9 and allowed_write_paths need review");
+    toast(api, "error", "Self-test failed! Contract behaviour does not match §9.");
   }
 }
 
 /* ---------------- outputs & validation (§3.6, §12.10) ---------------- */
 
 export const FIELD_DESC: Record<string, string> = {
-  summary: "خلاصه",
-  problem_statement: "بیان دقیق مسئله",
-  questions_asked: "پرسش‌های مطرح‌شده",
-  risks: "فهرست ریسک‌ها",
-  decision: "تصمیم پیشنهادی",
-  solution: "راه‌حل اجرایی",
-  next_actions: "اقدام‌های بعدی",
-  approval_request: "درخواست تأیید انسانی",
+  summary: "summary",
+  problem_statement: "the precise problem statement",
+  questions_asked: "questions raised",
+  risks: "risk list",
+  decision: "recommended decision",
+  solution: "executable solution",
+  next_actions: "next actions",
+  approval_request: "human approval request",
 };
 
 function validateOutput(entries: OutputEntry[], required: string[]): string[] {
@@ -354,7 +354,7 @@ export async function writeOutputs(api: EngineApi, nodeId: string, entries: Outp
   await Promise.all(entries.map((e) => storage.writeFile(`${dir}/${e.file}`, e.content)));
   await storage.writeFile(`${dir}/index.yaml`, outputsIndexYaml(nodeId, entries));
   api.set((st) => ({ outputs: { ...st.outputs, [nodeId]: entries } }));
-  emit(api, "output.written", `${entries.length} فایل خروجی در outputs/${shared ? `shared/${nodeId}` : nodeId}/ ذخیره شد`);
+  emit(api, "output.written", `${entries.length} output files saved in outputs/${shared ? `shared/${nodeId}` : nodeId}/`);
 }
 
 /* ---------------- LLM provider (§15) ---------------- */
@@ -370,7 +370,7 @@ async function askModel(apiKey: string, model: string, messages: LlmMsg[]): Prom
   if (!res.ok) throw new Error(`DeepSeek API ${res.status}`);
   const j = await res.json();
   const text = j?.choices?.[0]?.message?.content;
-  if (!text) throw new Error("پاسخ خالی از مدل");
+  if (!text) throw new Error("empty response from the model");
   return String(text);
 }
 
@@ -382,27 +382,27 @@ function simFields(roleId: string, title: string, upstream: string, owner: strin
   switch (roleId) {
     case "understander":
       return {
-        summary: `مسئله‌ی «${title}» در یک جلسه‌ی شبیه‌سازی‌شده با کاربر بررسی شد. هسته‌ی مسئله: فاصله‌ی بین تجربه‌ی فعلی دانش‌آموز و انتظار یک یادگیری شخصی‌سازی‌شده. ورودی مرجع: ${up}`,
-        problem_statement: `دانش‌آموزان ۱۲ تا ۱۵ ساله در کلاس‌های آنلاین، بازخورد لحظه‌ای دریافت نمی‌کنند و انگیزه‌شان در هفته‌ی سوم افت می‌کند. راه‌حل باید قبل از هر توسعه‌ای، معیار «درگیری فعال» را تعریف کند. (ثبت‌شده در ${d} توسط خط لوله‌ی ${owner})`,
-        questions_asked: `۱. معیار موفقیت «یادگیری فعال» دقیقاً چیست؟\n۲. محدودیت زمانی و بودجه‌ی فاز آزمایشی چقدر است؟\n۳. آیا دسترسی به معلم‌ها برای مصاحبه ممکن است؟`,
+        summary: `The “${title}” problem was reviewed in a simulated session with the user. Core of the problem: the gap between the current experience of students and the expectation of personalised learning. Reference input: ${up}`,
+        problem_statement: `Students aged 12 to 15 in online classes get no immediate feedback and lose motivation in week three. Before any build, the solution must define an “active engagement” metric. (recorded on ${d} by the ${owner} pipeline)`,
+        questions_asked: `1. What exactly is the success metric for “active learning”?\n2. What are the time and budget limits of the pilot phase?\n3. Is access to teachers for interviews possible?`,
       };
     case "risk-analyst":
       return {
-        summary: `سه ریسک اصلی برای «${title}» شناسایی شد. ورودی تحلیل از نود قبلی: ${up}`,
-        risks: `- ریسک ۱: وابستگی به حضور معلم — شدت ۶\n- ریسک ۲: پیچیدگی فنی بازخورد لحظه‌ای — شدت ۵\n- ریسک ۳: افت انگیزه در فاز آزمایشی — شدت ۴\n\nامتیاز کل ریسک: **۵ از ۱۰** (قابل قبول با اصلاح)`,
-        decision: `تأیید مشروط: ادامه‌ی مسیر با اصلاح گام دوم پیشنهاد می‌شود. هیچ ریسکی بالاتر از آستانه‌ی ۷ نیست.`,
+        summary: `Three main risks were identified for “${title}”. Analysis input from the previous node: ${up}`,
+        risks: `- risk 1: dependence on teacher availability — severity 6\n- risk 2: technical complexity of instant feedback — severity 5\n- risk 3: motivation drop in the pilot — severity 4\n\nTotal risk score: **5 out of 10** (acceptable with fixes)`,
+        decision: `Conditional approval: continue the path with a revision of step two. No risk exceeds the threshold of 7.`,
       };
     case "solution-designer":
       return {
-        summary: `راه‌حل «${title}» در سه گام طراحی شد؛ ریسک‌های گزارش‌شده در گام ۲ پوشش داده شده‌اند.`,
-        solution: `گام ۱: ساخت پروتوتایپ بازخورد لحظه‌ای (خروجی: دموی clickable — معیار: ۸۰٪ سناریوها پوشش داده شود)\nگام ۲: آزمایش با ۲۰ دانش‌آموز (خروجی: گزارش درگیری — معیار: حفظ ۶۰٪ در هفته‌ی سوم)\nگام ۳: اصلاح و آماده‌سازی استقرار (خروجی: نسخه‌ی ۰.۹ — معیار: بدون خطای بحرانی)`,
-        next_actions: `- تعیین معیار «درگیری فعال» با کاربر\n- جذب ۲۰ دانش‌آموز برای آزمایش\n- زمان‌بندی گام ۱ در بوم`,
+        summary: `The “${title}” solution was designed in three steps; the reported risks are covered in step 2.`,
+        solution: `step 1: build the instant-feedback prototype (output: clickable demo — criterion: cover 80% of scenarios)\nstep 2: test with 20 students (output: engagement report — criterion: retain 60% in week three)\nstep 3: refine and prepare deployment (output: version 0.9 — criterion: no critical errors)`,
+        next_actions: `- define the “active engagement” metric with the user\n- recruit 20 students for the test\n- schedule step 1 on the canvas`,
       };
     default:
       return {
-        summary: `همه‌ی خروجی‌های مجاز خوانده شد. تعارض جدی بین گام‌ها دیده نشد؛ یک ناهماهنگی کوچک در معیارهای موفقیت وجود دارد که در تصمیم لحاظ شد.`,
-        decision: `تصمیم نهایی: شروع گام ۱ (پروتوتایپ) با بودجه‌ی محدود و بازبینی هفتگی. دلایل: ریسک قابل قبول (۵/۱۰)، راه‌حل سه‌گامه‌ی شفاف، و هم‌راستایی با هدف بوم.`,
-        approval_request: `این تصمیم برای اجرا به تأیید انسانی نیاز دارد. گزینه‌ها: تأیید و شروع گام ۱ / اصلاح و بازگشت به نود «طراحی راه‌حل» / رد کامل.`,
+        summary: `All allowed outputs were read. No serious conflict between steps; one small inconsistency in the success criteria, which the decision accounts for.`,
+        decision: `Final decision: start step 1 (prototype) with a limited budget and a weekly review. Reasons: acceptable risk (5/10), a clear three-step solution, alignment with the canvas goal.`,
+        approval_request: `This decision needs human approval before it runs. Options: approve and start step 1 / revise and return to the “Design the solution” node / reject entirely.`,
       };
   }
 }
@@ -420,7 +420,7 @@ function buildEntries(nodeId: string, required: string[], fields: Record<string,
   entries.push({
     file: "details.json",
     type: "detailed",
-    description: "داده‌ی ساختاریافته‌ی خروجی",
+    description: "structured output data",
     content: JSON.stringify({ node_id: nodeId, generated_at: nowIso(), fields }, null, 2),
   });
   return entries;
@@ -492,24 +492,24 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
   // lock §3.4
   patchNode(api, nodeId, { lock: { status: "locked", locked_by: runId, locked_at: nowIso() }, agent: agent ? { ...agent, status: "running" } : agent }, true);
-  emit(api, "lock.acquired", `نود ${nodeId} توسط ${runId} قفل شد`);
-  emit(api, "node.started", `اجرای «${node.data.title}» شروع شد`);
+  emit(api, "lock.acquired", `node ${nodeId} locked by ${runId}`);
+  emit(api, "node.started", `run of “${node.data.title}” started`);
   api.set((st) => ({ execution: { ...st.execution, current_node_id: nodeId } }));
-  await appendLog(api, nodeId, `== شروع اجرا (${runId}) ==`);
+  await appendLog(api, nodeId, `== run started (${runId}) ==`);
 
   try {
     let steps = 0;
     const maxSteps = agent?.max_steps ?? 6;
 
     // step 1 — overview (§9)
-    await appendLog(api, nodeId, "ابزار get_canvas_overview → خواندن canvas-overview.md");
+    await appendLog(api, nodeId, "tool get_canvas_overview → read canvas-overview.md");
     await guard(delay * 0.7);
     steps++;
 
     // step 2 — brief
     if (agent) {
       const role = roleById(agent.role_id);
-      await appendLog(api, nodeId, `ابزار get_agent_brief → نقش «${role.name}» بارگذاری شد (max_steps=${agent.max_steps})`);
+      await appendLog(api, nodeId, `tool get_agent_brief → role “${role.name}” loaded (max_steps=${agent.max_steps})`);
       await guard(delay * 0.6);
       steps++;
     }
@@ -519,7 +519,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
     if (agent) {
       const parts = await MemoryManager.read(api, nodeId);
       memoryTxt = parts.join("\n\n");
-      await appendLog(api, nodeId, `ابزار read_memory → ${agent.context_contract.allowed_read_paths.length} مسیر مجاز خوانده شد`);
+      await appendLog(api, nodeId, `tool read_memory → ${agent.context_contract.allowed_read_paths.length} allowed paths read`);
       await guard(delay * 0.6);
       steps++;
     }
@@ -533,20 +533,20 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // step 4 — generation
     await appendLog(api, nodeId, agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey
-      ? `فراخوانی مدل ${api.get().settings.model}…`
-      : "تولید پاسخ در شبیه‌ساز داخلی فاز ۱…");
+      ? `calling model ${api.get().settings.model}…`
+      : "generating a response in the phase 1 simulator…");
     let fields: Record<string, string>;
     const required = agent?.context_contract.output_contract.required_fields ?? ["summary"];
     if (agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey) {
       try {
         const text = await askModel(api.get().settings.apiKey, api.get().settings.model, [
           { role: "system", content: agent.system_prompt },
-          { role: "user", content: `خلاصه‌ی بوم و حافظه:\n${memoryTxt.slice(0, 1200)}\n\nخروجی نود قبلی:\n${upstream.slice(0, 800)}\n\nخروجی را با فیلدهای ${required.join("، ")} بنویس.` },
+          { role: "user", content: `Canvas summary and memory:\n${memoryTxt.slice(0, 1200)}\n\nOutput of the previous node:\n${upstream.slice(0, 800)}\n\nWrite the output with these fields: ${required.join(", ")}.` },
         ]);
         fields = { summary: text, ...simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner) };
       } catch (err) {
-        await appendLog(api, nodeId, `خطای API: ${String(err)} — بازگشت به شبیه‌ساز (§12.6 Fallback)`);
-        toast(api, "warn", "اتصال به DeepSeek برقرار نشد؛ از شبیه‌ساز داخلی استفاده شد.");
+        await appendLog(api, nodeId, `API error: ${String(err)} — falling back to the simulator (§12.6 fallback)`);
+        toast(api, "warn", "DeepSeek unreachable; used the internal simulator.");
         fields = simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner);
       }
     } else {
@@ -554,26 +554,26 @@ async function executeNode(api: EngineApi, nodeId: string) {
       fields = simFields(agent?.role_id ?? "decision-maker", node.data.title, upstream, s0.canvas.owner);
     }
     steps++;
-    if (steps > maxSteps) throw new Error("سقف max_steps رد شد (§12.3)");
+    if (steps > maxSteps) throw new Error("max_steps exceeded (§12.3)");
 
     // step 5 — write_output + validation §3.6
     const entries = buildEntries(nodeId, required, fields);
     const missing = validateOutput(entries, required);
     if (missing.length) {
-      emit(api, "validation.failed", `خروجی ${nodeId} فیلدهای ${missing.join("، ")} را ندارد — رد شد`);
-      throw new Error(`خروجی نامعتبر: ${missing.join("، ")}`);
+      emit(api, "validation.failed", `output of ${nodeId} is missing ${missing.join(", ")} — rejected`);
+      throw new Error(`invalid output: ${missing.join(", ")}`);
     }
     await writeOutputs(api, nodeId, entries);
-    await appendLog(api, nodeId, `ابزار write_output → اعتبارسنجی موفق (${required.length}/${required.length} فیلد)`);
+    await appendLog(api, nodeId, `tool write_output → validation passed (${required.length}/${required.length} fields)`);
     steps++;
 
     // step 6 — write_memory §6
     const memLines = [
-      `# حافظه‌ی ایجنت ${node.data.title}`,
+      `# Memory of ${node.data.title}`,
       "",
-      `- آخرین ورودی‌ها: ${upstream ? upstream.slice(0, 90).replace(/\n/g, " ") + "…" : "خروجی نود قبلی در دسترس نبود"}`,
-      `- تصمیم‌های گرفته‌شده: ${(fields.decision ?? fields.problem_statement ?? "").slice(0, 120).replace(/\n/g, " ")}`,
-      `- نکات مهم برای اجرای بعدی: فیلدهای الزامی ${required.join("، ")} همیشه در خروجی باشند.`,
+      `- latest inputs: ${upstream ? upstream.slice(0, 90).replace(/\n/g, " ") + "…" : "the output of the previous node was unavailable"}`,
+      `- decisions taken: ${(fields.decision ?? fields.problem_statement ?? "").slice(0, 120).replace(/\n/g, " ")}`,
+      `- notes for the next run: the required fields ${required.join(", ")} must always be in the output.`,
     ].join("\n");
     await MemoryManager.write(api, nodeId, memLines, 0.8);
 
@@ -591,34 +591,34 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // success
     patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agent ? { ...agent, status: "done" } : agent }, true);
-    emit(api, "lock.released", `قفل ${nodeId} آزاد شد`);
-    emit(api, "node.completed", `«${node.data.title}» با موفقیت کامل شد`);
-    await appendLog(api, nodeId, "== پایان موفق ==");
+    emit(api, "lock.released", `lock of ${nodeId} released`);
+    emit(api, "node.completed", `“${node.data.title}” completed successfully`);
+    await appendLog(api, nodeId, "== completed ==");
     api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nodeId] } }));
-    toast(api, "success", `نود «${node.data.title}» کامل شد ✓`);
+    toast(api, "success", `Node “${node.data.title}” is done ✓`);
 
     // checkpoint §10
-    await takeSnapshot(api, `پایان «${node.data.title}»`, true);
+    await takeSnapshot(api, `end of “${node.data.title}”`, true);
     if (aborted()) throw new Error("__abort__");
 
     // human-in-the-loop
     if (agent?.require_approval) {
       api.set((st) => ({ execution: { ...st.execution, status: "waiting_approval" } }));
-      emit(api, "run.paused", `اجرا برای تأیید انسانی متوقف شد — نود «${node.data.title}»`);
-      toast(api, "warn", "تصمیم این نود به تأیید شما نیاز دارد.");
+      emit(api, "run.paused", `run paused for human approval — node “${node.data.title}”`);
+      toast(api, "warn", "The decision of this node needs your approval.");
     }
   } catch (err) {
     if (String(err).includes("__abort__")) {
       // run was cancelled mid-flight (stop / restore) — leave state to the canceller
-      emit(api, "system", `اجرای «${node.data.title}» به‌دلیل توقف یا بازگردانی لغو شد`);
+      emit(api, "system", `run of “${node.data.title}” cancelled by a stop or a rollback`);
       return;
     }
     const agentNow = getNode(api.get(), nodeId)?.data.agent;
     patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow }, true);
-    emit(api, "node.failed", `اجرای «${node.data.title}» شکست خورد: ${String(err)}`);
-    await appendLog(api, nodeId, `خطا: ${String(err)}`);
+    emit(api, "node.failed", `run of “${node.data.title}” failed: ${String(err)}`);
+    await appendLog(api, nodeId, `error: ${String(err)}`);
     api.set((st) => ({ execution: { ...st.execution, status: "failed" } }));
-    toast(api, "error", `خطا در «${node.data.title}» — اجرا متوقف شد`);
+    toast(api, "error", `Error in “${node.data.title}” — the run stopped`);
   }
 }
 
@@ -626,7 +626,7 @@ async function collectToBox(api: EngineApi, boxId: string) {
   const s = api.get();
   const box = getNode(s, boxId);
   if (!box) return;
-  emit(api, "node.started", `جمع‌آوری خروجی‌ها در «${box.data.title}»`);
+  emit(api, "node.started", `collecting outputs in “${box.data.title}”`);
   api.set((st) => ({ execution: { ...st.execution, current_node_id: boxId } }));
   const parts = s.execution.completed
     .map((id) => {
@@ -637,16 +637,16 @@ async function collectToBox(api: EngineApi, boxId: string) {
     .filter(Boolean);
   const content = frontmatter(
     { box_id: boxId, generated_at: nowIso(), run_id: s.execution.run_id },
-    `# بسته‌ی خروجی نهایی\n\n${parts.join("\n\n---\n\n")}`
+    `# Final output package\n\n${parts.join("\n\n---\n\n")}`
   );
   const entries: OutputEntry[] = [{
-    file: "final-package.md", type: "summary", description: "بسته‌ی نهایی خروجی‌های خط لوله", content,
+    file: "final-package.md", type: "summary", description: "final package of pipeline outputs", content,
   }];
   await writeOutputs(api, boxId, entries, true);
-  patchNode(api, boxId, { content: `بسته‌ی نهایی با ${parts.length} بخش در outputs/shared/${boxId}/ ذخیره شد.` }, true);
-  emit(api, "node.completed", `«${box.data.title}» ${parts.length} خروجی را جمع‌آوری کرد`);
+  patchNode(api, boxId, { content: `Final package with ${parts.length} sections saved in outputs/shared/${boxId}/.` }, true);
+  emit(api, "node.completed", `“${box.data.title}” collected ${parts.length} outputs`);
   api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, boxId] } }));
-  await takeSnapshot(api, "جمع‌آوری خروجی نهایی", true);
+  await takeSnapshot(api, "final output collection", true);
 }
 
 async function processQueue(api: EngineApi) {
@@ -656,9 +656,9 @@ async function processQueue(api: EngineApi) {
     const nextId = ex.queue.find((q) => !ex.completed.includes(q));
     if (!nextId) {
       api.set((st) => ({ execution: { ...st.execution, status: "completed", current_node_id: null } }));
-      emit(api, "run.completed", "اجرای خط لوله با موفقیت به پایان رسید");
-      toast(api, "success", "خط لوله کامل شد — همه‌ی خروجی‌ها ذخیره شدند ✓");
-      await takeSnapshot(api, "پایان اجرای کامل", false);
+      emit(api, "run.completed", "the pipeline run completed successfully");
+      toast(api, "success", "Pipeline finished — every output is saved ✓");
+      await takeSnapshot(api, "end of full run", false);
       touch(api);
       return;
     }
@@ -668,8 +668,8 @@ async function processQueue(api: EngineApi) {
       const edge = api.get().edges.find((e) => e.source === prev && e.target === nextId);
       const cond = edge?.data?.trigger;
       if (cond?.type === "condition" && cond.condition && !evalCondition(cond.condition, ex.context)) {
-        emit(api, "system", `شرط یال «${cond.condition}» برقرار نبود — ${nextId} رد شد`);
-        await appendLog(api, nextId, `رد شد: شرط ${cond.condition} برقرار نیست`);
+        emit(api, "system", `edge condition “${cond.condition}” was not met — ${nextId} skipped`);
+        await appendLog(api, nextId, `skipped: condition ${cond.condition} is not satisfied`);
         api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nextId] } }));
         continue;
       }
@@ -689,12 +689,12 @@ async function processQueue(api: EngineApi) {
 export async function runPipeline(api: EngineApi) {
   const s = api.get();
   if (s.execution.status === "running" || s.execution.status === "waiting_approval") {
-    toast(api, "warn", "یک اجرا در جریان است؛ اول آن را متوقف یا تأیید کنید.");
+    toast(api, "warn", "A run is in progress; stop or approve it first.");
     return;
   }
   const start = findStart(s);
   if (!start) {
-    toast(api, "error", "هیچ نود ایجنتی برای اجرا پیدا نشد.");
+    toast(api, "error", "No agent node to run.");
     return;
   }
   const order = computeOrder(s, start.id);
@@ -704,19 +704,19 @@ export async function runPipeline(api: EngineApi) {
       queue: order, started_at: nowIso(),
     },
   });
-  emit(api, "run.started", `اجرای خط لوله از «${start.data.title}» شروع شد — ${order.length} نود در صف`);
-  toast(api, "info", `اجرا شروع شد — ${order.length} نود در صف`);
+  emit(api, "run.started", `pipeline started from “${start.data.title}” — ${order.length} nodes queued`);
+  toast(api, "info", `Run started — ${order.length} nodes queued`);
   await processQueue(api);
 }
 
 export async function runSingle(api: EngineApi, nodeId: string) {
   const s = api.get();
   if (s.execution.status === "running" || s.execution.status === "waiting_approval") {
-    toast(api, "warn", "اجرای دیگری در جریان است.");
+    toast(api, "warn", "Another run is already in progress.");
     return;
   }
   api.set({ execution: { ...emptyExecution(), run_id: uid("run"), status: "running", queue: [nodeId], started_at: nowIso() } });
-  emit(api, "run.started", `اجرای تک‌نود: ${nodeId}`);
+  emit(api, "run.started", `single-node run: ${nodeId}`);
   await executeNode(api, nodeId);
   const ex = api.get().execution;
   if (ex.status === "running")
@@ -728,15 +728,15 @@ export async function resumeRun(api: EngineApi) {
   const ex = api.get().execution;
   if (ex.status !== "waiting_approval") return;
   api.set((st) => ({ execution: { ...st.execution, status: "running" } }));
-  emit(api, "run.resumed", "تأیید انسانی ثبت شد — اجرا ادامه یافت");
-  toast(api, "success", "تأیید شد — ادامه‌ی اجرا…");
+  emit(api, "run.resumed", "human approval recorded — the run continued");
+  toast(api, "success", "Approved — resuming the run…");
   await processQueue(api);
 }
 
 export function rejectRun(api: EngineApi) {
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
-  emit(api, "run.stopped", "تصمیم توسط کاربر رد شد — اجرا متوقف شد");
-  toast(api, "info", "تصمیم رد شد و اجرا متوقف شد.");
+  emit(api, "run.stopped", "the decision was rejected by the user — run stopped");
+  toast(api, "info", "Decision rejected and the run stopped.");
   touch(api);
 }
 
@@ -750,8 +750,8 @@ export function stopRun(api: EngineApi) {
   }
   // invalidating run_id makes any in-flight node abort at its next guard (§12.5)
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
-  emit(api, "run.stopped", "اجرا توسط کاربر متوقف شد");
-  toast(api, "info", "اجرا متوقف شد.");
+  emit(api, "run.stopped", "run stopped by the user");
+  toast(api, "info", "Run stopped.");
   touch(api);
 }
 
@@ -767,7 +767,7 @@ export function resetExecution(api: EngineApi) {
       },
     })),
   }));
-  emit(api, "system", "وضعیت اجرا بازنشانی شد");
+  emit(api, "system", "run status reset");
   touch(api);
 }
 
@@ -777,25 +777,25 @@ function simChatReply(roleId: string, roleTitle: string, userText: string, memDo
   const short = userText.length > 80 ? userText.slice(0, 80) + "…" : userText;
   const base: Record<string, string[]> = {
     understander: [
-      `پیام شما را خواندم: «${short}». از نگاه من هنوز یک ابهام اصلی وجود دارد — معیار موفقیت دقیقاً چه عددی است؟ اگر آن را مشخص کنید، بیان مسئله را نهایی می‌کنم.`,
-      `نکته‌ی خوبی است. من این را به questions_asked اضافه می‌کنم. می‌توانید بگویید این موضوع برای چه گروهی از کاربران اولویت دارد؟`,
+      `I read your message: “${short}”. From my side there is still one ambiguity — what exactly is the numeric success metric? Once you set it, I will finalise the problem statement.`,
+      `Good point. I will add it to questions_asked. Which group of users does this matter to most?`,
     ],
     "risk-analyst": [
-      `درخواست شما را با فهرست ریسک‌های فعلی سنجیدم. به نظر می‌رسد به ریسک «وابستگی به حضور معلم» اشاره دارید — شدت آن ۶ است و با یک گام اصلاحی قابل کاهش است.`,
-      `تحلیل اولیه: اگر این تغییر اعمال شود، امتیاز ریسک کل از ۵ به ۴ می‌رسد. می‌خواهید گزارش را به‌روزرسانی کنم؟`,
+      `I weighed your request against the current risk list. It looks like you mean the risk “dependence on teacher availability” — severity 6, reducible with one corrective step.`,
+      `Early analysis: if this change is applied, the total risk score drops from 5 to 4. Should I update the report?`,
     ],
     "solution-designer": [
-      `پیشنهاد شما در گام ۲ راه‌حل جای می‌گیرد. معیار موفقیت گام را این‌طور تنظیم می‌کنم: «حفظ ۶۰٪ کاربران در هفته‌ی سوم». موافقید؟`,
-      `این ایده را می‌توان به‌صورت یک آزمایش کوچک قبل از گام ۱ اجرا کرد. خروجی: یک گزارش کوتاه A/B. زمان تخمینی: یک هفته.`,
+      `Your suggestion fits step 2 of the solution. I would set the success criterion of that step to “retain 60% of users in week three”. Agreed?`,
+      `This idea can run as a small experiment before step 1. Output: a short A/B report. Estimated time: one week.`,
     ],
     "decision-maker": [
-      `جمع‌بندی من از پیام شما: موافق مسیر فعلی هستید اما نگران زمان‌بندی‌اید. در تصمیم نهایی بازبینی هفتگی را اضافه می‌کنم.`,
-      `تصمیم نهایی هنوز به تأیید انسانی نیاز دارد. اگر مایل‌اید، خط لوله را اجرا کنید تا بسته‌ی تصمیم آماده شود.`,
+      `My summary of your message: you agree with the current path but worry about the schedule. I will add a weekly review to the final decision.`,
+      `The final decision still needs human approval. If you want, run the pipeline so the decision package is built.`,
     ],
   };
   const opts = base[roleId] ?? base["decision-maker"];
   const pick = opts[(userText.length + roleTitle.length) % opts.length];
-  const memNote = memDoc ? `\n\n_آخرین به‌روزرسانی حافظه: ${memDoc.updated_at.slice(0, 10)} — اعتماد ${memDoc.confidence}_` : "";
+  const memNote = memDoc ? `\n\n_memory last updated: ${memDoc.updated_at.slice(0, 10)} — confidence ${memDoc.confidence}_` : "";
   return pick + memNote;
 }
 
@@ -806,7 +806,7 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
   const msg: ChatMsg = { role: "user", text, at: nowIso() };
   api.set((st) => ({ chats: { ...st.chats, [nodeId]: [...(st.chats[nodeId] ?? []), msg] } }));
   api.set((st) => ({ typing: { ...st.typing, [nodeId]: true } }));
-  emit(api, "chat.message", `پیام کاربر به «${node.data.title}» ارسال شد`);
+  emit(api, "chat.message", `user message sent to “${node.data.title}”`);
 
   let reply: string;
   const settings = api.get().settings;
@@ -821,7 +821,7 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
         ...history,
       ]);
     } catch {
-      toast(api, "warn", "مدل در دسترس نبود؛ پاسخ شبیه‌سازی شد.");
+      toast(api, "warn", "Model unavailable; the reply was simulated.");
       reply = simChatReply(node.data.agent.role_id, node.data.title, text, api.get().memory.agents[nodeId]);
     }
   } else {
@@ -835,7 +835,7 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
     typing: { ...st.typing, [nodeId]: false },
   }));
   await storage.writeFile(`${ROOT}/chats/chat-${nodeId}.md`, chatToMd(nodeId, node.data.title, api.get().chats[nodeId] ?? []));
-  emit(api, "chat.message", `پاسخ «${node.data.title}» در chats/chat-${nodeId}.md ذخیره شد`);
+  emit(api, "chat.message", `reply from “${node.data.title}” saved in chats/chat-${nodeId}.md`);
 }
 
 /* ---------------- snapshots (§10) ---------------- */
@@ -857,8 +857,8 @@ export async function takeSnapshot(api: EngineApi, label: string, quiet = false)
     `${ROOT}/history/index.yaml`,
     toYaml({ canvas_id: s.canvasId, snapshot_count: api.get().snapshots.length, snapshots: api.get().snapshots.map((m) => ({ id: m.id, at: m.at, label: m.label })) })
   );
-  emit(api, "snapshot.saved", `چک‌پوینت «${label}» در history/ ذخیره شد`);
-  if (!quiet) toast(api, "success", "چک‌پوینت ذخیره شد.");
+  emit(api, "snapshot.saved", `checkpoint “${label}” saved in history/`);
+  if (!quiet) toast(api, "success", "Checkpoint saved.");
 }
 
 export async function restoreSnapshot(api: EngineApi, id: string) {
@@ -873,11 +873,11 @@ export async function restoreSnapshot(api: EngineApi, id: string) {
       },
     }));
     api.set({ nodes: unlocked, edges: payload.graph.edges, execution: emptyExecution() });
-    emit(api, "snapshot.restored", `بوم به چک‌پوینت ${id} بازگردانده شد`);
-    toast(api, "success", "بوم به چک‌پوینت انتخابی بازگشت.");
+    emit(api, "snapshot.restored", `canvas restored to checkpoint ${id}`);
+    toast(api, "success", "The canvas rolled back to the selected checkpoint.");
     touch(api);
   } catch {
-    toast(api, "error", "خواندن چک‌پوینت ناموفق بود.");
+    toast(api, "error", "Reading the checkpoint failed.");
   }
 }
 
@@ -904,7 +904,7 @@ export interface StrokeCluster {
   order: number;
 }
 
-/** گروه‌بندی طرح‌های نزدیک به هم با union-find روی جعبه‌های محاطی */
+/** Groups nearby strokes with union-find over their bounding boxes */
 export function clusterStrokes(strokes: Stroke[], gap = 80): StrokeCluster[] {
   const boxes = strokes.map((s) => strokeBox(s.points));
   const parent = strokes.map((_, i) => i);
@@ -945,7 +945,7 @@ export function clusterStrokes(strokes: Stroke[], gap = 80): StrokeCluster[] {
 export async function addStroke(api: EngineApi, stroke: Stroke) {
   api.set((st) => ({ strokes: [...st.strokes, stroke] }));
   await storage.writeJson(`${ROOT}/strokes/${stroke.id}.json`, stroke);
-  emit(api, "stroke.created", `طرح ${stroke.id.slice(0, 16)}… در strokes/ ذخیره شد (${stroke.points.length} نقطه)`);
+  emit(api, "stroke.created", `stroke ${stroke.id.slice(0, 16)}… saved in strokes/ (${stroke.points.length} points)`);
 }
 
 export async function removeStroke(api: EngineApi, id: string) {
@@ -957,11 +957,11 @@ export async function undoStroke(api: EngineApi) {
   const s = api.get();
   const last = s.strokes[s.strokes.length - 1];
   if (!last) {
-    toast(api, "info", "طرحی برای بازگردانی نیست.");
+    toast(api, "info", "Nothing to undo.");
     return;
   }
   await removeStroke(api, last.id);
-  emit(api, "stroke.deleted", `آخرین طرح (${last.id.slice(0, 14)}…) بازگردانی شد`);
+  emit(api, "stroke.deleted", `last stroke (${last.id.slice(0, 14)}…) removed`);
 }
 
 export async function clearStrokes(api: EngineApi) {
@@ -969,34 +969,34 @@ export async function clearStrokes(api: EngineApi) {
   if (!s.strokes.length) return;
   await Promise.all(s.strokes.map((st) => storage.deleteFile(`${ROOT}/strokes/${st.id}.json`)));
   api.set({ strokes: [] });
-  emit(api, "strokes.cleared", `${s.strokes.length} طرح از لایه‌ی نقاشی پاک شد`);
-  toast(api, "info", "لایه‌ی نقاشی خالی شد.");
+  emit(api, "strokes.cleared", `${s.strokes.length} strokes cleared from the drawing layer`);
+  toast(api, "info", "Drawing layer emptied.");
 }
 
-/** تبدیل طرح‌ها به گراف — هر خوشه یک نود، به ترتیب ترسیم */
+/** Converts strokes into a graph — one node per cluster, in drawing order */
 export async function convertStrokesToGraph(api: EngineApi, opts: { nodeType: NodeType; connect: boolean }) {
   const s = api.get();
   const clusters = clusterStrokes(s.strokes);
   if (!clusters.length) {
-    toast(api, "warn", "هیچ طرحی برای تبدیل پیدا نشد — اول چیزی بکشید.");
+    toast(api, "warn", "No stroke to convert — draw something first.");
     return;
   }
-  emit(api, "strokes.converted", `تبدیل شروع شد — ${clusters.length} خوشه شناسایی شد`);
+  emit(api, "strokes.converted", `conversion started — ${clusters.length} clusters found`);
   const ids: string[] = [];
   let i = 1;
   for (const c of clusters) {
-    const title = `طرح ${faNum(i++)}`;
+    const title = `Sketch ${i++}`;
     const id = await createNode(api, opts.nodeType, { x: c.cx - 40, y: c.cy - 32 }, {
       title,
-      content: `این نود از لایه‌ی نقاشی تبدیل شده است.\n\n- مرکز خوشه: (${Math.round(c.cx)}, ${Math.round(c.cy)})\n- تعداد خطوط: ${c.strokes.length}`,
+      content: `This node was converted from the drawing layer.\n\n- cluster centre: (${Math.round(c.cx)}, ${Math.round(c.cy)})\n- stroke count: ${c.strokes.length}`,
     });
     ids.push(id);
   }
   if (opts.connect && ids.length > 1) {
     for (let k = 0; k < ids.length - 1; k++) await createEdge(api, ids[k], ids[k + 1]);
   }
-  emit(api, "strokes.converted", `${clusters.length} نود «${opts.nodeType}» از طرح‌ها ساخته شد${opts.connect ? " و به ترتیب ترسیم به هم متصل شدند" : ""}`);
-  toast(api, "success", `${faNum(clusters.length)} نود از طرح‌ها ساخته شد — طرح‌ها به‌عنوان سند مرجع حفظ می‌شوند.`);
+  emit(api, "strokes.converted", `${clusters.length} “${opts.nodeType}” nodes built from strokes${opts.connect ? " and connected in drawing order" : ""}`);
+  toast(api, "success", `${clusters.length} nodes built from strokes — the strokes stay as the reference document.`);
 }
 
 /* ---------------- node / edge mutations ---------------- */
@@ -1009,7 +1009,7 @@ export async function createNode(
 ): Promise<string> {
   const prefix = nodeType === "agent" ? "node" : nodeType === "output-box" ? "box" : nodeType === "note" ? "note" : nodeType;
   const id = uid(prefix);
-  const title = opts?.title ?? (nodeType === "agent" ? "ایجنت جدید" : nodeType === "output-box" ? "جعبه خروجی" : nodeType === "note" ? "یادداشت" : "نود جدید");
+  const title = opts?.title ?? (nodeType === "agent" ? "New agent" : nodeType === "output-box" ? "Output box" : nodeType === "note" ? "Note" : "New node");
   const data = makeNodeData(nodeType, title, api.get().canvas.owner, {
     ...(nodeType === "agent" ? { agent: makeAgentConfig(id, "understander") } : {}),
     ...(nodeType === "output-box" ? { shape: "hexagon" as const } : {}),
@@ -1021,15 +1021,15 @@ export async function createNode(
   if (nodeType === "agent") {
     const doc: MemDoc = {
       path: `memory/agents/${id}.md`,
-      title: `حافظه‌ی ایجنت ${title}`,
-      body: "- آخرین ورودی‌ها: —\n- تصمیم‌های گرفته‌شده: —\n- نکات مهم: اولین اجرا هنوز انجام نشده.",
+      title: `Memory of ${title}`,
+      body: "- latest inputs: —\n- decisions taken: —\n- notes: the first run has not happened yet.",
       updated_at: nowIso(), last_accessed: nowIso(), confidence: 0.7, source: "agent",
     };
     api.set((st) => ({ memory: { ...st.memory, agents: { ...st.memory.agents, [id]: doc } } }));
     await storage.writeFile(`${ROOT}/memory/agents/${id}.md`, memoryToMd(doc));
   }
   await writeNodeArtifact(api, id, true);
-  emit(api, "node.created", `نود «${title}» (${nodeType}) در ${id} ساخته شد`);
+  emit(api, "node.created", `node “${title}” (${nodeType}) created at ${id}`);
   touch(api);
   return id;
 }
@@ -1038,8 +1038,8 @@ export async function deleteNode(api: EngineApi, id: string) {
   const n = getNode(api.get(), id);
   if (!n) return;
   if (n.data.lock.status === "locked" && (n.data.lock.locked_by ?? "").startsWith("run-")) {
-    emit(api, "system", `حذف «${n.data.title}» رد شد — نود در حال اجرا قفل است (§12.5)`);
-    toast(api, "warn", "حذف نودِ در حال اجرا مجاز نیست (§12.5).");
+    emit(api, "system", `delete of “${n.data.title}” rejected — the node is locked by a run (§12.5)`);
+    toast(api, "warn", "Deleting a node mid-run is not allowed (§12.5).");
     return;
   }
   const connected = api.get().edges.filter((e) => e.source === id || e.target === id);
@@ -1049,8 +1049,8 @@ export async function deleteNode(api: EngineApi, id: string) {
   }));
   await storage.deleteFile(nodePath(id));
   for (const e of connected) await storage.deleteFile(edgePath(e.id));
-  emit(api, "node.deleted", `نود «${n.data.title}» و ${connected.length} یال متصل حذف شد`);
-  toast(api, "info", `«${n.data.title}» حذف شد`);
+  emit(api, "node.deleted", `node “${n.data.title}” and ${connected.length} connected edges deleted`);
+  toast(api, "info", `“${n.data.title}” deleted`);
   touch(api);
 }
 
@@ -1061,7 +1061,7 @@ export async function createEdge(api: EngineApi, source: string, target: string)
   const edge: RFEdge = { id, source, target, type: "lc", data };
   api.set((st) => ({ edges: [...st.edges, edge] }));
   await writeEdgeArtifact(api, id, true);
-  emit(api, "edge.created", `یال ${source} ← ${target} ساخته شد`);
+  emit(api, "edge.created", `edge ${source} ← ${target} created`);
   touch(api);
   return id;
 }
@@ -1069,13 +1069,13 @@ export async function createEdge(api: EngineApi, source: string, target: string)
 export async function deleteEdge(api: EngineApi, id: string) {
   api.set((st) => ({ edges: st.edges.filter((e) => e.id !== id) }));
   await storage.deleteFile(edgePath(id));
-  emit(api, "edge.deleted", `یال ${id} حذف شد`);
+  emit(api, "edge.deleted", `edge ${id} deleted`);
   touch(api);
 }
 
 /* ---------------- workspace init & seed (§2) ---------------- */
 
-/** لایه‌ی نقاشی آزاد از فایل‌های جداگانه (§2 / §3 strokes). */
+/** Free drawing layer, from separate files (§2 / §3 strokes). */
 async function loadStrokes(): Promise<Stroke[]> {
   const strokes: Stroke[] = [];
   try {
@@ -1084,16 +1084,16 @@ async function loadStrokes(): Promise<Stroke[]> {
       try {
         const st = await storage.readJson<Stroke>(`${ROOT}/strokes/${f}`);
         if (st?.points?.length) strokes.push(st);
-      } catch { /* فایل نقاشی خراب — رد */ }
+      } catch { /* corrupt stroke file — skipped */ }
     }
-  } catch { /* پوشه خالی است */ }
+  } catch { /* the folder is empty */ }
   return strokes.sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
 /**
- * قالب‌های ذخیره‌شده از library/templates/ (§13).
- * بسته‌ی قالب داخل زیرپوشه است؛ فیکس `listDirectory` لازم بود تا این‌جا
- * پوشه‌ها دیده شوند (قبلاً خالی برمی‌گشت و قالب کاربر بعد از رفرش می‌پرید).
+ * Saved templates from library/templates/ (§13).
+ * A template package lives in a subfolder; the `listDirectory` fix was needed so
+ * folders are visible here (before it returned empty and user templates vanished after a refresh).
  */
 async function loadTemplates(): Promise<TemplateInfo[]> {
   const out = [builtinTemplateInfo()];
@@ -1110,11 +1110,11 @@ async function loadTemplates(): Promise<TemplateInfo[]> {
         });
       }
     }
-  } catch { /* هنوز قالب سفارشی‌ای نیست */ }
+  } catch { /* no custom template yet */ }
   return out;
 }
 
-/** حافظه‌ی سراسری/ایجنتی از فایل‌ها (§3.7) — برای حالت «بدون state.json». */
+/** global / per-agent memory read from files (§3.7) — for the "no state.json" path. */
 function pickMemory(derived: ReturnType<typeof deriveCanvasFromFiles>, fallback: AppState["memory"]): AppState["memory"] {
   const memory = { ...fallback, agents: { ...fallback.agents } };
   for (const key of ["global", "decisions", "progress", "user"] as const) {
@@ -1126,22 +1126,22 @@ function pickMemory(derived: ReturnType<typeof deriveCanvasFromFiles>, fallback:
 }
 
 /**
- * بارگذاری بوم از StorageAdapter (§2/§4).
- * دو مسیر دارد و هر دو معتبرند:
- *  ۱) graph.json + state.json  → بارگذاری سریع (مسیر معمول IDB)
- *  ۲) خودِ فایل‌های Markdown/YAML → وقتی کش ماشینی نیست (پوشه‌ی Obsidian/Git، Import از فایل)
- * در مسیر ۱ هم title/content/system_prompt از فایل نود «اورلی» می‌شوند تا ویرایش دستی
- * در ادیتور بیرونی بعد از رفرش گم نشود (§1.3-۱: فایل‌ها پایهٔ ذخیره‌سازی‌اند).
- * قفل‌ها همیشه آزاد می‌شوند: قفل، وضعیتِ لحظه‌ی اجراست نه داده (§12.5).
+ * Loads the canvas from the StorageAdapter (§2/§4).
+ * Two valid paths:
+ *   1) graph.json + state.json  → fast load (the usual IndexedDB path)
+ *   2) the Markdown/YAML files themselves → when there is no machine cache (Obsidian/Git folder, file import)
+ * On path 1 the title/content/system_prompt of each node are still overlaid from its file, so a manual
+ * edit in an external editor survives a refresh (§1.3-1: files are the storage substrate).
+ * Locks are always released: a lock is a moment of execution, not data (§12.5).
  */
 export async function hydrate(api: EngineApi): Promise<boolean> {
   if (!(await storage.exists(`${ROOT}/manifest.json`))) return false;
   try {
     const graph = await storage.readJson<{ nodes: RFNode[]; edges: RFEdge[] }>(`${ROOT}/graph.json`).catch(() => null);
 
-    /* خواندنِ به‌اندازه: اگر graph.json بود، فقط فایل نودها برای اورلی لازم است
-       (یک allPath ارزان + چند readFile)؛ اگر نبود، کل درخت §2 خوانده می‌شود.
-       بدون این تفکیک، boot روی بوم بزرگ معادل خواندن همه‌ی logs/outputs بود. */
+    /* read only what is needed: with graph.json present, only node files are required for the overlay
+       (one cheap allPaths + a few readFile); otherwise the whole §2 tree is read.
+       without this split, boot on a big canvas meant reading every log/output file. */
     const files = graph?.nodes?.length
       ? await collectCanvasFiles({ filter: (p) => new RegExp(`^${ROOT}/nodes/[^/]+\\.md$`).test(p) || p === `${ROOT}/canvas.yaml` })
       : await collectCanvasFiles();
@@ -1192,11 +1192,11 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
       api,
       "system",
       graph?.nodes?.length
-        ? `بوم بارگذاری شد — ${nodes.length} نود، ${edges.length} یال (منبع: graph.json${mode === "fs" ? " + فایل‌های پوشه" : ""})`
-        : `بوم از فایل‌های Markdown/YAML بازسازی شد — ${nodes.length} نود، ${edges.length} یال`
+        ? `canvas loaded — ${nodes.length} nodes, ${edges.length} edges (source: graph.json${mode === "fs" ? " + folder files" : ""})`
+        : `canvas rebuilt from Markdown/YAML files — ${nodes.length} nodes, ${edges.length} edges`
     );
     if (derived.unreadable.length) {
-      emit(api, "validation.failed", `${derived.unreadable.length} فایل قابل‌خواندن نبود و نادیده گرفته شد: ${derived.unreadable.slice(0, 4).join("، ")}`);
+      emit(api, "validation.failed", `${derived.unreadable.length} unreadable files were ignored: ${derived.unreadable.slice(0, 4).join(", ")}`);
     }
     return true;
   } catch {
@@ -1238,9 +1238,9 @@ export async function seedWorkspace(api: EngineApi) {
       default_context_contract: { allowed_read_paths: ["canvas-overview.md", "memory/agents/{node_id}.md"], allowed_write_paths: ["outputs/{node_id}/", "memory/agents/{node_id}.md"] },
     }, null, 2));
   }
-  await boot("library/shapes/agent-card.json", JSON.stringify({ id: "agent-card", name: "کارت ایجنت", type: "shape", default_size: { width: 280, height: 160 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
-  await boot("library/shapes/hex-process.json", JSON.stringify({ id: "hex-process", name: "شش‌ضلعی فرایند", type: "shape", default_size: { width: 240, height: 140 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
-  await boot("library/templates/quick-pipeline/template.yaml", toYaml({ template_id: "quick-pipeline", version: "1.0", description: "خط لوله‌ی ۴ مرحله‌ای فهم، ریسک، راه‌حل، تصمیم", nodes: 5, edges: 4 }));
+  await boot("library/shapes/agent-card.json", JSON.stringify({ id: "agent-card", name: "Agent card", type: "shape", default_size: { width: 280, height: 160 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
+  await boot("library/shapes/hex-process.json", JSON.stringify({ id: "hex-process", name: "Process hexagon", type: "shape", default_size: { width: 240, height: 140 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
+  await boot("library/templates/quick-pipeline/template.yaml", toYaml({ template_id: "quick-pipeline", version: "1.0", description: "4-step pipeline: understand, risk, solution, decision", nodes: 5, edges: 4 }));
   await storage.writeJson(`${ROOT}/graph.json`, {
     canvas_id: st.canvasId, version: "1.0", structure_version: "1.3",
     nodes: st.nodes.map((n) => ({ id: n.id, type: n.type, label: n.data.title, position: n.position, data: n.data, config_ref: `nodes/${n.id}.md` })),
@@ -1251,10 +1251,10 @@ export async function seedWorkspace(api: EngineApi) {
     execution: emptyExecution(), saved_at: nowIso(),
   });
   api.set((prev) => ({ bootLines: [...prev.bootLines, { text: "graph.json + state.json", ok: true }] }));
-  emit(api, "system", "بوم جدید مقداردهی اولیه شد — ساختار §2 کامل است");
+  emit(api, "system", "a fresh canvas was initialised — the §2 structure is complete");
 }
 
-/** اگر backendUrl تنظیم شده باشد، StorageAdapter سروری را جایگزین IndexedDB می‌کند (§5.2) */
+/** If backendUrl is set, the server StorageAdapter replaces IndexedDB (§5.2) */
 async function maybeSwitchStorage(api: EngineApi) {
   const url = api.get().settings.backendUrl?.trim();
   if (!url) return;
@@ -1266,42 +1266,42 @@ async function maybeSwitchStorage(api: EngineApi) {
     ]);
     if (!ok) throw new Error("timeout");
     setStorage(http);
-    emit(api, "system", `StorageAdapter به سرور سوئیچ شد: ${url}`);
-    toast(api, "success", "اتصال به سرور برقرار شد — فایل‌ها روی فایل‌سیستم واقعی ذخیره می‌شوند.");
+    emit(api, "system", `StorageAdapter switched to the server: ${url}`);
+    toast(api, "success", "Server connection up — files are stored on a real file system.");
   } catch {
-    emit(api, "validation.failed", `سرور ${url} پاسخ نداد — ادامه با IndexedDB محلی`);
-    toast(api, "error", "سرور در دسترس نبود؛ با ذخیره‌سازی محلی ادامه می‌دهیم.");
+    emit(api, "validation.failed", `server ${url} did not answer — continuing with local IndexedDB`);
+    toast(api, "error", "Server unreachable; continuing with local storage.");
   }
 }
 
 export async function initWorkspace(api: EngineApi) {
   await maybeSwitchStorage(api);
-  // «حالت پوشه‌ی زنده» بر IndexedDB اولویت دارد: اگر پوشه‌ای قبلاً وصل شده بود،
-  // منبع داده همان فایل‌های روی دیسک‌اند (§5.1).
+  // "live folder mode" outranks IndexedDB: if a folder was attached before,
+  // the data source is those files on disk (§5.1).
   const resumed = await maybeResumeWorkspace(api);
   const ok = resumed || (await hydrate(api));
   if (!ok) await seedWorkspace(api);
   api.set({ booted: true });
-  toast(api, "success", ok ? "بوم از حافظه‌ی ذخیره‌سازی بارگذاری شد." : "بوم جدید با ساختار فایل‌محور آماده شد.");
+  toast(api, "success", ok ? "Canvas loaded from storage." : "A new canvas is ready with the file-first layout.");
 }
 
 /**
- * «خواندن دوباره از دیسک»: اگر فایل‌ها بیرون (Git pull / ویرایش Obsidian) عوض شده باشند،
- * بوم را از همان فایل‌ها بازخوانی می‌کند. قبلش flush نمی‌کنیم تا تغییر ناموجو از بین نرود،
- * ولی اگر تغییر معلق باشد هشدار می‌دهیم.
+ * "re-read from disk": if the files changed outside (git pull / Obsidian edit),
+ * the canvas is rebuilt from those files. We do not flush first, so pending edits are not lost,
+ * but we warn when a save is in flight.
  */
 export async function reloadFromStorage(api: EngineApi) {
   if (api.get().saveState === "saving") {
-    toast(api, "warn", "یک ذخیره در جریان است — چند لحظه بعد دوباره تلاش کن تا تغییراتت گم نشود.");
+    toast(api, "warn", "A save is in flight — try again in a moment so your edits are not lost.");
     return;
   }
-  emit(api, "system", "بوم از فایل‌ها بازخوانی شد (درخواست کاربر)");
+  emit(api, "system", "canvas re-read from files (user request)");
   const ok = await hydrate(api);
   if (!ok) {
-    toast(api, "error", "بازخوانی ناموفق — فایل‌های بوم در دسترس نیستند.");
+    toast(api, "error", "Reload failed — the canvas files are not reachable.");
     return;
   }
-  toast(api, "success", "از دیسک بازخوانی شد.");
+  toast(api, "success", "Reloaded from disk.");
 }
 
 export async function resetWorkspace(api: EngineApi) {
@@ -1309,11 +1309,11 @@ export async function resetWorkspace(api: EngineApi) {
   api.set({ booted: false, bootLines: [], events: [], toasts: [], snapshots: [], outputs: {}, chats: {}, logs: {}, strokes: [], templates: api.get().templates.filter((t) => t.builtin) });
   await seedWorkspace(api);
   api.set({ booted: true });
-  toast(api, "success", "فضای کار پاک و دوباره ساخته شد.");
+  toast(api, "success", "Workspace cleared and rebuilt.");
 }
 
 /* ============================================================
-   قالب‌ها و نقش‌ها — save_pipeline_template /
+   Templates and roles — save_pipeline_template /
    load_pipeline_template / save_role (§8, §13)
    ============================================================ */
 
@@ -1322,15 +1322,15 @@ function slugify(s: string): string {
   return base || `tpl-${Date.now().toString(36)}`;
 }
 
-/** ابزار save_pipeline_template — ذخیره‌ی کل گراف به‌عنوان قالب */
+/** save_pipeline_template tool — stores the whole graph as a template */
 export async function saveTemplate(api: EngineApi, name: string) {
   const st = api.get();
   if (!st.nodes.length) {
-    toast(api, "warn", "بوم خالی است — نودی برای ذخیره در قالب وجود ندارد.");
+    toast(api, "warn", "The canvas is empty — there is no node to keep in a template.");
     return;
   }
   if (st.execution.status === "running") {
-    toast(api, "warn", "در میانه‌ی اجرا نمی‌توان قالب ذخیره کرد.");
+    toast(api, "warn", "Templates cannot be saved mid-run.");
     return;
   }
   const id = slugify(name);
@@ -1338,7 +1338,7 @@ export async function saveTemplate(api: EngineApi, name: string) {
   const spec: TemplateSpec & { structure_version: string; saved_at: string; saved_by: string } = {
     template_id: id,
     name: name.trim(),
-    description: `ذخیره‌شده از بوم «${st.canvas.title}» — ${st.nodes.length} نود و ${st.edges.length} یال`,
+    description: `saved from the canvas “${st.canvas.title}” — ${st.nodes.length} nodes and ${st.edges.length} edges`,
     version: "1.0",
     structure_version: "1.3",
     saved_at: nowIso(),
@@ -1374,33 +1374,33 @@ export async function saveTemplate(api: EngineApi, name: string) {
 
   const info = { id, name: spec.name, description: spec.description, nodes: spec.nodes.length, edges: spec.edges.length, builtin: false, saved_at: spec.saved_at };
   api.set((s) => ({ templates: [...s.templates.filter((t) => t.id !== id), info] }));
-  emit(api, "system", `قالب «${spec.name}» در library/templates/${id}/ ذخیره شد`);
-  toast(api, "success", `قالب «${spec.name}» در کتابخانه ذخیره شد.`);
+  emit(api, "system", `template “${spec.name}” saved in library/templates/${id}/`);
+  toast(api, "success", `Template “${spec.name}” saved to the library.`);
 }
 
-/** ابزار load_pipeline_template — بارگذاری قالب روی بوم */
+/** load_pipeline_template tool — loads a template onto the canvas */
 export async function loadTemplate(api: EngineApi, id: string) {
   const st = api.get();
   if (st.execution.status === "running" || st.execution.status === "waiting_approval") {
-    toast(api, "warn", "در میانه‌ی اجرا نمی‌توان قالب بارگذاری کرد.");
+    toast(api, "warn", "Templates cannot be loaded mid-run.");
     return;
   }
   let spec: TemplateSpec | null = null;
   if (id === BUILTIN_TEMPLATE.template_id) spec = BUILTIN_TEMPLATE;
   else spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${id}/template.json`).catch(() => null);
   if (!spec) {
-    toast(api, "error", "فایل قالب پیدا نشد.");
+    toast(api, "error", "Template file not found.");
     return;
   }
-  if (!window.confirm(`بوم فعلی با قالب «${spec.name}» جایگزین می‌شود. ادامه می‌دهید؟`)) return;
+  if (!window.confirm(`The current canvas will be replaced by the template “${spec.name}”. Continue?`)) return;
 
-  // پاک‌سازی آرته‌فکت‌های گراف قبلی
+  // clean up artifacts of the previous graph
   for (const n of st.nodes) await storage.deleteFile(`${ROOT}/nodes/${n.id}.md`).catch(() => undefined);
   for (const e of st.edges) await storage.deleteFile(`${ROOT}/edges/${e.id}.yaml`).catch(() => undefined);
 
   const owner = st.settings.owner;
   const nodes: RFNode[] = (spec.nodes ?? []).map((sn) => {
-    const data = makeNodeData(sn.nodeType ?? "note", sn.title ?? "بدون عنوان", owner, {
+    const data = makeNodeData(sn.nodeType ?? "note", sn.title ?? "Untitled", owner, {
       shape: sn.shape, color: sn.color, viewMode: sn.viewMode, content: sn.content ?? "",
       ...(sn.role ? { agent: makeAgentConfig(sn.id, sn.role) } : {}),
     });
@@ -1411,13 +1411,13 @@ export async function loadTemplate(api: EngineApi, id: string) {
     data: makeEdgeData({ edgeType: se.edgeType ?? "flow", label: se.label ?? "", line_style: se.line_style ?? "solid" }),
   } as RFEdge));
 
-  // ساخت حافظه‌ی اختصاصی برای ایجنت‌های جدید (§6)
+  // create a private memory for the new agents (§6)
   const agents = { ...st.memory.agents };
   for (const n of nodes) {
     if (n.data.agent && !agents[n.id]) {
       agents[n.id] = makeMemDoc(
-        `memory/agents/${n.id}.md`, `حافظه‌ی ایجنت ${n.data.title}`,
-        "- آخرین ورودی‌ها: —\n- تصمیم‌های گرفته‌شده: —\n- نکات مهم برای اجرای بعدی: —", 0.7, "agent"
+        `memory/agents/${n.id}.md`, `Memory of ${n.data.title}`,
+        "- latest inputs: —\n- decisions taken: —\n- notes for the next run: —", 0.7, "agent"
       );
       await storage.writeFile(`${ROOT}/memory/agents/${n.id}.md`, memoryToMd(agents[n.id])).catch(() => undefined);
     }
@@ -1432,11 +1432,11 @@ export async function loadTemplate(api: EngineApi, id: string) {
   for (const n of nodes) await writeNodeArtifact(api, n.id, true);
   for (const e of edges) await writeEdgeArtifact(api, e.id, true);
   touch(api);
-  emit(api, "system", `قالب «${spec.name}» بارگذاری شد — ${nodes.length} نود، ${edges.length} یال`);
-  toast(api, "success", `قالب «${spec.name}» روی بوم بارگذاری شد.`);
+  emit(api, "system", `template “${spec.name}” loaded — ${nodes.length} nodes, ${edges.length} edges`);
+  toast(api, "success", `Template “${spec.name}” loaded onto the canvas.`);
 }
 
-/** ابزار save_role — ذخیره‌ی نقش شخصی‌سازی‌شده‌ی یک ایجنت در کتابخانه */
+/** save_role tool — keeps an agent's customised role in the library */
 export async function saveRoleFromNode(api: EngineApi, nodeId: string) {
   const st = api.get();
   const n = st.nodes.find((x) => x.id === nodeId);
@@ -1447,7 +1447,7 @@ export async function saveRoleFromNode(api: EngineApi, nodeId: string) {
   const role = {
     id: rid,
     name: n.data.title,
-    description: `${base.name} — شخصی‌سازی‌شده از نود ${nodeId}`,
+    description: `${base.name} — customised from node ${nodeId}`,
     system_prompt: agent.system_prompt,
     model: agent.model,
     tools: agent.tools,
@@ -1464,18 +1464,18 @@ export async function saveRoleFromNode(api: EngineApi, nodeId: string) {
     },
   };
   await storage.writeJson(`${ROOT}/library/roles/${rid}.json`, role);
-  emit(api, "system", `نقش «${n.data.title}» در library/roles/${rid}.json ذخیره شد`);
-  toast(api, "success", "نقش ایجنت در کتابخانه ذخیره شد.");
+  emit(api, "system", `role “${n.data.title}” saved in library/roles/${rid}.json`);
+  toast(api, "success", "Agent role saved to the library.");
 }
 
 /* ============================================================
-   Portability — Export/Import و «حالت پوشه‌ی زنده» (§5.1)
+   Portability — Export/Import and "live folder mode" (§5.1)
    ============================================================ */
 
 /* ---------- root handle (File System Access) ---------- */
 
-/* هندل پوشه را در IndexedDB نگه می‌داریم؛ localStorage handle را ذخیره نمی‌کند
-   (و DB جدا از living-canvas است تا LRU/clearِ وضعیت، اتصال پوشه را نابود نکند). */
+/* We keep the folder handle in IndexedDB; localStorage cannot store a handle
+   (and a DB separate from living-canvas means LRU/clear never destroys the folder link). */
 const ROOT_DB = "living-canvas-root";
 const openRootDb = (): Promise<IDBDatabase> =>
   new Promise((resolve, reject) => {
@@ -1500,7 +1500,7 @@ async function persistRootHandle(handle: FsDirHandle | null): Promise<void> {
     });
     idb.close();
   } catch {
-    /* نگه‌داشتن handle اختیاری است؛ نشد که کاربر «اتصال» را دوباره می‌زند */
+    /* keeping the handle is optional; if it fails the user just attaches again */
   }
 }
 
@@ -1521,11 +1521,11 @@ async function loadRootHandle(): Promise<FsDirHandle | null> {
   }
 }
 
-/** هندل را روی storage فعال می‌کند؛ false یعنی اتصال ممکن نیست. */
+/** Activates the handle on storage; false means the attachment is impossible. */
 export async function applyRootHandle(api: EngineApi, handle: FsDirHandle): Promise<boolean> {
   if (!(await ensurePermission(handle, "readwrite"))) return false;
   try {
-    //probe نوشتن: اگر پوشه فقط‌خواندنی باشد همین‌جا می‌فهمیم، نه وسط کار
+    // write probe: a read-only folder is discovered here, not mid-work
     await ensureStructure(handle);
   } catch {
     return false;
@@ -1535,21 +1535,21 @@ export async function applyRootHandle(api: EngineApi, handle: FsDirHandle): Prom
   return true;
 }
 
-/** اتصال به یک پوشه‌ی واقعی روی دیسک: اگر بومی بود بارگذاری، اگر نبود از وضعیت فعلی seed می‌شود. */
+/** Attaches a real folder on disk: if it has a canvas we load it, otherwise we seed from the current state. */
 export async function attachWorkspaceFolder(api: EngineApi, handle: FsDirHandle): Promise<void> {
-  emit(api, "system", `پوشه‌ی کاری باز شد: ${handle.name}/ — در حال بررسی ساختار §2…`);
+  emit(api, "system", `workspace folder opened: ${handle.name}/ — checking the §2 structure…`);
   if (!(await applyRootHandle(api, handle))) {
-    toast(api, "error", "اجازه‌ی نوشتن روی پوشه داده نشد — اتصال برقرار نشد.");
+    toast(api, "error", "Write permission for the folder was not granted — no attachment.");
     return;
   }
   await persistRootHandle(handle);
   const ok = await hydrate(api);
   if (ok) {
-    emit(api, "system", "بوم از فایل‌های همین پوشه بارگذاری شد");
-    toast(api, "success", `به «${handle.name}» متصل شد — تغییرات عیناً روی دیسک نوشته می‌شوند.`);
+    emit(api, "system", "canvas loaded from the files of this folder");
+    toast(api, "success", `Attached to “${handle.name}” — every change is written verbatim to disk.`);
   } else {
     await seedWorkspace(api);
-    toast(api, "success", `پوشه‌ی «${handle.name}» با ساختار §2 ساخته شد — حالا Git/Obsidian روی همین پوشه کار می‌کنند.`);
+    toast(api, "success", `Folder “${handle.name}” now holds the §2 structure — Git and Obsidian can work on it.`);
   }
 }
 
@@ -1559,14 +1559,14 @@ export async function detachWorkspaceFolder(api: EngineApi): Promise<void> {
   api.set((st) => ({ settings: { ...st.settings, workspaceRoot: null } }));
   const ok = await hydrate(api);
   if (!ok) await seedWorkspace(api);
-  emit(api, "system", "حالت پوشه بسته شد — ذخیره‌سازی به IndexedDB محلی برگشت");
-  toast(api, "info", "اتصال به پوشه قطع شد. فایل‌ها سرِ جای خود روی دیسک می‌مانند.");
+  emit(api, "system", "folder mode closed — storage fell back to local IndexedDB");
+  toast(api, "info", "Folder detached. The files stay on disk, untouched.");
 }
 
-/** انتخاب پوشه از طریق File System Access API (با fallback به پیام راهنما). */
+/** Picks a folder through the File System Access API (with a guidance fallback). */
 export async function pickCanvasFolder(api: EngineApi): Promise<void> {
   if (!isFsAccessSupported()) {
-    toast(api, "warn", "این مرورگر File System Access API ندارد (Firefox/Safari). از Export/Import فایل استفاده کن.");
+    toast(api, "warn", "This browser has no File System Access API (Firefox/Safari). Use the file Export/Import instead.");
     return;
   }
   try {
@@ -1574,22 +1574,22 @@ export async function pickCanvasFolder(api: EngineApi): Promise<void> {
     await attachWorkspaceFolder(api, handle);
   } catch (err) {
     if (String(err).includes("AbortError") || (err as { name?: string })?.name === "AbortError") return;
-    emit(api, "validation.failed", `اتصال به پوشه ناموفق: ${String(err)}`);
-    toast(api, "error", "اتصال به پوشه ناموفق بود.");
+    emit(api, "validation.failed", `folder attach failed: ${String(err)}`);
+    toast(api, "error", "Attaching the folder failed.");
   }
 }
 
 /* ---------- Export ----------
 
 /**
- * Export همیشه بعد از flush انجام می‌شود؛ وگرنه پنجره‌ی ۷۰۰ms debounce باعث می‌شد
- * آخرین ویرایش‌ها در فایل‌های خروجی نباشند (دقیقاً همان چیزی که در حالت پوشه‌ی زنده
- * حساس است، چون کاربر فایل‌ها را با Git مقایسه می‌کند).
+ * Export always runs after a flush; otherwise the 700ms debounce window would leave
+ * the last edits out of the exported files — exactly the sensitive case in live folder
+ * mode, because the user diffs those files with Git.
  */
 export async function exportBundleText(api: EngineApi): Promise<{ text: string; files: number; bytes: number; canvasId: string }> {
   await flushPending();
-  // collectCanvasFiles تمام درخت §2 را می‌گیرد؛ graph.json و state.json هم جزء فایل‌های
-  // بوم‌اند (state.json در سند تازه مستند شد) — پس Importِ این باندل بایت‌به‌بایت بازمی‌گرداند.
+  // collectCanvasFiles takes the whole §2 tree; graph.json and state.json are part of the
+  // canvas files too (state.json is now documented in the spec) — so importing this bundle restores it byte for byte.
   const files = await collectCanvasFiles();
   const bundle = buildBundle(files, api.get().canvasId);
   return {
@@ -1604,21 +1604,21 @@ export async function exportToJsonFile(api: EngineApi): Promise<void> {
   try {
     const { text, canvasId, files } = await exportBundleText(api);
     if (new Blob([text]).size > MAX_BUNDLE_BYTES) {
-      toast(api, "error", "خروجی از سقف ۳۲MB بزرگ‌تر است — از حالت پوشه استفاده کن.");
+      toast(api, "error", "the export is above the 32MB ceiling — use folder mode.");
       return;
     }
     await downloadJson(`${canvasId}.livingcanvas.json`, text);
-    emit(api, "system", `Export: ${files} فایل در قالب یک باندل JSON دانلود شد`);
-    toast(api, "success", "بوم Export شد — همه‌ی فایل‌ها داخل یک فایل JSON است.");
+    emit(api, "system", `export: ${files} files downloaded as one JSON bundle`);
+    toast(api, "success", "Canvas exported — every file lives inside one JSON.");
   } catch (err) {
-    toast(api, "error", `Export ناموفق: ${String(err)}`);
+    toast(api, "error", `Export failed: ${String(err)}`);
   }
 }
 
-/** Export به پوشه (نسخه‌ی استاتیک، بدون اتصال زنده). ساختار §2 عیناً روی دیسک نوشته می‌شود. */
+/** Export to a folder (static copy, no live attachment). The §2 tree is written verbatim. */
 export async function exportToFolder(api: EngineApi): Promise<void> {
   if (!isFsAccessSupported()) {
-    toast(api, "warn", "برای Export به پوشه به Chrome/Edge نیاز است؛ فعلاً همان فایل JSON را دانلود کن.");
+    toast(api, "warn", "Export to a folder needs Chrome/Edge; for now download the JSON file instead.");
     return;
   }
   try {
@@ -1626,12 +1626,12 @@ export async function exportToFolder(api: EngineApi): Promise<void> {
     await flushPending();
     const files = await collectCanvasFiles();
     const res = await writeFilesToDirectory(dir, files);
-    emit(api, "system", `Export به پوشه: ${res.written} فایل نوشته شد${res.failed.length ? `، ${res.failed.length} ناموفق` : ""}`);
+    emit(api, "system", `folder export: ${res.written} files written${res.failed.length ? `, ${res.failed.length} failed` : ""}`);
     toast(api, res.failed.length ? "warn" : "success",
-      `${res.written} فایل در «${dir.name}» نوشته شد${res.failed.length ? ` — ${res.failed.length} فایل ناموفق` : ""}.`);
+      `${res.written} files written into “${dir.name}”${res.failed.length ? ` — ${res.failed.length} failed` : ""}.`);
   } catch (err) {
     if ((err as { name?: string })?.name === "AbortError") return;
-    toast(api, "error", `Export به پوشه ناموفق: ${String(err)}`);
+    toast(api, "error", `Folder export failed: ${String(err)}`);
   }
 }
 
@@ -1640,7 +1640,7 @@ export async function exportToFolder(api: EngineApi): Promise<void> {
 export interface ImportPreview {
   canvasId: string | null;
   title: string | null;
-  /** تعداد فایل‌های معتبر داخل ورودی */
+  /** number of valid files in the input */
   fileCount: number;
   nodes: number;
   edges: number;
@@ -1663,27 +1663,27 @@ function summarize(api: EngineApi, r: ReturnType<typeof parseBundleText>): Impor
     skipped: r.skipped,
     warning:
       !r.files[`${ROOT}/manifest.json`]
-        ? "manifest.json ندارد — ممکن است خروجیِ نسخهٔ قدیمی یا فایل دستی باشد؛ با احتیاط وارد شود."
+        ? "no manifest.json — this may be an older export or a hand-made folder; import with care."
         : foreign
-          ? `شناسهٔ بوم «${r.canvasId}» با بوم فعلی فرق دارد؛ فایل‌ها زیر مسیر بوم فعلی نوشته می‌شوند.`
+          ? `canvas id “${r.canvasId}” differs from the current canvas; files will be written under the current canvas path.`
           : null,
   };
 }
 
 export async function previewImportText(api: EngineApi, text: string): Promise<ImportPreview & { files: CanvasFiles }> {
   const r = parseBundleText(text);
-  if (!r.ok) throw new Error(r.error ?? "فایل نامعتبر است");
+  if (!r.ok) throw new Error(r.error ?? "invalid file");
   return { ...summarize(api, r), files: r.files };
 }
 
-/** اعمال واقعی Import: نوشتن فایل‌ها + بازخوانی از همان فایل‌ها. */
+/** The actual Import: write the files + reload from those very files. */
 export async function applyImport(api: EngineApi, files: CanvasFiles, opts?: { replace?: boolean }): Promise<void> {
   const replace = opts?.replace ?? true;
   if (replace) {
     await storage.clear();
   }
   await installFiles(files, { replace: false });
-  // بعضی Exportها (یا پوشه‌ی دستی Obsidian) manifest.json ندارند؛ بدون آن hydrate رد می‌کند
+  // some exports (or a hand-made Obsidian folder) have no manifest.json; hydrate refuses without it
   if (!(await storage.exists(`${ROOT}/manifest.json`))) {
     await storage.writeJson(`${ROOT}/manifest.json`, {
       version: "1.0", app_version: APP_VERSION, canvas_id: api.get().canvasId,
@@ -1692,13 +1692,13 @@ export async function applyImport(api: EngineApi, files: CanvasFiles, opts?: { r
   }
   const ok = await hydrate(api);
   if (!ok) {
-    emit(api, "validation.failed", "Import انجام شد ولی بوم قابل‌ساختن نبود — فایل‌ها در ذخیره‌سازی‌اند");
-    toast(api, "error", "فایل‌ها نوشته شدند ولی بوم ساخته نشد (هیچ نودی پیدا نشد).");
+    emit(api, "validation.failed", "import wrote files but the canvas could not be built — the files are in storage");
+    toast(api, "error", "Files were written but no canvas was built (no node found).");
     return;
   }
   if (replace) await writeCore(api.get());
-  emit(api, "system", `Import کامل شد — ${api.get().nodes.length} نود از فایل‌ها بازسازی شد`);
-  toast(api, "success", "بوم بازیابی شد — همه‌ی نودها، حافظه‌ها و فایل‌ها جایگزین شدند.");
+  emit(api, "system", `import complete — ${api.get().nodes.length} nodes rebuilt from files`);
+  toast(api, "success", "Canvas restored — all nodes, memories and files were replaced.");
 }
 
 export async function importFromText(api: EngineApi, text: string, opts?: { replace?: boolean }): Promise<ImportPreview> {
@@ -1709,60 +1709,60 @@ export async function importFromText(api: EngineApi, text: string, opts?: { repl
   return rest;
 }
 
-/** Import از یک پوشه (File System Access) — خواندن درخت §2 و بازسازی بوم. */
+/** Import from a folder (File System Access) — read the §2 tree and rebuild the canvas. */
 export async function importFromFolder(api: EngineApi, replace = true): Promise<void> {
   if (!isFsAccessSupported()) {
-    toast(api, "warn", "مرورگر تو File System Access API ندارد؛ فایل .livingcanvas.json را انتخاب کن.");
+    toast(api, "warn", "Your browser has no File System Access API; pick the .livingcanvas.json file instead.");
     return;
   }
   try {
     const dir = await pickCanvasDirectory("living-canvas-import");
     const raw = await readCanvasFromDirectory(dir);
-    // مسیرها را منطقی می‌کنیم: اگر پوشه ریشهٔ canvases/<id> باشد، پیشوند را وصل می‌کنیم
+    // normalise paths: if the folder is the canvases/<id> root, we re-attach the prefix
     const files: CanvasFiles = {};
     for (const [rel, text] of Object.entries(raw)) files[`${ROOT}/${rel}`] = text;
     const parsed = parseBundleText(JSON.stringify(files));
     if (!parsed.ok) {
-      toast(api, "error", "هیچ فایل بومی در این پوشه پیدا نشد (nodes/ یا manifest.json خالی است).");
+      toast(api, "error", "no canvas file found in this folder (nodes/ or manifest.json is empty).");
       return;
     }
     const preview = { ...summarize(api, parsed), files: parsed.files };
     if (!preview.files[`${ROOT}/manifest.json`] && !preview.nodes) {
-      toast(api, "error", "این پوشه ساختار Living Canvas را ندارد.");
+      toast(api, "error", "this folder has no Living Canvas structure.");
       return;
     }
     await applyImport(api, preview.files, { replace });
-    emit(api, "system", `Import از پوشه «${dir.name}» — ${preview.nodes} نود، ${preview.edges} یال`);
+    emit(api, "system", `folder import from “${dir.name}” — ${preview.nodes} nodes, ${preview.edges} edges`);
   } catch (err) {
     if ((err as { name?: string })?.name === "AbortError") return;
-    toast(api, "error", `Import از پوشه ناموفق: ${String(err)}`);
+    toast(api, "error", `Folder import failed: ${String(err)}`);
   }
 }
 
-/** انتخاب فایل با <input type=file> — خروجی‌اش File است. */
+/** Picks a file with <input type=file> — its result is a File. */
 export async function importFromFile(api: EngineApi, file: File, replace = true): Promise<void> {
   try {
     const text = await readFileAsText(file);
     const preview = await importFromText(api, text, { replace });
-    toast(api, "success", `بازیابی شد — ${preview.nodes} نود، ${preview.fileCount} فایل.`);
+    toast(api, "success", `restored — ${preview.nodes} nodes, ${preview.fileCount} files.`);
   } catch (err) {
-    toast(api, "error", `Import ناموفق: ${String(err)}`);
+    toast(api, "error", `Import failed: ${String(err)}`);
   }
 }
 
-/** تلاش برای اتصال خودکار به پوشه‌ای که قبلاً انتخاب شده. */
+/** Tries to re-attach the folder that was picked before. */
 export async function maybeResumeWorkspace(api: EngineApi): Promise<boolean> {
   const handle = await loadRootHandle();
   if (!handle) return false;
   if (!(await ensurePermission(handle, "readwrite"))) {
-    emit(api, "system", "برای پوشه‌ی کاری اجازه لازم است — از دکمه‌ی «اتصال به پوشه» دوباره اجازه بده");
+    emit(api, "system", "the workspace folder needs permission again — use “Attach a folder” to re-grant it");
     return false;
   }
   if (!(await applyRootHandle(api, handle))) return false;
   const ok = await hydrate(api);
   if (ok) {
-    emit(api, "system", `حالت پوشه‌ی زنده ادامه یافت: ${handle.name}/`);
-    toast(api, "success", `به پوشه‌ی «${handle.name}» متصل است — تغییرات روی دیسک نوشته می‌شود.`);
+    emit(api, "system", `live folder mode continued: ${handle.name}/`);
+    toast(api, "success", `Attached to “${handle.name}” — changes are written to disk.`);
   }
   return ok;
 }

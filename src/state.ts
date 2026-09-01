@@ -8,7 +8,7 @@ import type {
   OutputEntry, ChatMsg, SnapshotMeta, EdgeType, Stroke,
 } from "./lib/core";
 
-export const APP_VERSION = "0.1.0"; // انتشار v0.1 — پایان رسمی فاز ۱ سند معماری 1.3
+export const APP_VERSION = "0.1.0"; // release v0.1 — closes phase 1 of architecture doc 1.3
 export const CANVAS_ID = "nexus-edu-001";
 export const ROOT = `canvases/${CANVAS_ID}`;
 
@@ -74,21 +74,21 @@ export interface TemplateInfo {
 
 export const BUILTIN_TEMPLATE: TemplateSpec = {
   template_id: "quick-pipeline",
-  name: "خط لوله‌ی سریع",
-  description: "چهار مرحله: فهم مسئله ← تحلیل ریسک ← طراحی راه‌حل ← جمع‌بندی",
+  name: "Fast pipeline",
+  description: "Four steps: understand the problem → risk analysis → solution design → wrap-up",
   version: "1.0",
   nodes: [
-    { id: "tpl-001", nodeType: "agent", title: "فهم مسئله", position: { x: 80, y: 220 }, role: "understander", content: "مسئله را از ابهام بیرون بکش." },
-    { id: "tpl-002", nodeType: "agent", title: "تحلیل ریسک", position: { x: 440, y: 60 }, role: "risk-analyst", content: "ریسک‌ها را امتیازدهی کن." },
-    { id: "tpl-003", nodeType: "agent", title: "طراحی راه‌حل", position: { x: 800, y: 220 }, role: "solution-designer", content: "راه‌حل اجرایی در سه گام." },
-    { id: "tpl-004", nodeType: "agent", title: "جمع‌بندی", position: { x: 1160, y: 60 }, role: "decision-maker", content: "تصمیم نهایی با تأیید انسانی." },
-    { id: "tpl-005", nodeType: "output-box", title: "خروجی نهایی", position: { x: 1500, y: 220 }, content: "سند تحویل این‌جا جمع می‌شود." },
+    { id: "tpl-001", nodeType: "agent", title: "Understand the problem", position: { x: 80, y: 220 }, role: "understander", content: "Pull the problem out of ambiguity." },
+    { id: "tpl-002", nodeType: "agent", title: "Risk analysis", position: { x: 440, y: 60 }, role: "risk-analyst", content: "Score the risks." },
+    { id: "tpl-003", nodeType: "agent", title: "Design the solution", position: { x: 800, y: 220 }, role: "solution-designer", content: "An executable solution in three steps." },
+    { id: "tpl-004", nodeType: "agent", title: "Wrap-up", position: { x: 1160, y: 60 }, role: "decision-maker", content: "Final decision, with human approval." },
+    { id: "tpl-005", nodeType: "output-box", title: "Final output", position: { x: 1500, y: 220 }, content: "The deliverable is assembled here." },
   ],
   edges: [
-    { id: "tpl-e1", source: "tpl-001", target: "tpl-002", label: "بیان مسئله" },
-    { id: "tpl-e2", source: "tpl-002", target: "tpl-003", label: "گزارش ریسک" },
-    { id: "tpl-e3", source: "tpl-003", target: "tpl-004", label: "پیشنهاد راه‌حل" },
-    { id: "tpl-e4", source: "tpl-004", target: "tpl-005", label: "تصمیم نهایی" },
+    { id: "tpl-e1", source: "tpl-001", target: "tpl-002", label: "problem statement" },
+    { id: "tpl-e2", source: "tpl-002", target: "tpl-003", label: "risk report" },
+    { id: "tpl-e3", source: "tpl-003", target: "tpl-004", label: "proposed solution" },
+    { id: "tpl-e4", source: "tpl-004", target: "tpl-005", label: "final decision" },
   ],
 };
 
@@ -139,7 +139,7 @@ export interface AppState {
     settingsOpen: boolean;
     chatNodeId: string | null;
     consoleOpen: boolean;
-    /** پنجره‌ی Export/Import باز است؟ */
+  /** is the Export/Import panel open? */
     portOpen: boolean;
   };
 }
@@ -156,14 +156,14 @@ export const NODE_COLORS: Record<NodeType, string> = {
 };
 
 export const NODE_TYPE_LABEL: Record<NodeType, string> = {
-  agent: "ایجنت",
-  note: "یادداشت",
-  "output-box": "جعبه خروجی",
-  folder: "پوشه",
-  "pipeline-step": "گام خط لوله",
-  file: "فایل",
-  shape: "شکل",
-  drawing: "نقاشی",
+  agent: "Agent",
+  note: "Note",
+  "output-box": "Output box",
+  folder: "Folder",
+  "pipeline-step": "Pipeline step",
+  file: "File",
+  shape: "Shape",
+  drawing: "Drawing",
 };
 
 export const MODELS = ["deepseek-chat", "glm-4-flash", "ollama:qwen2.5"];
@@ -183,40 +183,40 @@ export interface RoleDef {
 export const ROLES: RoleDef[] = [
   {
     id: "understander",
-    name: "فهم مسئله",
-    description: "گفتگو با کاربر برای شفاف‌سازی مسئله و استخراج بیان دقیق آن",
+    name: "Understand the problem",
+    description: "Talks with the user to clarify the problem and extract a precise statement",
     system_prompt:
-      "تو ایجنت «فهم مسئله» هستی. مأموریت تو این است که با خواندن خلاصه‌ی بوم و حافظه‌ی خودت، مسئله‌ی اصلی را شفاف کنی. همیشه اول سؤال‌های مبهم را فهرست کن، سپس بیان مسئله را در یک پاراگراف دقیق بنویس. خروجی تو باید شامل summary، problem_statement و questions_asked باشد.",
+      "You are the \"Understand the problem\" agent. Read the canvas summary and your own memory, then make the core problem explicit. List the ambiguous questions first, then write the problem statement as one precise paragraph. Your output must contain summary, problem_statement and questions_asked.",
     model: "deepseek-chat",
     tools: ["read_memory", "write_memory", "chat_with_user", "write_output"],
     required_fields: ["summary", "problem_statement", "questions_asked"],
   },
   {
     id: "risk-analyst",
-    name: "تحلیل ریسک",
-    description: "شناسایی ریسک‌های راه‌حل پیشنهادی و امتیازدهی به آن‌ها",
+    name: "Risk analysis",
+    description: "Finds the risks of the proposed solution and scores them",
     system_prompt:
-      "تو ایجنت «تحلیل ریسک» هستی. ورودی تو بیان مسئله از نود قبلی است. ریسک‌های اصلی را فهرست کن، به هرکدام امتیاز ۱ تا ۱۰ بده و یک تصمیم کلی (رد / اصلاح / تأیید) پیشنهاد کن. خروجی شامل summary، risks و decision است.",
+      "You are the \"Risk analysis\" agent. Your input is the problem statement from the previous node. List the main risks, score each from 1 to 10, and recommend one overall decision (reject / revise / approve). Output contains summary, risks and decision.",
     model: "deepseek-chat",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "risks", "decision"],
   },
   {
     id: "solution-designer",
-    name: "طراحی راه‌حل",
-    description: "طراحی راه‌حل اجرایی با گام‌های مشخص و قابل اندازه‌گیری",
+    name: "Design the solution",
+    description: "Designs an executable solution with clear, measurable steps",
     system_prompt:
-      "تو ایجنت «طراحی راه‌حل» هستی. با توجه به مسئله و گزارش ریسک، یک راه‌حل اجرایی در سه گام طراحی کن. هر گام باید خروجی مشخص و معیار موفقیت داشته باشد. خروجی شامل summary، solution و next_actions است.",
+      "You are the \"Design the solution\" agent. Given the problem statement and the risk report, design an executable solution in three steps. Each step needs an explicit output and a success criterion. Output contains summary, solution and next_actions.",
     model: "deepseek-chat",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "solution", "next_actions"],
   },
   {
     id: "decision-maker",
-    name: "جمع‌بندی و تصمیم",
-    description: "جمع‌بندی همه‌ی خروجی‌ها و پیشنهاد تصمیم نهایی با تأیید انسانی",
+    name: "Wrap-up & decision",
+    description: "Collects every output and proposes the final decision, pending human approval",
     system_prompt:
-      "تو ایجنت «جمع‌بندی و تصمیم» هستی. همه‌ی خروجی‌های مجاز را بخوان، تعارض‌ها را مشخص کن و یک تصمیم نهایی با دلایل آن بنویس. تصمیم نهایی فقط بعد از تأیید انسانی اجرا می‌شود. خروجی شامل summary، decision و approval_request است.",
+      "You are the \"Wrap-up & decision\" agent. Read every allowed output, mark the conflicts, and write one final decision with its reasons. The final decision is executed only after human approval. Output contains summary, decision and approval_request.",
     model: "deepseek-chat",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "decision", "approval_request"],
@@ -321,12 +321,12 @@ export const defaultSettings = (): Settings => {
 /* ---------------- palette ---------------- */
 
 export const PALETTE: { nodeType: NodeType; label: string; desc: string; shape: ShapeKind; viewMode: ViewMode }[] = [
-  { nodeType: "agent", label: "ایجنت", desc: "نود هوشمند با نقش، قرارداد زمینه و حافظه", shape: "card", viewMode: "card" },
-  { nodeType: "note", label: "یادداشت", desc: "متن آزاد مارک‌داون روی بوم", shape: "rectangle", viewMode: "markdown" },
-  { nodeType: "output-box", label: "جعبه خروجی", desc: "جمع‌آوری خروجی مشترک چند نود", shape: "hexagon", viewMode: "card" },
-  { nodeType: "pipeline-step", label: "گام خط لوله", desc: "مرحله‌ی اجرایی بدون عامل", shape: "rectangle", viewMode: "name" },
-  { nodeType: "folder", label: "پوشه", desc: "گروه‌بندی بصری نودها", shape: "rectangle", viewMode: "name" },
-  { nodeType: "shape", label: "شکل آزاد", desc: "لوزی، دایره، شش‌ضلعی…", shape: "diamond", viewMode: "name" },
+  { nodeType: "agent", label: "Agent", desc: "Smart node with a role, a context contract and memory", shape: "card", viewMode: "card" },
+  { nodeType: "note", label: "Note", desc: "Free markdown text on the canvas", shape: "rectangle", viewMode: "markdown" },
+  { nodeType: "output-box", label: "Output box", desc: "Shared output of several nodes", shape: "hexagon", viewMode: "card" },
+  { nodeType: "pipeline-step", label: "Pipeline step", desc: "Executed step without an agent", shape: "rectangle", viewMode: "name" },
+  { nodeType: "folder", label: "Folder", desc: "Visual grouping of nodes", shape: "rectangle", viewMode: "name" },
+  { nodeType: "shape", label: "Free shape", desc: "Diamond, circle, hexagon…", shape: "diamond", viewMode: "name" },
 ];
 
 /* ---------------- seed content ---------------- */
@@ -337,18 +337,18 @@ export function buildSeed(owner: string) {
   const mkNode = (id: string, type: string, x: number, y: number, data: RFNode["data"]): RFNode =>
     ({ id, type, position: { x, y }, data } as RFNode);
 
-  const note = makeNodeData("note", "هدف بوم", owner, {
+  const note = makeNodeData("note", "Canvas goal", owner, {
     color: "#6fb3c7",
     shape: "rectangle",
     content:
-      "## هدف\n\nطراحی یک **مدرسه‌ی آنلاین هوشمند** برای دانش‌آموزان ۱۲ تا ۱۵ سال.\n\n### چارچوب\n- مسئله از نگاه دانش‌آموز تعریف شود\n- ریسک‌های آموزشی و فنی قبل از طراحی سنجیده شود\n- تصمیم نهایی فقط با تأیید انسانی اجرا می‌شود",
+      "## Goal\n\nDesign a **smart online school** for students aged 12 to 15.\n\n### Frame\n- the problem is defined from the student's point of view\n- educational and technical risks are weighed before designing\n- the final decision runs only after human approval",
   });
 
-  const a1 = makeNodeData("agent", "فهم مسئله", owner, {
+  const a1 = makeNodeData("agent", "Understand the problem", owner, {
     agent: makeAgentConfig("node-001", "understander"),
-    content: "نخستین ایجنت خط لوله؛ مسئله را از ابهام بیرون می‌کشد.",
+    content: "First agent of the pipeline; pulls the problem out of ambiguity.",
   });
-  const a2 = makeNodeData("agent", "تحلیل ریسک", owner, {
+  const a2 = makeNodeData("agent", "Risk analysis", owner, {
     color: "#e06a4e",
     agent: makeAgentConfig("node-002", "risk-analyst", {
       context_contract: {
@@ -361,7 +361,7 @@ export function buildSeed(owner: string) {
       },
     }),
   });
-  const a3 = makeNodeData("agent", "طراحی راه‌حل", owner, {
+  const a3 = makeNodeData("agent", "Design the solution", owner, {
     color: "#8fbf7f",
     agent: makeAgentConfig("node-003", "solution-designer", {
       context_contract: {
@@ -374,7 +374,7 @@ export function buildSeed(owner: string) {
       },
     }),
   });
-  const a4 = makeNodeData("agent", "جمع‌بندی و تصمیم", owner, {
+  const a4 = makeNodeData("agent", "Wrap-up & decision", owner, {
     color: "#b98bc2",
     agent: makeAgentConfig("node-004", "decision-maker", {
       require_approval: true,
@@ -388,8 +388,8 @@ export function buildSeed(owner: string) {
       },
     }),
   });
-  const box = makeNodeData("output-box", "خروجی نهایی", owner, {
-    content: "تصمیم نهایی و سند تحویل در این جعبه جمع می‌شود.",
+  const box = makeNodeData("output-box", "Final output", owner, {
+    content: "The final decision and the deliverable are assembled in this box.",
   });
 
   const nodes: RFNode[] = [
@@ -405,38 +405,38 @@ export function buildSeed(owner: string) {
     ({ id, source, target, type: "lc", data } as RFEdge);
 
   const edges: RFEdge[] = [
-    mkEdge("edge-001", "note-001", "node-001", makeEdgeData({ edgeType: "relation", label: "ارجاع هدف", line_style: "dotted", animation: "none" })),
-    mkEdge("edge-002", "node-001", "node-002", makeEdgeData({ label: "بیان مسئله" })),
-    mkEdge("edge-003", "node-002", "node-003", makeEdgeData({ label: "گزارش ریسک", trigger: { type: "condition", condition: "{{ risk_score < 7 }}" } })),
-    mkEdge("edge-004", "node-003", "node-004", makeEdgeData({ label: "پیشنهاد راه‌حل" })),
-    mkEdge("edge-005", "node-004", "box-001", makeEdgeData({ label: "تصمیم نهایی", animation: "pulse" })),
+    mkEdge("edge-001", "note-001", "node-001", makeEdgeData({ edgeType: "relation", label: "goal reference", line_style: "dotted", animation: "none" })),
+    mkEdge("edge-002", "node-001", "node-002", makeEdgeData({ label: "problem statement" })),
+    mkEdge("edge-003", "node-002", "node-003", makeEdgeData({ label: "risk report", trigger: { type: "condition", condition: "{{ risk_score < 7 }}" } })),
+    mkEdge("edge-004", "node-003", "node-004", makeEdgeData({ label: "proposed solution" })),
+    mkEdge("edge-005", "node-004", "box-001", makeEdgeData({ label: "final decision", animation: "pulse" })),
   ];
 
   const agents: Record<string, MemDoc> = {};
   for (const [nid, rid] of [["node-001", "understander"], ["node-002", "risk-analyst"], ["node-003", "solution-designer"], ["node-004", "decision-maker"]] as const) {
     agents[nid] = makeMemDoc(
       `memory/agents/${nid}.md`,
-      `حافظه‌ی ایجنت ${roleById(rid).name}`,
-      `- آخرین ورودی‌ها: هنوز اجرا نشده\n- تصمیم‌های گرفته‌شده: —\n- نکات مهم برای اجرای بعدی: قرارداد زمینه را قبل از خواندن هر فایل بررسی کن.`,
+      `Memory of the \"${roleById(rid).name}\" agent`,
+      `- latest inputs: not run yet\n- decisions taken: —\n- notes for the next run: read the context contract before reading any file.`,
       0.7,
       "agent"
     );
   }
 
   const memory = {
-    global: makeMemDoc("memory/global.md", "وضعیت کلی پروژه",
-      "- هدف: طراحی مدرسه‌ی آنلاین هوشمند برای نوجوانان ۱۲ تا ۱۵ سال\n- پیشرفت: ساختار بوم آماده، خط لوله‌ی ۴ مرحله‌ای تعریف شده\n- نکات مهم: تصمیم نهایی بدون تأیید انسانی اجرا نمی‌شود", 0.9, "system"),
-    decisions: makeMemDoc("memory/decisions.md", "تصمیم‌های مهم",
-      `- [${t.slice(0, 10)}] معماری: فایل‌محور با StorageAdapter روی IndexedDB\n- [${t.slice(0, 10)}] موتور اجرا: State Machine سبک در فاز ۱، LangGraph در فاز ۲\n- [${t.slice(0, 10)}] حافظه: دو سطحی (سراسری + اختصاصی ایجنت)`, 0.8, "system"),
-    progress: makeMemDoc("memory/progress.md", "پیشرفت کار",
-      "# کارهای انجام‌شده\n- ساخت بوم و تعریف ایجنت‌ها\n\n# در حال انجام\n- آماده‌سازی برای اولین اجرا\n\n# بعدی\n- اجرای خط لوله و جمع‌بندی", 0.8, "system"),
-    user: makeMemDoc("memory/user.md", "نمایه‌ی کاربر",
-      `- نام: ${owner}\n- سبک کاری: بصری، علاقه‌مند به جزئیات معماری\n- ترجیح: خروجی‌های کوتاه و ساختاریافته`, 0.85, "user"),
+    global: makeMemDoc("memory/global.md", "Overall project status",
+      "- goal: design a smart online school for teenagers aged 12 to 15\n- progress: canvas structure is ready, the 4-step pipeline is defined\n- important: the final decision never runs without human approval", 0.9, "system"),
+    decisions: makeMemDoc("memory/decisions.md", "Key decisions",
+      `- [${t.slice(0, 10)}] architecture: file-first, with StorageAdapter over IndexedDB\n- [${t.slice(0, 10)}] executor: lightweight state machine in phase 1, LangGraph in phase 2\n- [${t.slice(0, 10)}] memory: two levels (global + per-agent)`, 0.8, "system"),
+    progress: makeMemDoc("memory/progress.md", "Work in progress",
+      "# Done\n- canvas built, agents defined\n\n# In progress\n- preparing the first run\n\n# Next\n- run the pipeline and wrap up", 0.8, "system"),
+    user: makeMemDoc("memory/user.md", "User profile",
+      `- name: ${owner}\n- working style: visual, cares about architecture details\n- preference: short, structured outputs`, 0.85, "user"),
     agents,
   };
 
   const canvas: CanvasMeta = {
-    title: "مدرسه‌ی هوشمند نِکسوس",
+    title: "Nexus Smart School",
     owner,
     canvas_type: "agent-pipeline",
     tags: ["nexus", "school"],

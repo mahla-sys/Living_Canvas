@@ -1,6 +1,6 @@
 /* ============================================================
    Living Canvas — core: types, utils, event bus, serializers,
-   StorageAdapter (IndexedDB + LRU cache) — سند معماری v1.3 §5
+   StorageAdapter (IndexedDB + LRU cache) — architecture doc v1.3 §5
    ============================================================ */
 
 export type NodeType =
@@ -140,7 +140,7 @@ export interface Settings {
   owner: string;
   simDelay: number;
   backendUrl: string;
-  /** نام پوشه‌ای که در «حالت پوشه‌ی زنده» باز شده؛ null یعنی IndexedDB محلی. */
+  /** Name of the folder opened in "live folder" mode; null means local IndexedDB. */
   workspaceRoot?: string | null;
 }
 
@@ -166,29 +166,29 @@ export const nowIso = () => new Date().toISOString();
 export const nowStamp = () =>
   new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
 
+/** HH:MM:SS on the local clock. en-GB + h23: no Persian digits, no AM/PM. */
 export const fmtClock = (iso: string) => {
   try {
-    return new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
   } catch {
     return iso;
   }
 };
 
+/** ISO calendar date (YYYY-MM-DD) — sortable and locale-free. */
 export const fmtDate = (iso: string) => {
   try {
-    return new Date(iso).toLocaleDateString("fa-IR");
+    return new Date(iso).toISOString().slice(0, 10);
   } catch {
     return iso;
   }
 };
-
-export const faNum = (n: number) => n.toLocaleString("fa-IR");
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface Debounced<A extends unknown[]> {
   (...args: A): void;
-  /** اجرای فوری هر فراخوان معوق — قبل از Export لازم است تا فایل‌ها روی دیسک قطعی باشند. */
+  /** Run every pending call now — required before an Export so files on disk are final. */
   flush(): void;
   pending(): boolean;
 }
@@ -218,10 +218,10 @@ export const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a
 /* ---------------- path helpers (used by all StorageAdapters) ---------------- */
 
 /**
- * بچه‌های مستقیم یک پوشه از روی فهرست کامل مسیرها.
- * فایل‌ها نامشان برمی‌گردد، پوشه‌ها با «/» انتهایی — همان قراردادی که `hydrate` انتظار دارد.
- * (فیکس باگ §2: نسخهٔ قبلی با فیلتر `!p.includes("/")` آیتم‌های داخل زیرپوشه —
- *  مثل library/templates/<id>/template.json — را دور می‌ریخت و قالب‌های کاربر بعد از رفرش ناپدید می‌شدند.)
+ * Direct children of a folder, derived from the full path list.
+ * Files come back bare, directories with a trailing "/" — exactly what `hydrate` expects.
+ * (Fix for the §2 bug: the previous version filtered with `!p.includes("/")`, dropping entries
+ *  inside subfolders — e.g. library/templates/<id>/template.json — so user templates vanished on refresh.)
  */
 export function listChildren(allPaths: Iterable<string>, dir: string): string[] {
   const prefix = dir === "" || dir === "." ? "" : dir.replace(/\/+$/, "") + "/";
@@ -236,10 +236,10 @@ export function listChildren(allPaths: Iterable<string>, dir: string): string[] 
   return [...out].sort();
 }
 
-/** یک مسیر نسبی امن برای فایل‌سیستم/باندل؛ `..`، مسیر مطلق و بک‌اسلش را رد می‌کند. */
+/** A safe relative path for the file system / a bundle; rejects "..", absolute paths and backslashes. */
 export function safeRelPath(p: string): string | null {
   const raw = p.trim();
-  // مسیر مطلق (posix یا windows) هیچ‌وقت مسیر نسبیِ بوم نیست
+  // an absolute path (posix or windows) is never a canvas-relative path
   if (raw.startsWith("/") || /^[a-zA-Z]:[\/]/.test(raw)) return null;
   const s = raw.replace(/\\/g, "/").replace(/^\.\/+/, "");
   if (!s) return null;
@@ -256,22 +256,22 @@ const HTML_ESCAPES: Record<string, string> = {
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;",
 };
 
-/** تمام کاراکترهای معنادار HTML را خنثی می‌کند. هیچ تگی زنده نمی‌ماند. */
+/** Neutralises every HTML-significant character. No tag survives. */
 export function escapeHtml(s: string): string {
   return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
 }
 
 /**
- * رندر inline مارک‌داون — اول escape، بعد قالب‌بندی.
- * چون escape مقدم است، ورودی مخرب (مثل `<img onerror=…>` که AI می‌تواند تولید کند)
- * هرگز به HTML تبدیل نمی‌شود؛ فقط **bold**، _em_ و `code` پشتیبانی می‌شوند.
+ * Inline markdown rendering — escape first, format second.
+ * Because escaping happens first, hostile input (e.g. `<img onerror=…>` from a model)
+ * can never become HTML; only **bold**, _em_ and `code` are supported.
  */
 export function mdInline(raw: string): string {
   const esc = escapeHtml(raw);
   return esc
     .replace(/`([^`\n]+)`/g, "<code class='lc-md-code'>$1</code>")
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong class='lc-md-strong'>$1</strong>")
-    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,؛:!؟)])/g, "$1<em>$2</em>");
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,;:!?\)])/g, "$1<em>$2</em>");
 }
 
 /* ---------------- event bus (§11) ---------------- */
@@ -293,13 +293,27 @@ export const bus = {
 
 /* ---------------- mini YAML / markdown serializers ---------------- */
 
+/**
+ * A string is written bare only when reading it back yields the same value.
+ * Anything a real YAML parser would re-interpret — a leading indicator, ": ", " #",
+ * flow characters, or a number/boolean/null-shaped word — is double-quoted. That is
+ * what keeps these files readable by other tools (Obsidian, yamllint, CI YAML checks)
+ * and keeps parseYaml(toYaml(x)) an identity for strings such as "1.0" or "{{ a < 7 }}".
+ */
+const yvNeedsQuotes = (s: string): boolean =>
+  s !== s.trim() ||
+  /[:#\n"']/.test(s) ||
+  /^[-?:,[\]{}#&*!|>'"%@`]/.test(s) ||
+  /[{}[\],]/.test(s) ||
+  /^(?:null|~|true|false|yes|no|on|off|\.inf|\.nan)$/i.test(s) ||
+  /^-?\d+(\.\d+)?$/.test(s);
+
 const yv = (v: unknown): string => {
   if (v === null || v === undefined) return "null";
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   const s = String(v);
-  // هر رشته‌ای که ممکن است ساختار YAML را بشکند، دابل‌کوت می‌شود و
-  // کاراکترهای کنترل به escape تبدیل می‌شوند تا چندخطی‌ماندنی parseYaml نشکند.
-  if (/[:#\n"']/.test(s) || s !== s.trim()) {
+  // control characters are escaped so a multiline value still round-trips through parseYaml.
+  if (yvNeedsQuotes(s)) {
     const esc = s
       .replace(/\\/g, "\\\\")
       .replace(/"/g, '\\"')
@@ -342,14 +356,14 @@ export const frontmatter = (obj: Record<string, unknown>, body: string) =>
   `---\n${toYaml(obj).trimEnd()}\n---\n\n${body.trim()}\n`;
 
 /**
- * جدا کردن YAML frontmatter از بدنهٔ Markdown.
- * خروجی null یعنی فایل frontmatter ندارد (فایل ناقص/دست‌نویس).
+ * Split YAML frontmatter from the Markdown body.
+ * A null result means the file has no frontmatter (partial / hand-written file).
  */
 export function extractFrontmatter(md: string): { yaml: string; body: string } | null {
   const text = String(md);
   const m = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*/.exec(text);
   if (!m) return null;
-  // بدنه = باقی‌مانده‌ی فایل (نه گروهِ آخرین newline) — and tolerate the blank line after the fence
+  // body = the rest of the file (not the last-newline capture group) — and tolerate the blank line after the fence
   return { yaml: m[1], body: text.slice(m.index + m[0].length).replace(/^\r?\n/, "") };
 }
 
@@ -358,7 +372,7 @@ export function nodeToMarkdown(id: string, d: LCNodeData, position?: { x: number
     id,
     type: d.nodeType,
     title: d.title,
-    // موقعیت هم در فایل نود نوشته می‌شود تا فایل‌ها مستقل از graph.json قابل بازگردانی باشند (§3.4)
+    // position is written into the node file too, so files stay restorable without graph.json (§3.4)
     position: position ? { x: Math.round(position.x), y: Math.round(position.y), z: (position as { z?: number }).z ?? 0 } : "in graph.json",
     shape: d.shape,
     color: d.color,
@@ -371,8 +385,8 @@ export function nodeToMarkdown(id: string, d: LCNodeData, position?: { x: number
   if (d.agent) {
     fm.agent = {
       role_id: d.agent.role_id,
-      // پرامپت کامل نوشته می‌شود: فایل نود باید مستقل از graph.json قابل‌بازگردانی باشد (§1.3-۱).
-      // نسخهٔ قبلی به ۱۲۰ کاراکتر برش می‌داد و هویت ایجنت در مسیر «فقط فایل‌ها» گم می‌شد.
+      // the full prompt is written: the node file must be restorable on its own, without graph.json (§1.3-1).
+      // the previous version truncated to 120 characters and lost the agent identity in the files-only path.
       system_prompt: d.agent.system_prompt,
       model: d.agent.model,
       tools: d.agent.tools,
@@ -383,7 +397,7 @@ export function nodeToMarkdown(id: string, d: LCNodeData, position?: { x: number
       context_contract: d.agent.context_contract,
     };
   }
-  return frontmatter(fm, d.content || `# ${d.title}\n\nمحتوای نود «${d.title}».`);
+  return frontmatter(fm, d.content || `# ${d.title}\n\nNode content for "${d.title}".`);
 }
 
 export function edgeToYaml(id: string, source: string, target: string, d: LCEdgeData): string {
@@ -421,7 +435,7 @@ export const outputsIndexYaml = (nodeId: string, entries: OutputEntry[]) =>
 
 export const chatToMd = (nodeId: string, title: string, msgs: ChatMsg[]) => {
   const lines = msgs.map((m) => {
-    const who = m.role === "user" ? "کاربر" : m.role === "agent" ? `ایجنت (${title})` : "سیستم";
+    const who = m.role === "user" ? "User" : m.role === "agent" ? `Agent (${title})` : "System";
     return `## ${who} — ${fmtClock(m.at)}\n\n${m.text}`;
   });
   return frontmatter({ node_id: nodeId, message_count: msgs.length, updated_at: nowIso() }, lines.join("\n\n---\n\n"));
@@ -471,8 +485,8 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
   private cache = new LruCache(80);
   private mem = new Map<string, string>();
   /**
-   * تمام مسیرهایی که این سشن ساخته‌اند. تضمین می‌کند اگر IndexedDB در میانه‌ی
-   * کار از دست برود و به حالت حافظه‌ای بیفتیم، فهرست پوشه‌ها هنوز کامل باشد.
+   * Every path this session wrote. Guarantees that if IndexedDB is lost mid-session
+   * and we fall back to the memory adapter, the directory listings are still complete.
    */
   private seen = new Set<string>();
   private useMem = false;
@@ -582,7 +596,7 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
         r.onsuccess = () => resolve(r.result.map(String));
         r.onerror = () => reject(r.error);
       });
-      // seen را هم add کن تا فایل‌های نوشته‌شده بعد از آخرین flush جا نیفتند
+      // add to seen as well, so files written after the last flush are not dropped
       return [...new Set([...keys, ...this.seen])].sort();
     } catch {
       return [...new Set([...this.mem.keys(), ...this.seen])].sort();
@@ -603,12 +617,12 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
   }
 }
 
-/* ---------------- server adapter (§5.2 / §7.2 — فاز ۲) ----------------
- * همان رابط StorageAdapter روی HTTP؛ با پر کردن backendUrl در تنظیمات فعال می‌شود.
- * قرارداد endpoints (FastAPI):
+/* ---------------- server adapter (§5.2 / §7.2 — phase 2) ----------------
+ * The same StorageAdapter interface over HTTP; enabled by filling in backendUrl in Settings.
+ * Endpoint contract (FastAPI):
  *   GET / PUT / DELETE  {base}/api/canvases/{id}/files/{path}
  *   GET                 {base}/api/canvases/{id}/files?prefix=<dir>/  → JSON string[]
- *   DELETE              {base}/api/canvases/{id}   (بازنشانی کامل بوم)
+ *   DELETE              {base}/api/canvases/{id}   (full canvas reset)
  */
 export class HttpStorageAdapter implements StorageAdapter {
   private cache = new LruCache(120);
@@ -630,7 +644,7 @@ export class HttpStorageAdapter implements StorageAdapter {
     const res = await fetch(this.fileUrl(path), { method: "PUT", body: content });
     if (!res.ok) throw new Error(`write failed: ${path} (${res.status})`);
   }
-  /** فهرست خام سرور (مسیرهای کامل) — برای allPaths */
+  /** raw server listing (full paths) — backs allPaths */
   private async rawList(prefix: string): Promise<string[]> {
     try {
       const res = await fetch(`${this.base.replace(/\/$/, "")}/api/canvases/${this.canvasId}/files?prefix=${encodeURIComponent(prefix)}`);
@@ -641,7 +655,7 @@ export class HttpStorageAdapter implements StorageAdapter {
       return [];
     }
   }
-  /** بچه‌های مستقیم یک پوشه؛ سرور ممکن است مسیرهای بازگشتی بدهد پس نرمال می‌کنیم. */
+  /** direct children of a folder; a server may return full paths, so we normalise */
   async listDirectory(dir: string): Promise<string[]> {
     const prefix = dir === "" || dir === "." ? "" : dir.replace(/\/+$/, "") + "/";
     const rel = (await this.rawList(prefix)).map((p) => (p.startsWith(prefix) ? p.slice(prefix.length) : p));
@@ -676,9 +690,9 @@ export class HttpStorageAdapter implements StorageAdapter {
 }
 
 /**
- * آداپتر در حافظه — برای (۱) مرورگرهایی که IndexedDB ندارند یا آن را بلاک کرده،
- * (۲) پیش‌نمایش فایل‌های Import قبل از اعمال، و (۳) تست‌های node.
- * ساختار فایل‌محور را دقیقاً حفظ می‌کند تا listDirectory/hydrate قابل اتکا باشند.
+ * In-memory adapter — for (1) browsers without IndexedDB (or with it blocked),
+ * (2) previewing Import files before applying them, and (3) node tests.
+ * It preserves the file-first structure exactly, so listDirectory/hydrate stay trustworthy.
  */
 export class MemoryStorageAdapter implements StorageAdapter {
   private files = new Map<string, string>();
@@ -717,9 +731,9 @@ export class MemoryStorageAdapter implements StorageAdapter {
 }
 
 /* ---------------- YAML reader ----------------
- * خواننده‌ی block-YAML در همان اندازه‌ای که `toYaml` ما تولید می‌کند:
- * مپ‌های تودرتو، مقادیر اسکالر، و لیست (از جمله لیست آبجکت‌ها).
- * flow-style / anchor / multiline scalar پشتیبانی نمی‌شوند — چون هرگز تولیدشان نمی‌کنیم.
+ * A block-YAML reader scoped to exactly what our `toYaml` produces:
+ * nested maps, scalars and lists (including lists of objects).
+ * flow style / anchors / multiline scalars are unsupported — we never emit them.
  */
 type YamlLine = { indent: number; text: string };
 
@@ -743,14 +757,14 @@ function yamlScalar(v: string): unknown {
     return q[2]
       .replace(/\\"/g, '"')
       .replace(/\\n/g, "\n")
-      .replace(/\\r/g, "")
+      .replace(/\\r/g, "\r")
       .replace(/\\t/g, "\t")
       .replace(/\\\\/g, "\\");
   }
   return t;
 }
 
-/** @returns آبجکت پارس‌شده، یا null اگر ورودی قابل‌خواندن نباشد (فایل دستی/خراب). */
+/** @returns the parsed object, or null if the input is not readable (hand-written / broken file). */
 export function parseYaml(src: string): Record<string, unknown> | null {
   try {
     const lines = yamlLines(src);
@@ -780,7 +794,7 @@ export function parseYaml(src: string): Record<string, unknown> | null {
       while (i < lines.length && lines[i].indent === indent && lines[i].text.startsWith("- ")) {
         const first = lines[i].text.slice(2).trim();
         if (/^[^:]+:(\s|$)/.test(first)) {
-          // آیتم آبجکتی: «- key: value» و ادامه‌ی کلیدها با same indent+2
+          // object item: "- key: value", with following keys at the same indent+2
           const obj: Record<string, unknown> = {};
           const colon = first.indexOf(":");
           obj[first.slice(0, colon).trim()] = yamlScalar(first.slice(colon + 1));
@@ -806,19 +820,20 @@ export function parseYaml(src: string): Record<string, unknown> | null {
   }
 }
 
-/** استخراج frontmatter یک فایل Markdown (§3.4) و پارس آن. */
+/** Read and parse the frontmatter of a node Markdown file (§3.4). */
 export function readFrontmatterYaml(md: string): { yaml: Record<string, unknown> | null; body: string } {
   const fm = extractFrontmatter(md);
   if (!fm) return { yaml: null, body: String(md).trim() };
   return { yaml: parseYaml(fm.yaml), body: fm.body.trim() };
 }
 
-/** مرجع پایدار برای سلکتورهای خالی — جلوگیری از حلقه‌ی رندر بی‌نهایت (useSyncExternalStore) */
+/** Stable reference for empty selectors — avoids an infinite render loop (useSyncExternalStore) */
 export const EMPTY_ARR: never[] = [];
 
 /**
- * اگر IndexedDB وجود نداشته باشد (حالت خصوصی Safari / محیط SSR / jsdom بدون polyfill)
- * به آداپتر حافظه‌ای می‌افتیم — وگرنه خطای ساخت در module-load کل بوم را می‌اندازد.
+ * If IndexedDB is missing (Safari private mode / SSR / jsdom without a polyfill)
+ * we fall back to the memory adapter — otherwise a constructor error at module load
+ * would take the whole canvas down.
  */
 export function createDefaultStorage(dbName = "living-canvas"): StorageAdapter {
   const hasIdb = typeof indexedDB !== "undefined" && indexedDB !== null;
@@ -831,14 +846,14 @@ export function createDefaultStorage(dbName = "living-canvas"): StorageAdapter {
 
 export let storage: StorageAdapter = createDefaultStorage();
 
-/** تعویض زنده‌ی آداپتر — importکننده‌ها به‌لطف live binding نسخه‌ی جدید را می‌بینند */
+/** Live swap of the adapter — importers see the new one thanks to ESM live bindings */
 export function setStorage(s: StorageAdapter) {
   storage = s;
 }
 
 /**
- * نام مخزن فعال. در حالت پوشه (`fs`) فایل‌ها روی دیسک‌اند و File Tree
- * باید از خودِ درخت خوانده شود، نه از state.
+ * Name of the active store. In folder mode (`fs`) the files live on disk and the File Tree
+ * must read the tree itself, not the state.
  */
 export function storageMode(): "idb" | "fs" | "http" | "memory" {
   const a = storage;
