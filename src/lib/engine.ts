@@ -1046,10 +1046,24 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
   const s = api.get();
   const node = getNode(s, nodeId);
   if (!node) return;
-  // chat_with_user is a capability the contract grants, not a service the UI always provides (§9)
+  // chat_with_user is a capability the contract grants, not a service the UI always provides (§9).
+  // The refusal is about the *reply*: the user's own message is still recorded, because the chat file
+  // is the canvas's record of what was asked (Law 1) — dropping it would hide a question from history.
   if (node.data.agent && !hasTool(node.data.agent, "chat_with_user")) {
-    emit(api, "validation.failed", `chat_with_user is not in the tools of “${nodeId}” — the message never reached the agent`);
-    toast(api, "warn", "This agent has no chat_with_user tool, so it will not answer here.");
+    const why = `chat_with_user is not in the tools of “${nodeId}”, so this agent does not answer here. Its own log and memory are unaffected.`;
+    api.set((st) => ({
+      chats: {
+        ...st.chats,
+        [nodeId]: [
+          ...(st.chats[nodeId] ?? []),
+          { role: "user" as const, text, at: nowIso() },
+          { role: "agent" as const, text: why, at: nowIso() },
+        ],
+      },
+    }));
+    await storage.writeFile(`${ROOT}/chats/chat-${nodeId}.md`, chatToMd(nodeId, node.data.title, api.get().chats[nodeId] ?? []));
+    emit(api, "validation.failed", `chat refused: ${why}`);
+    toast(api, "warn", "No chat_with_user tool on this agent — the message was saved, but it will not answer.");
     return;
   }
   const msg: ChatMsg = { role: "user", text, at: nowIso() };

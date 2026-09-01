@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { setStorage, storage, MemoryStorageAdapter } from "../core";
 import {
-  evalCondition, numericScope, isPathAllowed, computeOrder, hasTool, unknownTools, MemoryManager, runPipeline,
+  evalCondition, numericScope, isPathAllowed, computeOrder, hasTool, unknownTools, MemoryManager, runPipeline, sendChat,
 } from "../engine";
 import {
   CANVAS_ID, emptyExecution, makeAgentConfig, makeEdgeData, makeNodeData,
@@ -295,6 +295,26 @@ describe("runPipeline — the contract gates what a node reads, writes and may d
     expect(ledger).toContain("**run completed**");
     // the ledger is a file, so it survives a reload: nothing in state is required to see it
     expect(api.peek().nodes.every((n) => n.data.agent?.status !== "running")).toBe(true);
+  });
+});
+
+describe("chat_with_user — the gate refuses the reply, not the record", () => {
+  it("still saves the user's message and explains the refusal", async () => {
+    const { api } = await twoAgentGraph({ b: { tools: ["read_memory", "write_memory", "write_output"] } });
+    await sendChat(api, "b", "what does the risk report mean?");
+    const chat = await read("chats/chat-b.md");
+    expect(chat).toContain("what does the risk report mean?");
+    expect(chat).toContain("chat_with_user is not in the tools");
+    expect(api.peek().typing["b"]).toBeFalsy();
+    expect(api.peek().events.some((e) => e.type === "validation.failed" && e.message.includes("chat refused"))).toBe(true);
+  });
+
+  it("answers normally when the role has the tool", async () => {
+    const { api } = await twoAgentGraph({ a: { tools: ["read_memory", "write_memory", "write_output", "chat_with_user"] } });
+    await sendChat(api, "a", "hello?");
+    const chat = await read("chats/chat-a.md");
+    expect(chat).not.toContain("chat refused");
+    expect(chat.split("## ").length).toBeGreaterThanOrEqual(3); // user + agent
   });
 });
 

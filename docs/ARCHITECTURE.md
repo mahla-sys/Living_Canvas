@@ -160,11 +160,11 @@ src/
 ├── index.css                   342  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
 │   ├── core.ts                 865  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety
-│   ├── engine.ts              2018  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
+│   ├── engine.ts              2032  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             439  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            343  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             1206  L   90 tests in 6 files (§7)
+│   └── __tests__/             1226  L   92 tests in 6 files (§7)
 └── components/
     ├── CanvasArea.tsx           729  L   ★ React Flow: node shapes, drawing layer, approval banner
     ├── SidePanels.tsx          839  L   ★ library/files tabs, file tree, live folder tree, inspector
@@ -172,7 +172,7 @@ src/
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **8 709 lines** in 21 files (8 367 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **8 743 lines** in 20 files (8 401 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 `scripts/check-english.mjs` is not a dependency: a plain node script that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -398,7 +398,7 @@ Notable behaviour living here (small but load-bearing):
 - `openStorageFile(path)` reads the file **through the adapter**, not from state, in folder mode — so the
   File Tree shows bytes on disk, including files the app did not write.
 
-## 3.4 `src/lib/engine.ts` (2018 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (2032 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
@@ -417,14 +417,14 @@ engine functions so engine never imports zustand. Sections, in file order:
 | **run ledger** | `startLedger` 504, `ledgerRow` 519, `endLedger` 540 | `runs/<run-id>.md`, one row per step: read-modify-write so a reload extends the same file, capped at 300 rows, closed with `**run completed/stopped/rejected**`. Format: §4.13 |
 | **execution** | `findStart` 662, `executeNode` 669, `runPipeline` 926, `runSingle` 952, `resumeRun` 968, `rejectRun` 977, `stopRun` 985, `resetExecution` 1001 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node |
 | **contract matching** | `isPathAllowed` 564, `numericScope` 575, `evalCondition` 593 | one matcher for `allowed_read_paths` and `allowed_write_paths`: a directory entry (trailing `/`), an exact path, or a glob over **one** segment (`outputs/*/summary.md`). `evalCondition` is fail-closed and returns `{ ok, reason }` — see §5.8. `numericScope` lifts a node's numeric output fields into `execution.context`, so a condition reads data, not prose |
-| **chat** | `sendChat(api,nodeId,text)` 1045 | appends to `chats/chat-<id>.md`; the simulated replies are per-role |
-| **snapshots** | `takeSnapshot(api,label,quiet)` 1092, `restoreSnapshot(api,id)` 1113 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
-| **strokes** | `clusterStrokes(strokes,gap=80)` 1157, `addStroke` 1194, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1226 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
-| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1253, `deleteNode` 1286, `createEdge` 1306, `deleteEdge` 1318 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
-| **loaders** | `loadStrokes` 1328, `loadTemplates` 1347, `pickMemory`/memory reads 1367, **`hydrate(api)`** 1137 | `hydrate` is the heart — see §5.2 |
-| **workspace** | `seedWorkspace(api)` 1456, `initWorkspace(api)` 1526, `reloadFromStorage` 1542, `resetWorkspace` 1556 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds |
-| **templates/roles** | `saveTemplate(api,name)` 1575, `loadTemplate(api,id)` 1631, `saveRoleFromNode(api,nodeId)` 1689 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
-| **portability** | `applyRootHandle` 1774, `attachWorkspaceFolder` 1788, `detachWorkspaceFolder` 1805, `pickCanvasFolder` 1816, `exportBundleText` 1838, `exportToJsonFile` 1852, `exportToFolder` 1868, `ImportPreview` 1889, `previewImportText` 1922, `applyImport` 1929, `importFromText` 1953, `importFromFolder` 1962, `importFromFile` 1992, `maybeResumeWorkspace` 2003 | see §5.5-§5.8 |
+| **chat** | `sendChat(api,nodeId,text)` 1045 | appends to `chats/chat-<id>.md`; the simulated replies are per-role. A node without `chat_with_user` in `tools` still gets the user's message recorded, followed by an explicit refusal line — the gate stops the *reply*, never the record |
+| **snapshots** | `takeSnapshot(api,label,quiet)` 1106, `restoreSnapshot(api,id)` 1127 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
+| **strokes** | `clusterStrokes(strokes,gap=80)` 1171, `addStroke` 1208, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1240 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
+| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1267, `deleteNode` 1300, `createEdge` 1320, `deleteEdge` 1332 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
+| **loaders** | `loadStrokes` 1342, `loadTemplates` 1361, `pickMemory`/memory reads 1367, **`hydrate(api)`** 1137 | `hydrate` is the heart — see §5.2 |
+| **workspace** | `seedWorkspace(api)` 1470, `initWorkspace(api)` 1540, `reloadFromStorage` 1556, `resetWorkspace` 1570 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds |
+| **templates/roles** | `saveTemplate(api,name)` 1589, `loadTemplate(api,id)` 1645, `saveRoleFromNode(api,nodeId)` 1703 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
+| **portability** | `applyRootHandle` 1788, `attachWorkspaceFolder` 1802, `detachWorkspaceFolder` 1819, `pickCanvasFolder` 1830, `exportBundleText` 1852, `exportToJsonFile` 1866, `exportToFolder` 1882, `ImportPreview` 1903, `previewImportText` 1936, `applyImport` 1943, `importFromText` 1967, `importFromFolder` 1976, `importFromFile` 2006, `maybeResumeWorkspace` 2017 | see §5.5-§5.8 |
 
 ## 3.5 `src/lib/portable.ts` (439 lines) — the bundle and the file-first rebuild
 
@@ -999,13 +999,13 @@ selector returning a fresh array/object re-renders forever. Every empty fallback
 | `ActivityConsole` | `events` (cap 250) | `toggleConsole` |
 
 Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Enter in "save template").
-There are no canvas shortcuts, no focus rings on nodes, no `aria-live` on toasts — see §9.8.
+There are no canvas shortcuts, no focus rings on nodes, no `aria-live` on toasts — see §9.9.
 
 ---
 
 # 7. Immune system — tests
 
-`npx vitest run` → **6 files, 90 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **6 files, 92 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
 Every test runs the **production** functions — no re-implementations. `src/lib/test-helpers.ts` exists so a
 test cannot accidentally grow its own serialiser (that is how a fixture hides a bug).
 
@@ -1015,7 +1015,7 @@ test cannot accidentally grow its own serialiser (that is how a fixture hides a 
 | `portable.test.ts` | 22 | bundle round-trip identity; escaping paths rejected; non-string content rejected; newer `version` rejected; foreign canvas skipped with a reason; missing manifest = warning; long/multiline `system_prompt` survives; files-only rebuild (nodes/edges/memory, canvas title, no truncation); a manual Obsidian edit wins; dangling edge dropped; locks not restored; `running→idle`, `done` kept; invalid colour/edge-type/clipped confidence; `parseYaml∘toYaml` identity; **YAML interop** (no bare flow mapping, no type drift for `"1.0"`) |
 | `fs-access.test.ts` | 13 | a Map-backed fake of the File System Access API: `toRelativePath` mapping and rejection; adapter CRUD + `listDirectory` + `allPaths` (files only, no dotfiles) + `..` throws + `clear` scoped; `ensureStructure` creation & idempotence; `writeFilesToDirectory` (valid files land, invalid ones are reported, prefix-escape rejected); `readCanvasFromDirectory` |
 | `roundtrip.test.ts` | 4 | seed → collect → bundle → parse → **compare file maps byte for byte**; hydration from real Markdown; the template-folder regression at workspace level; export *without* `graph.json`/`state.json` still rebuilds |
-| `execution.test.ts` | 27 | the run rules: `evalCondition` fail-closed (unsatisfied / unknown variable / unparsable / non-numeric data / string compare), `numericScope`, `isPathAllowed` (dir, exact, one-segment glob, no neighbour leakage), `computeOrder` (diamond, disconnected, cycle, parallel edges, determinism, mid-graph start), `hasTool`/`unknownTools`; plus `runPipeline` end to end on a two-agent graph — an ungranted upstream path is not read, `write_output` missing makes the node fail with no output files, a conditional edge skips the node and logs the reason, the run ledger is written row by row and closed, and `MemoryManager.read` returns a granted `outputs/` file |
+| `execution.test.ts` | 29 | the run rules: `evalCondition` fail-closed (unsatisfied / unknown variable / unparsable / non-numeric data / string compare), `numericScope`, `isPathAllowed` (dir, exact, one-segment glob, no neighbour leakage), `computeOrder` (diamond, disconnected, cycle, parallel edges, determinism, mid-graph start), `hasTool`/`unknownTools`; plus `runPipeline` end to end on a two-agent graph — an ungranted upstream path is not read, `write_output` missing makes the node fail with no output files, a conditional edge skips the node and logs the reason, the run ledger is written row by row and closed, and `MemoryManager.read` returns a granted `outputs/` file |
 | `hydrate.test.ts` | 8 | the real `hydrate()` against `MemoryStorageAdapter`: no manifest → `false` and nothing deleted; custom template found after reload; several templates + neighbouring files; files-only mode builds the canvas; locked node not restored; `graph.json` supplies geometry while the file overrides title/content/prompt; broken `state.json` tolerated; the adapter in play is the adapter read (no stale cache between tests) |
 
 Rules for adding a test:
@@ -1091,7 +1091,14 @@ npm dependencies and a 40 MB tracked snapshot; nothing that ran automatically (t
    `nodes/pending.md`. Fix: pass the id in, no default agent at all.
 7. **`logs/<node>/<date>.log` vs `run.log` in prose.** The code shards logs by date; some legacy wording (and older
    notes) still says `run.log`. Cosmetic today, a wrong filename in someone else's reader tomorrow — pick one.
-8. no eslint/prettier config and no LICENSE file; a11y: no focus ring on canvas nodes, no keyboard traversal of the
+8. **Two edges from the enforcement pass that need a decision, not a patch.** (a) Pre-existing node files were
+   written before `makeAgentConfig` started granting `outputs/*/summary.md`, so an *older* agent node now reads no
+   upstream input until its `allowed_read_paths` gains that line — the run logs it (`blocked read — not in
+   allowed_read_paths`), which is honest, but it will look like a regression to anyone with a canvas from last week.
+   Options: a one-time contract bump on hydrate (writes into user files: ugly), or a "grant predecessors' summaries"
+   button in the inspector (explicit: it edits the file, which is the point). (b) `runs/` has no pruning policy —
+   one small file per run, forever. Snapshots have the same problem (§9.3); solve them together, with keep-last-N.
+9. no eslint/prettier config and no LICENSE file; a11y: no focus ring on canvas nodes, no keyboard traversal of the
    graph, toasts are not announced, draw mode has no escape-to-cancel (only the ✕ button), modals do not trap focus.
 
 ---
@@ -1206,7 +1213,7 @@ create files in `.github/workflows/` (a GitHub App permission, not a code proble
 `cp ci/github-actions.yml .github/workflows/ci.yml`. Until that lands there is no automation guarding `main`, so whoever
 merges runs the four commands by hand.
 
-No lint step and no formatter config (§9.8) — adding
+No lint step and no formatter config (§9.9) — adding
 one is a decision, not a cleanup, because it would reformat 8.7k lines in one commit. If you add one, match the four
 conventions already in use: double quotes, semicolons, 2-space indent, ~120 column soft limit, `/* */` section
 banners inside long files.
