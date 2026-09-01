@@ -6,6 +6,8 @@ Two rules decide where a sentence belongs, and they are the whole design of this
    — one home, no restatement. Everything else here links into it and never copies it.
 2. **A document earns its place by naming what it changes.** A doc with no code reference, no test and no
    decision attached is an idea, and ideas live in `notes/ideas.md`.
+3. **If a sentence has no home, it goes to `inbox.md` with its cost attached.** Unplaced is not the same as
+   deleted: a question that was silently dropped is a decision nobody made, arriving later as a bug report.
 
 Restating is the failure mode this folder is built against. The project spent a phase with two files describing
 one graph (`graph.json` and `nodes/*.md`) and the fix was deletion, not a better precedence rule
@@ -23,12 +25,14 @@ bug wearing prose: so one home per fact, links instead of copies, and a gate tha
 | `research/` | dated synthesis, read once and cited | authority: evidence, not a spec |
 | `notes/ideas.md` | everything not yet a decision, including product identity | decision language ("accepted", "decided") |
 | `archive/` | superseded docs, each naming what replaced it | silence about why it died |
+| `ui-spec.md` | what the interface must **look like**, row by row: value + storage location + status | the mechanism behind it; a taste without a number |
+| `inbox.md` | every open question and every idea with no home, ranked by the cost of not answering | content that already has a home |
 
 ## Format, and the gate that enforces it
 
-Every doc under a content directory (`decisions/`, `patterns/`, `roadmap/`, `research/`, `notes/`) opens with
-frontmatter that starts at byte zero — no leading blank line, which is how a `phase` field silently stops
-existing:
+Every doc under a content directory (`decisions/`, `patterns/`, `roadmap/`, `research/`, `notes/`) and every
+file at the root of `docs/` except this map and `ARCHITECTURE.md` opens with frontmatter starting at byte zero —
+no leading blank line, which is how a `phase` field silently stops existing:
 
     title: Hard output validation
     status: accepted
@@ -48,13 +52,26 @@ Also enforced, because conventions without checks last a month: `status` must be
 `decisions/README.md`, and **`phase:` is banned everywhere** — scheduling is a filename in `roadmap/`, so
 moving a commitment between phases is a one-line edit instead of a corpus-wide sweep.
 
+`related:` is optional and, like every other key, a single inline list — the parser understands
+`related: [a, b]` and nothing else, on purpose: a format that cannot hold a hidden second truth is a feature here.
+
 Run it with `node scripts/check-docs.mjs`; CI runs it next to the other two repository gates
 (`docs/ARCHITECTURE.md#11.3`).
 
 ## Language
 
-Everything tracked here is English — code, comments, UI strings, tests, docs — because `scripts/check-english.mjs`
-fails on RTL or bidi text in any tracked file. Persian design conversation is welcome; it happens outside the
-repository, which is also where the original Persian design documents live (`Living_Canvas-main/` at the repo
-root, git-ignored). The alternative — a bilingual corpus — was weighed and rejected: half of every document
-would be un-gated, and the documents that drift are the ones nobody can check.
+`docs/` may be Persian. The owner is the reader, and a document that gets read is worth more than a document
+that is uniform — so the corpus is bilingual by decision: `ARCHITECTURE.md`, this map and the ADRs written before
+the ruling stay English, `ui-spec.md` and `inbox.md` are Persian, and a new file may be either.
+
+What did **not** change: code, comments, UI strings and tests are English, because a tool that reads the
+repository (`scripts/doc-anchors.mjs`, a grep, an agent with no locale) should never have to transliterate.
+`scripts/check-english.mjs` enforces exactly that split — RTL script is rejected in every tracked path outside
+`docs/`, and **bidi control characters (U+200B, U+200F/200E, U+202A–202E, U+2066–2069) are rejected everywhere,
+`docs/` included**. A Persian document is welcome; a Persian document carrying an invisible override is a
+different class of failure — the one that corrupts diffs, `grep` and another AI's reading of a line. The single
+exception is **U+200C ZWNJ, allowed in `docs/` and banned outside it**: Persian cannot be spelled without the
+non-joiner, so in `docs/` it is orthography, and anywhere else it is a bug.
+
+Nobody is translating the existing English documents. Rewriting a doc that is already true costs more than
+reading one in a language you already read; the money goes into the documents that do not exist yet.

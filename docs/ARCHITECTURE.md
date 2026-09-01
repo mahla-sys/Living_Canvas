@@ -1,6 +1,7 @@
 # Living Canvas — Architecture
 
-**Version 1.4 (handoff edition) · 2026-09-01 · language: English, everywhere (code, UI, docs, tests)**
+**Version 1.5 (handoff edition) · 2026-09-01 · language: English in code, UI, tests and this file —
+`docs/` may be Persian (§8); invisible bidi characters are banned in every path**
 
 This document is written for a reader who **does not have the repository open**. It is meant to be
 sufficient on its own: every module, every file format, every flow, every invariant. When this text and
@@ -23,7 +24,7 @@ and you can reason about any change. Level 3+ is the detail you come back for wh
 | **Next ring** | `10` open questions, `11` legacy anchors | decisions waiting for the owner |
 
 Naming convention in the repo: files and identifiers are English; Persian digits (`U+06F0-U+06F9`) and RTL markup
-are **not** allowed anywhere in the app. There are zero `dir="rtl"`, zero `toLocaleString("fa-IR")`,
+are **not** allowed anywhere in the app (documents under `docs/` may be Persian — see §8). There are zero `dir="rtl"`, zero `toLocaleString("fa-IR")`,
 zero Persian string literals in `src/` — the LTR layout is the layout.
 
 ---
@@ -1073,6 +1074,10 @@ executed node (`quiet=true`, no toast).
 
 # 6. Skin — UI anatomy (what is on screen, and where the data comes from)
 
+This section is the *description of what renders*. What the interface **should** look like — every pixel, state and
+stored setting, as a row-by-row spec — is `docs/ui-spec.md`, and the two never trade jobs: a number that changes the
+appearance goes there, a mechanism that makes it renderable goes here.
+
 Direction: **LTR**, English only. Fonts: Inter (body), Space Grotesk (display), IBM Plex Mono (paths, ids,
 numbers). Palette is defined once as Tailwind v4 `@theme` tokens in `src/index.css` — 12 ink shades
 (`ink-50` lightest → `ink-950` background) plus 7 accents:
@@ -1176,12 +1181,16 @@ Written down so nobody "helpfully" adds them back:
 - **No auto-retry in the executor**, no background queue, no optimistic LLM calls.
 - **No CSS framework other than Tailwind v4 tokens**; no component kit (they bring their own opinions about
   direction, density and focus, and this UI is deliberately dense).
-- **No i18n layer, and no RTL text anywhere in the repository — `docs/` included.** English is the source language; there is no translation table and that is a decision,
-  not an oversight. Design conversation in another language is fine and happens *outside* the repo; a doc folder
-  where half the files are un-gated is how a corpus ends up with two truths about the same mechanism (see
-  `docs/decisions/adr-002-graph-json-deleted.md` for what that cost in code). Adding one means deciding what gets localised (dates/numbers via `Intl` — the code
-  currently avoids `Intl` for exactly that reason). `scripts/check-english.mjs` fails CI on any RTL-script or bidi-control
-  character in a tracked file, so this stays a rule rather than a habit.
+- **No i18n layer.** English is the source language of the app and there is no translation table; that is a decision,
+  not an oversight, and it stays true: `src/` carries zero Persian literals and zero `dir="rtl"`. Adding localisation
+  means deciding what gets localised (dates/numbers via `Intl` — the code currently avoids `Intl` for exactly that reason).
+- **RTL script is confined to `docs/`.** Documents may be written in Persian, because the person who reads them owns the
+  project and a doc that is read is worth more than a corpus that is uniform — an earlier "English everywhere" rule was
+  replaced by this one on 2026-09-01 (see `docs/README.md#Language`). What is banned in every tracked file, `docs/`
+  included, is the invisible kind: U+200B, U+200D–200F, U+202A–202E, U+2066–2069. Those are not a language, they are a
+  corrupted line: they break `grep`, diffs and anyone's re-reading of a sentence, and no tool will explain them later.
+  U+200C (ZWNJ) is the one deliberate exception — required to spell Persian, allowed in `docs/`, rejected outside it.
+  `scripts/check-english.mjs` enforces all of that, so this stays a rule rather than a habit.
 - **Not a multiplayer doc.** No CRDT, no awareness, no per-file locking. `lock` is an execution mutex, not a
   collaboration primitive. Do not let it grow into one.
 
@@ -1348,7 +1357,7 @@ npm test            vitest run            → 7 files / 118 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~527 kB js / 163 kB gzip (chunk ceiling 600)
-node scripts/check-english.mjs   English-only gate: scans `git ls-files`, exits 1 on any RTL/bidi character
+node scripts/check-english.mjs   language gate: RTL script only outside docs/; invisible bidi chars anywhere
 node scripts/doc-anchors.mjs     rewrites the `name 412` line anchors in §3.4 from src/lib/engine.ts (--check = exit 1)
 node scripts/check-docs.mjs      the doc map's gate: frontmatter, legal statuses, every reference resolving
 ```
@@ -1378,6 +1387,8 @@ split that keeps a reference usable by someone who cannot read the code:
 | when? | `docs/roadmap/phase-N.md` | the sole owner of scheduling; `- [x]` requires a test file |
 | what did the research say? | `docs/research/summaries/` | dated, sourced, and evidence rather than a spec |
 | what is not decided? | `docs/notes/ideas.md` | ideas, costs, and no decision language |
+| what must it look like? | `docs/ui-spec.md` | one row per claim: value + storage + status; never the mechanism |
+| where does this go? | `docs/inbox.md` | anything with no home, ranked by the cost of not answering |
 
 The map with the full rules is `docs/README.md`; the gate that keeps it honest is `scripts/check-docs.mjs`, which
 resolves every path, symbol and section anchor a document cites, refuses a shipped claim with no test behind it,

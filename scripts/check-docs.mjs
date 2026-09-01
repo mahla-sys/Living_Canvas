@@ -10,12 +10,14 @@
      - every file path or symbol named in a doc must resolve in the repository
      - every shipped claim (`- [x]`) must name a guard: a test file, a doc, or a script
      - `status` values are per directory; a superseded decision must name its successor
+     - a doc at the root of `docs/` (a spec, an inbox — anything that is neither map nor mechanism) is held to
+       the same discipline as a directory: frontmatter, a legal status, a body cap
      - `phase:` is banned everywhere — scheduling is a filename under docs/roadmap/
      - an ADR is short by construction (40 body lines), because a decision that needs 100 lines is a spec
 
      node scripts/check-docs.mjs          # report; exit 1 on any violation
 
-   Deliberately dumb: no YAML dependency, flat `key: value` frontmatter only, and `sources: [a, b]` lists.
+   Deliberately dumb: no YAML dependency, flat `key: value` frontmatter with inline `[a, b]` lists only.
    If a doc needs richer metadata, that is a signal the doc is becoming a database.
    ============================================================ */
 import { readFileSync, existsSync } from "node:fs";
@@ -36,6 +38,11 @@ const STATUS = {
   notes: ["active", "frozen"],
 };
 const BODY_CAP = { decisions: 40, patterns: 80, roadmap: 60, research: 140, notes: 120 };
+/* docs/ root: the map (README) and the mechanism (ARCHITECTURE) are exempt; anything else standing there is a
+   spec or a queue, and an un-gated one is exactly how a corpus grows a shadow half. Generous cap, because a
+   row-per-decision reference is a table, not an essay — past ~180 lines it is two documents. */
+const ROOT_STATUS = ["draft", "active", "proposed", "frozen", "superseded"];
+const ROOT_CAP = 180;
 
 /* ---- repository index, so citations are checked against what actually exists ----
    `--others --exclude-standard` on purpose: a gate that only sees committed files cannot be run by the person
@@ -120,7 +127,9 @@ for (const file of docs) {
     fail(file, "tracked but unreadable");
     continue;
   }
-  const dir = file.split("/")[1] ?? "";
+  const parts = file.split("/");
+  const isRootDoc = parts.length === 2;
+  const dir = isRootDoc ? "" : parts[1] ?? "";
   const lines = body.split("\n");
 
   /* frontmatter — the leading-blank-line bug is a real one, so byte zero matters */
@@ -146,8 +155,9 @@ for (const file of docs) {
     if (phaseLine >= 0) fail(file, "`phase:` is banned in docs/ — scheduling lives in the roadmap filename (`docs/roadmap/README.md`)");
 
     const status = meta.get("status");
-    const allowed = STATUS[dir];
-    if (status && allowed && !allowed.includes(status)) fail(file, `status “${status}” is not legal under ${dir}/ (allowed: ${allowed.join(", ")})`);
+    const allowed = isRootDoc ? ROOT_STATUS : STATUS[dir];
+    if (status && allowed && !allowed.includes(status))
+      fail(file, `status “${status}” is not legal ${isRootDoc ? "at the root of docs/" : `under ${dir}/`} (allowed: ${allowed.join(", ")})`);
     if (status === "superseded" && !meta.get("superseded_by")) fail(file, "a superseded decision must name its successor (`superseded_by:`)");
     const upd = meta.get("updated");
     if (upd && !/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(upd))
@@ -165,8 +175,9 @@ for (const file of docs) {
 
     /* body length: an ADR is short by construction */
     const bodyLines = lines.slice(end + 1).filter((l) => l.trim()).length;
-    const cap = BODY_CAP[dir];
-    if (cap && bodyLines > cap) fail(file, `body is ${bodyLines} non-empty lines, the cap for ${dir}/ is ${cap}`);
+    const cap = isRootDoc ? ROOT_CAP : BODY_CAP[dir];
+    if (cap && bodyLines > cap)
+      fail(file, `body is ${bodyLines} non-empty lines, the cap for ${isRootDoc ? "a docs/ root doc" : `${dir}/`} is ${cap}`);
   }
 
   /* every citation in the prose must resolve — this is the whole reason the file exists */

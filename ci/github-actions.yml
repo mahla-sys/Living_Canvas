@@ -1,4 +1,4 @@
-# Living Canvas CI definition. This repository is English-only and the agent account that maintains
+# Living Canvas CI definition. This repository keeps its code in English and the agent account that maintains
 # the branch cannot write under .github/workflows/ (GitHub App permission), so the file lives here.
 # To activate:  cp ci/github-actions.yml .github/workflows/ci.yml && git add .github/workflows
 #
@@ -25,7 +25,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - name: English-only repository check
+      - name: language check (RTL confined to docs/, no bidi controls anywhere)
         run: node scripts/check-english.mjs
       - name: Documentation references resolve
         run: node scripts/check-docs.mjs

@@ -10,7 +10,10 @@ competing with the node files, and `state.json` is a cache that nothing is allow
 The consequence that defines the design: **you can open the canvas folder in Obsidian or edit it with Git,
 and the app reads your edits back.** Files are the source of truth; in-memory state is a cache of them.
 
-> Everything in this repository is English — code, comments, UI strings, tests, docs. The UI is LTR.
+> Code, comments, UI strings and tests are English, and the UI is LTR. `docs/` may be Persian — the owner reads
+> it there. Invisible bidi characters are banned in every tracked file (U+200B, U+200D–200F, U+202A–202E,
+> U+2066–2069); U+200C is allowed in `docs/` only, because Persian cannot be spelled without it.
+> `scripts/check-english.mjs` enforces exactly that line.
 
 ---
 
@@ -22,13 +25,14 @@ npm run dev         # http://localhost:3000  (binds 0.0.0.0, accepts any host fo
 npm test            # vitest run — 7 files / 118 tests, no jsdom, no extra config file
 npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
 npm run build       # tsc --noEmit && vite build — types are part of the build
-node scripts/check-english.mjs   # the English-only rule, as CI runs it
+node scripts/check-english.mjs   # the language rule above, as CI runs it
+node scripts/check-docs.mjs      # docs/ gate: frontmatter, legal statuses, every citation resolving
 node scripts/doc-anchors.mjs     # regenerate the line anchors in ARCHITECTURE.md §3.4 (--check to gate)
 ```
-CI is committed as `ci/github-actions.yml` (typecheck → test → build → English gate). Activating it is one command:
+CI is committed as `ci/github-actions.yml` (typecheck → test → build → language gate → docs gate). Activating it is one command:
 `cp ci/github-actions.yml .github/workflows/ci.yml`. The agent account on this branch is not allowed to create files
 under `.github/workflows/` (a GitHub App permission), so that copy needs someone with repository access. Until it
-lands, the four commands above are the gate.
+lands, the five commands above are the gate.
 
 ## Read it
 
@@ -82,8 +86,16 @@ shape is yours to draw, the guarantees above are what the app brings.
 `Living_Canvas-main/` is the original snapshot of the project (its own `src/` and three long Persian design
 documents: architecture, UI/UX spec, Nexus+City concept). It is **not built and not canonical**; `docs/ARCHITECTURE.md`
 supersedes it, and §11.1 of that document maps every `§` reference in the code comments to the section that
-now explains it. The snapshot and its `Living_Canvas-main.zip` archive are **no longer tracked** — they are git-ignored local
-material, so a fresh clone contains only the live app. The archive was repacked down to its reference material
-(25 files, ~123 KB) after `node_modules` and build output were stripped out of it; the design documents inside
-it are the point, and they are unmodified. Re-add them with `git add -f` if the
-history of the design documents is ever needed in the repository again.
+now explains it.
+
+The snapshot is git-ignored, so the live tree contains only the app. There used to be a `Living_Canvas-main.zip`
+next to it as well; it is deleted, on purpose — an archive of files that are already on disk, sitting beside the
+files, is how a repository grows a copy nobody remembers to update. Nothing is lost: the snapshot is still tracked
+on `main`, so a working copy is one command away.
+
+```bash
+git archive origin/main Living_Canvas-main | tar -x    # restore the ignored snapshot (~469 KB)
+```
+
+Its three design documents are unmodified and untranslated, in Persian, and they stay that way: they are history,
+not spec. `docs/` is where the live ones are — in whatever language each of them is easiest to read.

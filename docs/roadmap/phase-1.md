@@ -27,7 +27,7 @@ is `npx vitest run` (118 tests in 7 files) plus the three repository gates
 - [x] a fresh canvas is structure, not a demo pipeline (`hydrate.test.ts`, `docs/ARCHITECTURE.md#5.3`)
 - [x] memory conflict rule: strictly-higher confidence wins, and says so (`execution.test.ts`)
 - [x] chat is gated by `chat_with_user`, and the question is still recorded (`execution.test.ts`)
-- [x] English-only repository, as a gate rather than a habit (`scripts/check-english.mjs`)
+- [x] the language rule is a gate, not a habit: English in code/UI/tests, RTL confined to `docs/`, bidi controls nowhere (`scripts/check-english.mjs`)
 - [x] CI definition committed, activation pending one human step (`ci/github-actions.yml`)
 - [x] line anchors in the architecture doc regenerate and are checked (`scripts/doc-anchors.mjs`)
 - [x] dependencies: four runtime libraries, the unused ones pruned (`docs/ARCHITECTURE.md#2`)
