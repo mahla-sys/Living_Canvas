@@ -153,18 +153,18 @@ instead of growing the exceptions.
 
 ```
 src/
-├── main.tsx                    101  L   boot, global error surface, React error boundary
+├── main.tsx                    100  L   boot, global error surface, React error boundary
 ├── App.tsx                      38  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
 ├── state.ts                    451  L   ★ constants, types re-exports, factories, seed workspace data
 ├── store.ts                    381  L   ★ zustand store + Actions façade (the only UI-facing API)
-├── index.css                   ~345  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
+├── index.css                   342  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
-│   ├── core.ts                 851  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety
+│   ├── core.ts                 865  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety
 │   ├── engine.ts              1769  L   ★ all behaviour: events, files, run, memory, strokes, portability
 │   ├── portable.ts             439  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            340  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/              748  L   61 tests in 5 files (§7)
+│   └── __tests__/              887  L   63 tests in 5 files (§7)
 └── components/
     ├── CanvasArea.tsx           729  L   ★ React Flow: node shapes, drawing layer, approval banner
     ├── SidePanels.tsx          839  L   ★ library/files tabs, file tree, live folder tree, inspector
@@ -172,7 +172,7 @@ src/
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **~6.6k lines**, 14 files.
+★ = the file you must understand before changing that area. Total: **8 115 lines** in 20 files (7 773 of it TypeScript).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
 `index.html` script tag other than the module entry.
 
@@ -185,7 +185,7 @@ decision that must not change behaviour (§10 Q3).
 
 # 3. Branches — one section per module
 
-## 3.1 `src/lib/core.ts` (851 lines) — types, serialisers, storage, HTML safety
+## 3.1 `src/lib/core.ts` (865 lines) — types, serialisers, storage, HTML safety
 
 No imports from inside the project. This is the only file allowed to know how a file looks on disk and how
 a folder is listed. Six sections, in this order:
@@ -988,8 +988,11 @@ Ordered by how much they will cost to fix later. The first four are **blockers b
    tool list is decorative. There is no function-calling loop: the model is asked for a JSON-ish blob and the
    fields are parsed out. Phase 2's tool use must start by making `tools` real (dispatch table + permission
    check against the contract), not by adding a provider.
-4. **`validateOutput` is unfailable** (it only checks that `required_fields` are non-empty strings) and
-   `library/schemas/*.schema.json` is never read — `output_contract.validator` points at a file nobody loads.
+4. **`validateOutput` is unfailable** (it only checks that `required_fields` are non-empty strings) and the
+   validator it pretends to use does not exist: every role writes `validator: "schemas/<role>.schema.json"`
+   into its output contract (`engine.ts:1237`, `:1458`), but no `schemas/` directory is seeded and nothing
+   reads that field. Either seed the schema files and validate against them, or delete the field — a
+   documented-but-nonexistent validator is worse than none, because agents (and humans) will trust it.
    Either wire a JSON-schema validator or delete the field; a documented-but-unused validator is the worst
    of both.
 5. `risk_score` is hardcoded to 5 in the conditional-edge demo, so `{{ risk_score < 7 }}` always passes —
@@ -1024,8 +1027,8 @@ These are the decisions that change the shape of the thing, so they should be ma
 document, before the code moves. My recommendation is attached to each; the ones marked ⚑ are the ones I
 would not start phase 2 without.
 
-⚑ **Q1 — Where does the file contract become load-bearing?** Today `library/schemas/*.schema.json` is
-unreferenced and `validateOutput` cannot fail. Two coherent futures: (a) *canvas as editor* — keep
+⚑ **Q1 — Where does the file contract become load-bearing?** Today the schema field in every role points
+at a file that does not exist, and `validateOutput` cannot fail. Two coherent futures: (a) *canvas as editor* — keep
 validation soft, delete the schema promise, ship phase 2 as "tools that propose diffs"; (b) *canvas as
 orchestrator* — schemas become the contract between agents, validation is hard, and an output that fails
 schema stops the run (and the node shows the error inline). (b) is what the docs imply and what the
@@ -1108,8 +1111,8 @@ translation table into this document:
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
 npm test            vitest run            → 5 files / 63 tests
 npm run test:watch
-npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails the build)
-npm run build       vite build    → ~517 kB js / 159 kB gzip (chunk ceiling 600)
+npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
+npm run build       tsc --noEmit && vite build → ~517 kB js / 159 kB gzip (chunk ceiling 600)
 ```
 
 No lint step, no formatter config (§9.11). If you add one, make it match the four conventions already in use:

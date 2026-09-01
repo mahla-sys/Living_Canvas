@@ -19,7 +19,7 @@ npm install
 npm run dev         # http://localhost:3000  (binds 0.0.0.0, accepts any host for sandboxed previews)
 npm test            # vitest run — 5 files / 63 tests, no jsdom, no extra config file
 npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
-npm run build
+npm run build       # tsc --noEmit && vite build — types are part of the build
 ```
 
 ## Read it
