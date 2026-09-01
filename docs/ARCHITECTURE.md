@@ -183,6 +183,10 @@ the two scripts in `scripts/` are not dependencies either: plain node files that
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
 `index.html` script tag other than the module entry.
 
+`docs/` is not in that tree because it is not part of the app: it is a map, an index of decisions, a roadmap and
+a research shelf, described in `docs/README.md` and policed by `scripts/check-docs.mjs`. This file stays the only
+place a mechanism is written down.
+
 Two files are large on purpose (`engine.ts`, `core.ts`) — they are the places where "one writer, one
 reader" can be enforced by eye. They are internally sectioned with `/* ---------------- name ---------------- */`
 banners, and the sections are the real module boundaries: splitting them into more files is a *later*
@@ -1172,8 +1176,10 @@ Written down so nobody "helpfully" adds them back:
 - **No auto-retry in the executor**, no background queue, no optimistic LLM calls.
 - **No CSS framework other than Tailwind v4 tokens**; no component kit (they bring their own opinions about
   direction, density and focus, and this UI is deliberately dense).
-- **No i18n layer, and no RTL text anywhere in the repository.** English is the source language; there is no translation table and that is a decision,
-  not an oversight. Adding one means deciding what gets localised (dates/numbers via `Intl` — the code
+- **No i18n layer, and no RTL text anywhere in the repository — `docs/` included.** English is the source language; there is no translation table and that is a decision,
+  not an oversight. Design conversation in another language is fine and happens *outside* the repo; a doc folder
+  where half the files are un-gated is how a corpus ends up with two truths about the same mechanism (see
+  `docs/decisions/adr-002-graph-json-deleted.md` for what that cost in code). Adding one means deciding what gets localised (dates/numbers via `Intl` — the code
   currently avoids `Intl` for exactly that reason). `scripts/check-english.mjs` fails CI on any RTL-script or bidi-control
   character in a tracked file, so this stays a rule rather than a habit.
 - **Not a multiplayer doc.** No CRDT, no awareness, no per-file locking. `lock` is an execution mutex, not a
@@ -1344,6 +1350,7 @@ npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~527 kB js / 163 kB gzip (chunk ceiling 600)
 node scripts/check-english.mjs   English-only gate: scans `git ls-files`, exits 1 on any RTL/bidi character
 node scripts/doc-anchors.mjs     rewrites the `name 412` line anchors in §3.4 from src/lib/engine.ts (--check = exit 1)
+node scripts/check-docs.mjs      the doc map's gate: frontmatter, legal statuses, every reference resolving
 ```
 
 Those checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**` — including the anchor gate,
@@ -1351,9 +1358,29 @@ because a reference document is only worth having if nothing can quietly make it
 **`ci/github-actions.yml`** rather than under `.github/`, because the agent connection maintaining this branch may not
 create files in `.github/workflows/` (a GitHub App permission, not a code problem). Activating it is one human commit:
 `cp ci/github-actions.yml .github/workflows/ci.yml`. Until that lands there is no automation guarding `main`, so whoever
-merges runs the four commands by hand.
+merges runs the commands above by hand.
 
 No lint step and no formatter config (§9.9) — adding
 one is a decision, not a cleanup, because it would reformat 9.3k lines in one commit. If you add one, match the four
 conventions already in use: double quotes, semicolons, 2-space indent, ~120 column soft limit, `/* */` section
 banners inside long files.
+
+## 11.4 Who writes what (the `docs/` map)
+
+This document answers *how*; it deliberately does not answer *why* or *when*, and that is not a gap — it is the
+split that keeps a reference usable by someone who cannot read the code:
+
+| question | home | rule |
+|---|---|---|
+| how does it work? | **here** | the only place a mechanism is written |
+| why was it decided? | `docs/decisions/adr-0NN-….md` | ≤ 40 lines, `proposed` / `accepted` / `superseded`, no mechanism restated |
+| what should we build next, and what is missing today? | `docs/patterns/` | a proposal must name the code or test it touches |
+| when? | `docs/roadmap/phase-N.md` | the sole owner of scheduling; `- [x]` requires a test file |
+| what did the research say? | `docs/research/summaries/` | dated, sourced, and evidence rather than a spec |
+| what is not decided? | `docs/notes/ideas.md` | ideas, costs, and no decision language |
+
+The map with the full rules is `docs/README.md`; the gate that keeps it honest is `scripts/check-docs.mjs`, which
+resolves every path, symbol and section anchor a document cites, refuses a shipped claim with no test behind it,
+and bans a `phase` field outside the roadmap. It exists because a folder of prose about code, written by readers
+without code access, is exactly the shape of artifact that rots silently — and a stale doc is worse than none,
+since it is believed.
