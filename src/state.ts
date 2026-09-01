@@ -196,10 +196,10 @@ export const ROLES: RoleDef[] = [
     name: "Risk analysis",
     description: "Finds the risks of the proposed solution and scores them",
     system_prompt:
-      "You are the \"Risk analysis\" agent. Your input is the problem statement from the previous node. List the main risks, score each from 1 to 10, and recommend one overall decision (reject / revise / approve). Output contains summary, risks and decision.",
+      "You are the \"Risk analysis\" agent. Your input is the problem statement from the previous node. List the main risks, score each from 1 to 10, and recommend one overall decision (reject / revise / approve). Output contains summary, risks, decision and a single numeric risk_score (1-10) for the whole proposal.",
     model: "deepseek-chat",
     tools: ["read_memory", "write_memory", "write_output"],
-    required_fields: ["summary", "risks", "decision"],
+    required_fields: ["summary", "risks", "decision", "risk_score"],
   },
   {
     id: "solution-designer",
@@ -229,10 +229,18 @@ export const roleById = (id: string) => ROLES.find((r) => r.id === id) ?? ROLES[
 
 const iso = () => new Date().toISOString();
 
-export function makeAgentConfig(nodeId: string, roleId: string, opts?: Partial<AgentConfig>): AgentConfig {
+/**
+ * Overrides for a node's agent config. `context_contract` is partial on purpose: the UI and the tests
+ * edit one list at a time, and `makeAgentConfig` merges it onto the role defaults (see below).
+ */
+export type AgentConfigOverrides = Partial<Omit<AgentConfig, "context_contract">> & {
+  context_contract?: Partial<NonNullable<AgentConfig["context_contract"]>>;
+};
+
+export function makeAgentConfig(nodeId: string, roleId: string, opts?: AgentConfigOverrides): AgentConfig {
   const role = roleById(roleId);
   const extraRead = opts?.context_contract?.allowed_read_paths ?? [];
-  return {
+  const base: AgentConfig = {
     role_id: role.id,
     system_prompt: role.system_prompt,
     model: role.model,
@@ -246,6 +254,9 @@ export function makeAgentConfig(nodeId: string, roleId: string, opts?: Partial<A
         "canvas-overview.md",
         `nodes/${nodeId}.md`,
         `memory/agents/${nodeId}.md`,
+        // a fresh agent node may read its predecessors' summaries — but the grant is explicit in the
+        // file (one-segment glob), so tightening it is an edit, not a code change (§9)
+        "outputs/*/summary.md",
         ...extraRead,
       ],
       allowed_write_paths: [`outputs/${nodeId}/`, `memory/agents/${nodeId}.md`, `logs/${nodeId}/`],
@@ -255,8 +266,20 @@ export function makeAgentConfig(nodeId: string, roleId: string, opts?: Partial<A
         save_to: `outputs/${nodeId}/`,
       },
     },
-    ...opts,
   };
+  // A partial override merges instead of replacing: `...opts` alone meant a caller that narrowed one
+  // list silently dropped the other two, and an empty allowed_write_paths denies every write (§9).
+  const { context_contract: c, ...rest } = opts ?? {};
+  const merged: AgentConfig = { ...base, ...rest };
+  if (c)
+    merged.context_contract = {
+      ...base.context_contract,
+      ...c,
+      allowed_read_paths: c.allowed_read_paths ?? base.context_contract.allowed_read_paths,
+      allowed_write_paths: c.allowed_write_paths ?? base.context_contract.allowed_write_paths,
+      output_contract: { ...base.context_contract.output_contract, ...(c.output_contract ?? {}) },
+    };
+  return merged;
 }
 
 export function makeNodeData(
@@ -357,7 +380,7 @@ export function buildSeed(owner: string) {
           "outputs/node-001/", "memory/decisions.md",
         ],
         allowed_write_paths: ["outputs/node-002/", "memory/agents/node-002.md", "logs/node-002/"],
-        output_contract: { format: "markdown", required_fields: ["summary", "risks", "decision"], save_to: "outputs/node-002/" },
+        output_contract: { format: "markdown", required_fields: ["summary", "risks", "decision", "risk_score"], save_to: "outputs/node-002/" },
       },
     }),
   });

@@ -302,10 +302,13 @@ export async function writeFilesToDirectory(
 /**
  * Creates the §2 skeleton inside a folder (empty one or a fresh Git clone).
  * Harmless by design: existing folders change nothing.
+ *
+ * `runs/` is the append-only run ledger (one file per run); a hand-made vault gets it too so the
+ * tree the app writes and the tree the user sees stay the same shape.
  */
 export const CANVAS_SUBDIRS = [
   "nodes", "edges", "strokes", "chats", "outputs", "memory/agents",
-  "history", "logs", "library/shapes", "library/roles", "library/templates", "assets",
+  "history", "logs", "runs", "library/shapes", "library/roles", "library/templates", "assets",
 ];
 
 export async function ensureStructure(dir: FsDirHandle, relRoot = ""): Promise<string[]> {

@@ -17,10 +17,14 @@ and the app reads your edits back.** Files are the source of truth; in-memory st
 ```bash
 npm install
 npm run dev         # http://localhost:3000  (binds 0.0.0.0, accepts any host for sandboxed previews)
-npm test            # vitest run — 5 files / 63 tests, no jsdom, no extra config file
+npm test            # vitest run — 6 files / 90 tests, no jsdom, no extra config file
 npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
 npm run build       # tsc --noEmit && vite build — types are part of the build
+node scripts/check-english.mjs   # the English-only rule, as CI runs it
 ```
+CI is prepared at `.github/workflows/ci.yml` (typecheck → test → build → English gate). It is on disk but
+uncommitted: the agent account used for this branch cannot write under `.github/workflows/`, so adding it takes one
+commit from someone with repository access. Until then, run the four commands above yourself before merging.
 
 ## Read it
 
@@ -64,5 +68,6 @@ src/
 `Living_Canvas-main/` is the original snapshot of the project (its own `src/` and three long Persian design
 documents: architecture, UI/UX spec, Nexus+City concept). It is **not built and not canonical**; `docs/ARCHITECTURE.md`
 supersedes it, and §11.1 of that document maps every `§` reference in the code comments to the section that
-now explains it. Trimming the snapshot (and the 40 MB `Living_Canvas-main.zip`) out of git is an open
-housekeeping decision, not a code one.
+now explains it. The snapshot and the 40 MB `Living_Canvas-main.zip` archive are **no longer tracked** — they are
+git-ignored local material, so a fresh clone contains only the live app. Re-add them with `git add -f` if the
+history of the design documents is ever needed in the repository again.

@@ -5,7 +5,7 @@
 import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  type BusEventType, type OutputEntry, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
+  type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
 } from "./core";
 import {
   FsAccessStorageAdapter, isFsAccessSupported, pickCanvasDirectory, ensurePermission,
@@ -203,6 +203,31 @@ function memDocAt(s: AppState, path: string, agentId?: string): MemDoc | null {
   }
 }
 
+const MAX_DOC_CHARS = 4000;
+
+/**
+ * An allowed path that is not one of the five memory documents still has to resolve, otherwise a
+ * contract that grants `outputs/node-002/summary.md` silently reads nothing. Directories and
+ * one-segment globs expand against the real tree; size is capped so a log file cannot eat the prompt.
+ */
+async function resolveAllowedFiles(entry: string, cap = 12): Promise<string[]> {
+  const all = await storage.allPaths().catch(() => [] as string[]);
+  const out: string[] = [];
+  for (const full of all) {
+    if (!full.startsWith(ROOT + "/")) continue;
+    const rel = full.slice(ROOT.length + 1);
+    if (!isPathAllowed([entry], rel)) continue;
+    if (rel === "graph.json" || rel === "state.json") continue; // caches are not agent input
+    try {
+      const text = await storage.readFile(full);
+      const body = text.length > MAX_DOC_CHARS ? text.slice(0, MAX_DOC_CHARS) + "\n… (truncated)" : text;
+      out.push(`### ${rel}\n\n${body.trim()}`);
+      if (out.length >= cap) break;
+    } catch { /* unreadable — the contract granted it, the file is simply not there */ }
+  }
+  return out;
+}
+
 export const MemoryManager = {
   /** Read Path §6.2 — only paths inside allowed_read_paths */
   async read(api: EngineApi, agentId: string, query?: string): Promise<string[]> {
@@ -225,6 +250,13 @@ export const MemoryManager = {
           touched.agents = { ...(touched.agents ?? s.memory.agents), [agentId]: fresh };
       }
     }
+    // paths outside the five memory documents resolve against the real files (§9): the contract is
+    // the only gate, so "outputs/node-002/summary.md" works while an ungranted path stays invisible.
+    for (const p of contract.allowed_read_paths) {
+      if (memDocAt(s, p, agentId)) continue;
+      const extra = await resolveAllowedFiles(p);
+      for (const one of extra) results.push(one);
+    }
     api.set((st) => ({ memory: { ...st.memory, ...touched } }));
     if (query) {
       const q = query.trim();
@@ -242,7 +274,7 @@ export const MemoryManager = {
     if (!agent) return false;
     const path = targetPath ?? `memory/agents/${agentId}.md`;
     // 1) access check against context_contract (§9)
-    if (!agent.context_contract.allowed_write_paths.some((p) => path.startsWith(p))) {
+    if (!isPathAllowed(agent.context_contract.allowed_write_paths, path)) {
       emit(api, "validation.failed", `write to ${path} denied for ${agentId} — outside allowed_write_paths`);
       return false;
     }
@@ -342,6 +374,7 @@ export const FIELD_DESC: Record<string, string> = {
   solution: "executable solution",
   next_actions: "next actions",
   approval_request: "human approval request",
+  risk_score: "overall risk score from 1 to 10 — a number, so a conditional edge can read it",
 };
 
 function validateOutput(entries: OutputEntry[], required: string[]): string[] {
@@ -391,6 +424,7 @@ function simFields(roleId: string, title: string, upstream: string, owner: strin
         summary: `Three main risks were identified for “${title}”. Analysis input from the previous node: ${up}`,
         risks: `- risk 1: dependence on teacher availability — severity 6\n- risk 2: technical complexity of instant feedback — severity 5\n- risk 3: motivation drop in the pilot — severity 4\n\nTotal risk score: **5 out of 10** (acceptable with fixes)`,
         decision: `Conditional approval: continue the path with a revision of step two. No risk exceeds the threshold of 7.`,
+        risk_score: "5",
       };
     case "solution-designer":
       return {
@@ -408,7 +442,10 @@ function simFields(roleId: string, title: string, upstream: string, owner: strin
 }
 
 function buildEntries(nodeId: string, required: string[], fields: Record<string, string>): OutputEntry[] {
-  const entries: OutputEntry[] = required.map((f) => ({
+  // only fields that carry content become files. Manufacturing an empty file for a field the model
+  // never returned is what made validateOutput structurally unable to fail (§9).
+  const present = required.filter((f) => String(fields[f] ?? "").trim().length > 0);
+  const entries: OutputEntry[] = present.map((f) => ({
     file: `${f}.md`,
     type: f === "summary" ? "summary" : "detailed",
     description: FIELD_DESC[f] ?? f,
@@ -426,46 +463,200 @@ function buildEntries(nodeId: string, required: string[], fields: Record<string,
   return entries;
 }
 
+/* ---------------- tools ---------------- */
+
+/**
+ * The vocabulary a role may list in `tools`. `get_canvas_overview` and `get_agent_brief` are the
+ * harness itself (read-only, canvas-scoped, never triggered by a model), so they are always on;
+ * every other capability has to be granted in the node's agent.md.
+ *
+ * A name outside this list is still stored and shown, but never executed — see `hasTool`. The real
+ * dispatch table (name → execute(args)) arrives with function calling, where the model picks the
+ * tool; until then the executor is the only caller and a `Tool` interface would be decoration.
+ */
+export const TOOL_NAMES = ["get_canvas_overview", "get_agent_brief", "read_memory", "write_memory", "chat_with_user", "write_output"] as const;
+export type ToolName = (typeof TOOL_NAMES)[number];
+const HARNESS_TOOLS: string[] = ["get_canvas_overview", "get_agent_brief"];
+
+export function hasTool(agent: AgentConfig | null | undefined, name: ToolName): boolean {
+  if (!agent) return false;
+  const list = agent.tools ?? [];
+  return HARNESS_TOOLS.includes(name) || list.includes(name);
+}
+
+/** Tools a role lists that this app does not implement — reported in the log, not silently ignored. */
+export function unknownTools(agent: AgentConfig | null | undefined): string[] {
+  if (!agent) return [];
+  return (agent.tools ?? []).filter((t) => !(TOOL_NAMES as readonly string[]).includes(t));
+}
+
+/* ---------------- run ledger (§4.1 runs/) ---------------- */
+
+const LEDGER_HEADER = "| # | node | tool / step | status | detail |\n| --- | --- | --- | --- | --- |";
+const LEDGER_MAX_ROWS = 300;
+
+function ledgerPath(api: EngineApi): string | null {
+  const runId = api.get().execution.run_id;
+  return runId ? `${ROOT}/runs/${runId}.md` : null;
+}
+
+/** Open runs/<run-id>.md — the file is the record of a run, so the UI can be closed and reopened. */
+export async function startLedger(api: EngineApi, note: string) {
+  const path = ledgerPath(api);
+  if (!path) return;
+  const ex = api.get().execution;
+  await storage.writeFile(path, frontmatter(
+    { run_id: ex.run_id, canvas_id: CANVAS_ID, started_at: ex.started_at ?? nowIso(), queued: ex.queue.length, app: APP_VERSION },
+    `# Run ${ex.run_id}\n\n${note}\n\n${LEDGER_HEADER}\n`
+  ));
+  emit(api, "file.written", `run ledger opened: ${path.slice(ROOT.length + 1)}`);
+}
+
+/**
+ * One row per step, read-modify-write: a reload in the middle of a run must extend the same file
+ * rather than overwrite it. Rows are capped so a long run cannot grow the ledger without bound.
+ */
+export async function ledgerRow(api: EngineApi, row: { node?: string; tool: string; status: string; detail?: string }) {
+  const path = ledgerPath(api);
+  if (!path) return;
+  let text = "";
+  try {
+    text = await storage.readFile(path);
+  } catch {
+    text = `# Run ${api.get().execution.run_id}\n\n(recovered after a reload)\n\n${LEDGER_HEADER}\n`;
+  }
+  if (!text.includes("| # |")) text = text.trimEnd() + "\n\n" + LEDGER_HEADER + "\n";
+  const n = (text.match(/^\| \d+ \|/gm) ?? []).length + 1;
+  const cell = (x: string | undefined) => String(x ?? "—").replace(/\|/g, "/").replace(/\n+/g, " ").slice(0, 140);
+  text += `| ${n} | ${cell(row.node)} | ${cell(row.tool)} | ${cell(row.status)} | ${cell(row.detail)} |\n`;
+  const lines = text.split("\n");
+  if (lines.length > LEDGER_MAX_ROWS + 16)
+    text = lines.slice(0, 8).concat(["… (older rows dropped) …"], lines.slice(-(LEDGER_MAX_ROWS - 8))).join("\n");
+  await storage.writeFile(path, text);
+  emit(api, "file.written", `run ledger: ${text.split("\n").length - 8} row(s) in ${path.slice(ROOT.length + 1)}`);
+}
+
+/** Close the ledger: a reader must be able to tell how the run ended. */
+export async function endLedger(api: EngineApi, status: string, detail: string) {
+  const path = ledgerPath(api);
+  if (!path) return;
+  let text = "";
+  try { text = await storage.readFile(path); } catch { return; }
+  await storage.writeFile(path, text.trimEnd() + `\n\n**run ${status}** — ${detail}, ${nowStamp()}\n`);
+  emit(api, "file.written", `run ledger closed (${status}): ${path.slice(ROOT.length + 1)}`);
+}
+
 /* ---------------- execution (§7.1) ---------------- */
 
 const FLOW_TYPES = ["flow", "event-flow", "blackboard"];
 
-function evalCondition(cond: string, ctx: Record<string, unknown>): boolean {
-  const m = cond.match(/\{\{\s*([a-zA-Z_]\w*)\s*(<=|>=|==|!=|<|>)\s*([\d.]+)\s*\}\}/);
-  if (!m) return true;
-  const left = Number(ctx[m[1]]);
-  if (Number.isNaN(left)) return true;
-  const right = Number(m[3]);
-  switch (m[2]) {
-    case "<": return left < right;
-    case ">": return left > right;
-    case "<=": return left <= right;
-    case ">=": return left >= right;
-    case "==": return left === right;
-    case "!=": return left !== right;
-    default: return true;
+/**
+ * Contract path matching (§9). An entry is one of:
+ *   "outputs/node-002/"      a directory — everything under it
+ *   "memory/agents/x.md"      an exact path
+ *   "outputs/" + "*" + "/summary.md"  a glob over exactly one path segment
+ * Globs keep the contract useful *and* explicit: the grant is visible in the file, so
+ * narrowing it is an edit rather than a code change.
+ */
+const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Contract path matching for a relative canvas path. See the rules above the signature. */
+export function isPathAllowed(entries: string[], path: string): boolean {
+  return entries.some((raw) => {
+    const e = String(raw ?? "");
+    if (!e) return false;
+    if (e.endsWith("/")) return path.startsWith(e);
+    if (!e.includes("*")) return e === path;
+    const re = new RegExp("^" + e.split("*").map(escapeRe).join("[^/]+") + "$");
+    return re.test(path);
+  });
+}
+/** A previous step's numeric output field is data, so conditional edges can read it. */
+export function numericScope(fields: Record<string, string>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(fields ?? {})) {
+    const m = /^\s*(-?\d+(?:\.\d+)?)\s*$/.exec(String(v ?? ""));
+    if (m) out[k] = Number(m[1]);
   }
+  return out;
 }
 
-function computeOrder(s: AppState, startId: string): string[] {
-  const order: string[] = [];
-  const visited = new Set<string>([startId]);
-  let frontier = [startId];
-  order.push(startId);
-  while (frontier.length) {
-    const next: string[] = [];
-    for (const id of frontier) {
-      for (const e of s.edges) {
-        if (e.source === id && !visited.has(e.target) && FLOW_TYPES.includes(e.data?.edgeType ?? "flow")) {
-          visited.add(e.target);
-          order.push(e.target);
-          next.push(e.target);
-        }
-      }
-    }
-    frontier = next;
+export interface CondResult { ok: boolean; reason?: string }
+
+/**
+ * `trigger.type === "condition"` evaluation (§7.1) — **fail-closed**.
+ * A condition we cannot parse, or that names a variable no completed step produced, blocks the
+ * edge. Reason: a blocked edge is visible (the node is skipped and the log says why), while a
+ * wrongly-passed one runs the rest of the pipeline on top of nothing. The old version returned
+ * `true` for both cases.
+ */
+export function evalCondition(raw: string, ctx: Record<string, unknown>): CondResult {
+  const body = String(raw ?? "").trim().replace(/^\{\{\s*/, "").replace(/\s*\}\}$/, "").trim();
+  const m = /^([A-Za-z_]\w*)\s*(<=|>=|==|!=|<|>)\s*(.+)$/.exec(body);
+  if (!m) return { ok: false, reason: `unparsable condition “${raw}” — expected {{ field <op> value }}` };
+  const [, key, op, rhsRaw] = m;
+  if (!(key in ctx)) return { ok: false, reason: `“${key}” was never produced by a completed step` };
+  const left = ctx[key];
+  const quoted = /^(['"])(.*)\1$/.exec(rhsRaw.trim());
+  if (quoted) {
+    const want = quoted[2];
+    const got = String(left);
+    if (op === "==") return got === want ? { ok: true } : { ok: false, reason: `${key} = “${got}”, not “${want}”` };
+    if (op === "!=") return got !== want ? { ok: true } : { ok: false, reason: `${key} is “${want}”` };
+    return { ok: false, reason: `${op} cannot compare strings (${key})` };
   }
-  return order;
+  const l = Number(left);
+  const r = Number(rhsRaw.trim());
+  if (!Number.isFinite(l) || !Number.isFinite(r))
+    return { ok: false, reason: `${key} is not a number (${JSON.stringify(left)}) — numeric comparison needs data` };
+  const ok =
+    op === "<" ? l < r : op === ">" ? l > r : op === "<=" ? l <= r : op === ">=" ? l >= r : op === "==" ? l === r : l !== r;
+  return ok ? { ok: true } : { ok: false, reason: `${key} = ${l} does not satisfy ${op} ${r}` };
+}
+
+/**
+ * Run order over flow edges (§7.1). This is Kahn's algorithm over **every** runnable node, not a
+ * BFS from the start. The old walk pushed the start first no matter where it sat in the graph (so a
+ * mid-canvas node ran before its own predecessors) and enqueued a join the first time it was touched
+ * (so a diamond ran on the weaker of its two inputs); a node the start could not reach never ran.
+ *
+ * Determinism matters because the files are the record: ties break on (created_at, id), so the same
+ * graph always produces the same order.
+ *
+ * `cyclic` lists nodes whose flow edges form a cycle — they have no valid position, are queued last,
+ * and the caller says so out loud instead of pretending they ran.
+ */
+export function computeOrder(s: AppState, startId: string): { order: string[]; cyclic: string[] } {
+  const runnable = s.nodes
+    .filter((n) => n.data.nodeType === "agent" || n.data.nodeType === "output-box")
+    .slice()
+    .sort((a, b) => (a.data.created_at || "").localeCompare(b.data.created_at || "") || a.id.localeCompare(b.id));
+  const ids = new Set(runnable.map((n) => n.id));
+  const indeg = new Map<string, number>(runnable.map((n) => [n.id, 0]));
+  const adj = new Map<string, string[]>(runnable.map((n) => [n.id, []]));
+  for (const e of s.edges) {
+    if (!FLOW_TYPES.includes(e.data?.edgeType ?? "flow")) continue;
+    if (!ids.has(e.source) || !ids.has(e.target)) continue;
+    if (adj.get(e.source)!.includes(e.target)) continue; // parallel edges must not count twice
+    adj.get(e.source)!.push(e.target);
+    indeg.set(e.target, indeg.get(e.target)! + 1);
+  }
+  const ready = runnable.filter((n) => indeg.get(n.id) === 0).map((n) => n.id);
+  // "Run from here" keeps its meaning: a start with no incoming flow edge goes first
+  const startIdx = ready.indexOf(startId);
+  if (startIdx > 0) { ready.splice(startIdx, 1); ready.unshift(startId); }
+  const order: string[] = [];
+  while (ready.length) {
+    const id = ready.shift()!;
+    order.push(id);
+    for (const nx of adj.get(id) ?? []) {
+      const left = indeg.get(nx)! - 1;
+      indeg.set(nx, left);
+      if (left === 0) ready.push(nx);
+    }
+  }
+  const cyclic = runnable.map((n) => n.id).filter((id) => !order.includes(id));
+  return { order: [...order, ...cyclic], cyclic };
 }
 
 export function findStart(s: AppState): RFNode | null {
@@ -501,8 +692,9 @@ async function executeNode(api: EngineApi, nodeId: string) {
     let steps = 0;
     const maxSteps = agent?.max_steps ?? 6;
 
-    // step 1 — overview (§9)
+    // step 1 — overview (§9): read-only, canvas-scoped, part of the harness rather than a granted tool
     await appendLog(api, nodeId, "tool get_canvas_overview → read canvas-overview.md");
+    await ledgerRow(api, { node: nodeId, tool: "get_canvas_overview", status: "ok", detail: "canvas-overview.md" });
     await guard(delay * 0.7);
     steps++;
 
@@ -510,26 +702,47 @@ async function executeNode(api: EngineApi, nodeId: string) {
     if (agent) {
       const role = roleById(agent.role_id);
       await appendLog(api, nodeId, `tool get_agent_brief → role “${role.name}” loaded (max_steps=${agent.max_steps})`);
+      await ledgerRow(api, { node: nodeId, tool: "get_agent_brief", status: "ok", detail: `role ${role.id}` });
       await guard(delay * 0.6);
       steps++;
     }
 
-    // step 3 — read_memory via MemoryManager
+    const unimplemented = unknownTools(agent);
+    if (unimplemented.length)
+      await appendLog(api, nodeId, `tools this app does not implement (ignored, not executed): ${unimplemented.join(", ")}`);
+
+    // step 3 — read_memory, only when the role was granted it (§9: the tools list used to be decorative)
     let memoryTxt = "";
-    if (agent) {
+    if (agent && hasTool(agent, "read_memory")) {
       const parts = await MemoryManager.read(api, nodeId);
       memoryTxt = parts.join("\n\n");
-      await appendLog(api, nodeId, `tool read_memory → ${agent.context_contract.allowed_read_paths.length} allowed paths read`);
+      await appendLog(api, nodeId, `tool read_memory → ${parts.length} allowed document(s) read`);
+      await ledgerRow(api, { node: nodeId, tool: "read_memory", status: "ok", detail: `${parts.length} documents` });
       await guard(delay * 0.6);
       steps++;
+    } else if (agent) {
+      await appendLog(api, nodeId, "read_memory is not in tools → skipped (§9)");
+      await ledgerRow(api, { node: nodeId, tool: "read_memory", status: "denied", detail: "not in agent.tools" });
     }
 
-    // upstream outputs (blackboard context §1.3-4)
-    const upstream = s0.edges
-      .filter((e) => e.target === nodeId && FLOW_TYPES.includes(e.data?.edgeType ?? "flow"))
-      .map((e) => api.get().outputs[e.source]?.find((o) => o.file === "summary.md")?.content ?? "")
-      .filter(Boolean)
-      .join("\n");
+    // upstream outputs (blackboard context §1.3-4) — through THIS node's read contract, never around it
+    const readPaths = agent?.context_contract.allowed_read_paths ?? [];
+    const upstreamParts: string[] = [];
+    const blockedReads: string[] = [];
+    for (const e of s0.edges) {
+      if (e.target !== nodeId || !FLOW_TYPES.includes(e.data?.edgeType ?? "flow")) continue;
+      const summary = api.get().outputs[e.source]?.find((o) => o.file === "summary.md");
+      if (!summary?.content) continue;
+      const path = `outputs/${e.source}/summary.md`;
+      if (agent && !isPathAllowed(readPaths, path)) { blockedReads.push(path); continue; }
+      upstreamParts.push(summary.content);
+    }
+    const upstream = upstreamParts.join("\n");
+    if (blockedReads.length) {
+      emit(api, "validation.failed", `${blockedReads.length} upstream output(s) are outside the read contract of “${nodeId}” and were not used: ${blockedReads.join(", ")}`);
+      await appendLog(api, nodeId, `blocked read — not in allowed_read_paths: ${blockedReads.join(", ")}`);
+      await ledgerRow(api, { node: nodeId, tool: "read_output", status: "denied", detail: blockedReads.join(", ") });
+    }
 
     // step 4 — generation
     await appendLog(api, nodeId, agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey
@@ -556,15 +769,23 @@ async function executeNode(api: EngineApi, nodeId: string) {
     steps++;
     if (steps > maxSteps) throw new Error("max_steps exceeded (§12.3)");
 
-    // step 5 — write_output + validation §3.6
+    // step 5 — write_output + validation §3.6. Delivering output is a capability: an agent that is
+    // not allowed to write cannot "succeed" by quietly producing nothing.
+    if (agent && !hasTool(agent, "write_output")) {
+      await appendLog(api, nodeId, "write_output is not in tools → the output contract cannot be delivered (§9)");
+      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "denied", detail: "not in agent.tools" });
+      throw new Error(`write_output is not permitted for ${nodeId}`);
+    }
     const entries = buildEntries(nodeId, required, fields);
     const missing = validateOutput(entries, required);
     if (missing.length) {
       emit(api, "validation.failed", `output of ${nodeId} is missing ${missing.join(", ")} — rejected`);
+      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "rejected", detail: `missing ${missing.join(", ")}` });
       throw new Error(`invalid output: ${missing.join(", ")}`);
     }
     await writeOutputs(api, nodeId, entries);
     await appendLog(api, nodeId, `tool write_output → validation passed (${required.length}/${required.length} fields)`);
+    await ledgerRow(api, { node: nodeId, tool: "write_output", status: "ok", detail: `${required.length}/${required.length} fields → ${agent?.context_contract.output_contract.save_to ?? "outputs/"}` });
     steps++;
 
     // step 6 — write_memory §6
@@ -575,16 +796,23 @@ async function executeNode(api: EngineApi, nodeId: string) {
       `- decisions taken: ${(fields.decision ?? fields.problem_statement ?? "").slice(0, 120).replace(/\n/g, " ")}`,
       `- notes for the next run: the required fields ${required.join(", ")} must always be in the output.`,
     ].join("\n");
-    await MemoryManager.write(api, nodeId, memLines, 0.8);
+    if (!agent || hasTool(agent, "write_memory")) {
+      await MemoryManager.write(api, nodeId, memLines, 0.8);
+      await ledgerRow(api, { node: nodeId, tool: "write_memory", status: "ok", detail: `memory/agents/${nodeId}.md at confidence 0.8` });
+    } else {
+      await appendLog(api, nodeId, "write_memory is not in tools → memory left untouched (§9)");
+      await ledgerRow(api, { node: nodeId, tool: "write_memory", status: "denied", detail: "not in agent.tools" });
+    }
 
-    // context update (blackboard)
+    // context update (blackboard): the summary plus every numeric output field becomes a variable, so a
+    // later conditional edge reads data instead of prose. No role is special-cased here (§7.1).
     api.set((st) => ({
       execution: {
         ...st.execution,
         context: {
           ...st.execution.context,
           [nodeId]: (fields.summary ?? "").slice(0, 200),
-          ...(agent?.role_id === "risk-analyst" ? { risk_score: 5 } : {}),
+          ...numericScope(fields),
         },
       },
     }));
@@ -617,6 +845,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
     patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow }, true);
     emit(api, "node.failed", `run of “${node.data.title}” failed: ${String(err)}`);
     await appendLog(api, nodeId, `error: ${String(err)}`);
+    await ledgerRow(api, { node: nodeId, tool: "execute_node", status: "failed", detail: String(err) });
     api.set((st) => ({ execution: { ...st.execution, status: "failed" } }));
     toast(api, "error", `Error in “${node.data.title}” — the run stopped`);
   }
@@ -655,6 +884,7 @@ async function processQueue(api: EngineApi) {
     if (ex.status !== "running") return;
     const nextId = ex.queue.find((q) => !ex.completed.includes(q));
     if (!nextId) {
+      await endLedger(api, "completed", `${api.get().execution.completed.length} of ${ex.queue.length} queued nodes done`);
       api.set((st) => ({ execution: { ...st.execution, status: "completed", current_node_id: null } }));
       emit(api, "run.completed", "the pipeline run completed successfully");
       toast(api, "success", "Pipeline finished — every output is saved ✓");
@@ -667,11 +897,18 @@ async function processQueue(api: EngineApi) {
     if (prev && prev !== nextId) {
       const edge = api.get().edges.find((e) => e.source === prev && e.target === nextId);
       const cond = edge?.data?.trigger;
-      if (cond?.type === "condition" && cond.condition && !evalCondition(cond.condition, ex.context)) {
-        emit(api, "system", `edge condition “${cond.condition}” was not met — ${nextId} skipped`);
-        await appendLog(api, nextId, `skipped: condition ${cond.condition} is not satisfied`);
-        api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nextId] } }));
-        continue;
+      if (cond?.type === "condition" && cond.condition) {
+        const verdict = evalCondition(cond.condition, ex.context);
+        if (!verdict.ok) {
+          // fail-closed (§7.1): an unparsable condition or a variable nobody produced blocks the edge.
+          // The reason goes to the log so "not satisfied" and "cannot be evaluated" stay tellable apart.
+          emit(api, "validation.failed", `edge ${prev} → ${nextId} blocked: ${verdict.reason ?? "condition not met"}`);
+          await appendLog(api, nextId, `skipped: ${verdict.reason ?? `condition ${cond.condition} is not satisfied`}`);
+          await ledgerRow(api, { node: nextId, tool: "edge_condition", status: "blocked", detail: `${cond.condition} — ${verdict.reason ?? ""}` });
+          api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nextId] } }));
+          continue;
+        }
+        await ledgerRow(api, { node: nextId, tool: "edge_condition", status: "ok", detail: cond.condition });
       }
     }
     const node = getNode(api.get(), nextId);
@@ -697,13 +934,16 @@ export async function runPipeline(api: EngineApi) {
     toast(api, "error", "No agent node to run.");
     return;
   }
-  const order = computeOrder(s, start.id);
+  const { order, cyclic } = computeOrder(s, start.id);
   api.set({
     execution: {
       ...emptyExecution(), run_id: uid("run"), status: "running",
       queue: order, started_at: nowIso(),
     },
   });
+  await startLedger(api, `Full pipeline run from “${start.data.title}”.`);
+  if (cyclic.length)
+    emit(api, "validation.failed", `flow edges form a cycle through ${cyclic.join(", ")} — no valid order exists for those nodes; they are queued last`);
   emit(api, "run.started", `pipeline started from “${start.data.title}” — ${order.length} nodes queued`);
   toast(api, "info", `Run started — ${order.length} nodes queued`);
   await processQueue(api);
@@ -717,6 +957,7 @@ export async function runSingle(api: EngineApi, nodeId: string) {
   }
   api.set({ execution: { ...emptyExecution(), run_id: uid("run"), status: "running", queue: [nodeId], started_at: nowIso() } });
   emit(api, "run.started", `single-node run: ${nodeId}`);
+  await startLedger(api, `Single-node run of ${nodeId}.`);
   await executeNode(api, nodeId);
   const ex = api.get().execution;
   if (ex.status === "running")
@@ -734,6 +975,7 @@ export async function resumeRun(api: EngineApi) {
 }
 
 export function rejectRun(api: EngineApi) {
+  void endLedger(api, "rejected", "the decision was rejected before the queue drained");
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
   emit(api, "run.stopped", "the decision was rejected by the user — run stopped");
   toast(api, "info", "Decision rejected and the run stopped.");
@@ -748,6 +990,7 @@ export function stopRun(api: EngineApi) {
     const ag = n?.data.agent;
     patchNode(api, cur, { lock: { status: "free", locked_by: null, locked_at: null }, agent: ag ? { ...ag, status: ag.status === "running" ? "idle" : ag.status } : ag }, true);
   }
+  void endLedger(api, "stopped", "the user pressed stop before the queue drained");
   // invalidating run_id makes any in-flight node abort at its next guard (§12.5)
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
   emit(api, "run.stopped", "run stopped by the user");
@@ -803,6 +1046,12 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
   const s = api.get();
   const node = getNode(s, nodeId);
   if (!node) return;
+  // chat_with_user is a capability the contract grants, not a service the UI always provides (§9)
+  if (node.data.agent && !hasTool(node.data.agent, "chat_with_user")) {
+    emit(api, "validation.failed", `chat_with_user is not in the tools of “${nodeId}” — the message never reached the agent`);
+    toast(api, "warn", "This agent has no chat_with_user tool, so it will not answer here.");
+    return;
+  }
   const msg: ChatMsg = { role: "user", text, at: nowIso() };
   api.set((st) => ({ chats: { ...st.chats, [nodeId]: [...(st.chats[nodeId] ?? []), msg] } }));
   api.set((st) => ({ typing: { ...st.typing, [nodeId]: true } }));

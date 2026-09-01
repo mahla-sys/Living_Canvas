@@ -155,16 +155,16 @@ instead of growing the exceptions.
 src/
 ├── main.tsx                    100  L   boot, global error surface, React error boundary
 ├── App.tsx                      38  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
-├── state.ts                    451  L   ★ constants, types re-exports, factories, seed workspace data
+├── state.ts                    474  L   ★ constants, types re-exports, factories, seed workspace data
 ├── store.ts                    381  L   ★ zustand store + Actions façade (the only UI-facing API)
 ├── index.css                   342  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
 │   ├── core.ts                 865  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety
-│   ├── engine.ts              1769  L   ★ all behaviour: events, files, run, memory, strokes, portability
+│   ├── engine.ts              2018  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             439  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
-│   ├── fs-access.ts            340  L   ★ File System Access adapter, ensureStructure, read/write a folder
+│   ├── fs-access.ts            343  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/              887  L   63 tests in 5 files (§7)
+│   └── __tests__/             1206  L   90 tests in 6 files (§7)
 └── components/
     ├── CanvasArea.tsx           729  L   ★ React Flow: node shapes, drawing layer, approval banner
     ├── SidePanels.tsx          839  L   ★ library/files tabs, file tree, live folder tree, inspector
@@ -172,7 +172,9 @@ src/
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **8 115 lines** in 20 files (7 773 of it TypeScript).
+★ = the file you must understand before changing that area. Total: **8 709 lines** in 21 files (8 367 of it TypeScript). `package.json` carries **4 runtime dependencies**
+(react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
+`scripts/check-english.mjs` is not a dependency: a plain node script that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
 `index.html` script tag other than the module entry.
 
@@ -351,10 +353,10 @@ export function safeRelPath(p: string): string | null
 `safeRelPath` is called **after** any prefix stripping, on the final path (see `writeFilesToDirectory`) —
 the first version stripped, then validated, which let `canvases/x/../evil.md` escape the folder.
 
-## 3.2 `src/state.ts` (451 lines) — constants, factories, seed
+## 3.2 `src/state.ts` (474 lines) — constants, factories, seed
 
 Pure data + construction; no behaviour, no async, no I/O (one exception: `defaultSettings()` reads
-`localStorage["lc-settings"]`, see debt §9.9).
+`localStorage["lc-settings"]`, see debt §9.5).
 
 | export | what it is |
 |---|---|
@@ -363,9 +365,10 @@ Pure data + construction; no behaviour, no async, no I/O (one exception: `defaul
 | `memory` shape | `{ global, decisions, progress, user, agents: Record<nodeId, MemDoc> }` — the five documents of §6 legacy anchor |
 | `ui` shape | `{ leftTab:"palette"|"files", fileViewer, historyOpen, settingsOpen, chatNodeId, consoleOpen, portOpen }` |
 | `NODE_COLORS`, `NODE_TYPE_LABEL`, `PALETTE`, `MODELS` | presentation constants (palette cards: node/note/agent/output-box/pipeline-step/folder/shape) |
-| `ROLES: RoleDef[]`, `roleById(id)` | the 4 built-in roles: understander, risk-analyst, solution-designer, decision-maker — each with `default_output_contract` (format/required_fields/validator/save_to) and `default_context_contract` |
+| `ROLES: RoleDef[]`, `roleById(id)` | the 4 built-in roles: understander, risk-analyst, solution-designer, decision-maker — each with `default_output_contract` (format/required_fields/validator/save_to) and `default_context_contract`. `risk-analyst` requires a numeric `risk_score` field, which is what the seed's conditional edge reads — not a value the engine hardcodes |
 | `makeNodeData(type, title, owner, partial?)` | the single place a node's defaults are decided (also stamps `updated_at: nowIso()` — this is why tests project instead of deep-comparing) |
 | `makeEdgeData(partial?)`, `makeMemDoc(path,title,body,confidence,source)` | same, for edges/memories |
+| `makeAgentConfig(nodeId, roleId, opts?)` + `AgentConfigOverrides` | role defaults → a node's `AgentConfig`. `opts.context_contract` is merged **list by list**, because a caller that narrows `allowed_read_paths` must not silently drop `allowed_write_paths` or the output contract |
 | `emptyExecution()`, `defaultSettings()`, `builtinTemplateInfo()` | initial slices |
 | `BUILTIN_TEMPLATE: TemplateSpec` | the 5-node/4-edge "Fast pipeline" shipped in code and mirrored to `library/templates/quick-pipeline/` on first boot |
 | `seedNodes/seedEdges/seedMemories` (internal) | the demo workspace: 1 note + 4 agents + 1 output box + 5 edges |
@@ -395,30 +398,33 @@ Notable behaviour living here (small but load-bearing):
 - `openStorageFile(path)` reads the file **through the adapter**, not from state, in folder mode — so the
   File Tree shows bytes on disk, including files the app did not write.
 
-## 3.4 `src/lib/engine.ts` (1769 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (2018 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
 
 | section | exports (with line anchors) | contract |
 |---|---|---|
-| **events** | `emit(api,type,msg)` 32, `toast(api,kind,text)` 37 | `emit` builds a `BusEvent` through `bus` and prepends it to `state.events` (cap 250). `bus.on` currently has **zero subscribers** — it is the seam for SSE/plugins later (§9.10) |
-| **patching** | `getNode`, `patchNode(api,id,data,internal=false)` 48/55 | user edits are refused when `lock.status==="locked"` (§12.5); `internal=true` is how the executor itself writes |
-| **artifacts** | `writeNodeArtifact(api,id,quiet)` 75, `writeEdgeArtifact` 82, `appendLog` 91, `writeCanvasOverview` ~100 | one node = one file; `quiet` suppresses the event (used in bulk loops). `nodePath`/`edgePath` are the only path builders |
+| **events** | `emit(api,type,msg)` 32, `toast(api,kind,text)` 37 | `emit` builds a `BusEvent` through `bus` and prepends it to `state.events` (cap 250). `bus.on` currently has **zero subscribers** — it is the seam for SSE/plugins later (§10 ideas) |
+| **patching** | `getNode` 48, `patchNode(api,id,data,internal=false)` 55 | user edits are refused when `lock.status==="locked"` (§12.5); `internal=true` is how the executor itself writes |
+| **artifacts** | `writeNodeArtifact(api,id,quiet)` 75, `writeEdgeArtifact` 82, `appendLog` 91, `writeCanvasOverview` → `overviewMd` (private) 103 | one node = one file; `quiet` suppresses the event (used in bulk loops). `nodePath`/`edgePath` are the only path builders |
 | **saving** | `touch(api)` 181 (debounced 700 ms, flips `saveState`), `flushPending()` 187, `saveNow` (private) | every write sits on one promise chain so `flushPending` can await them all. **Export, reload and shutdown call it first** |
-| **memory** | `MemoryManager.read/write/list` 206 | conflict rule: incoming `confidence` must strictly exceed the stored one, else the old entry is kept and a `memory.updated` event explains it; equal weight → replaced + "ask the user later". A write into a locked node is refused. Paths are checked against `context_contract.allowed_write_paths` |
-| **self-checks** | `testFallback` 282, `contractSelfTest` 304 | `contractSelfTest` = one allowed write + two attempted intrusions (global memory, another agent's memory) and reports in the console. This is the executable form of the context contract |
-| **outputs** | `FIELD_DESC` 336, `writeOutputs(api,nodeId,entries,shared)` 352 | writes `outputs/<node>/index.yaml` + one file per entry; `shared=true` puts it under `outputs/shared/<node>/` (used by the collection box) |
-| **LLM** | `askModel` (private), `simulate` (private) ~373-470 | provider `sim` returns templated, plausible phase-1 answers; `deepseek` POSTs to the configured endpoint and falls back to `sim` on any error (§12.6). `throw` on an empty response |
-| **execution** | `findStart` 471, `executeNode` (~485), `runPipeline` 689, `runSingle` 712, `resumeRun` 727, `rejectRun` 736, `stopRun` 743, `resetExecution` 758 | a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node |
-| **chat** | `sendChat(api,nodeId,text)` 802 | appends to `chats/chat-<id>.md`; the simulated replies are per-role |
-| **snapshots** | `takeSnapshot(api,label,quiet)` 843, `restoreSnapshot(api,id)` 864 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
-| **strokes** | `clusterStrokes(strokes,gap=80)` 908, `addStroke` 945, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 977 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
-| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1004, `deleteNode` 1037, `createEdge` 1057, `deleteEdge` 1069 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
-| **loaders** | `loadStrokes` ~1078, `loadTemplates` 1094, `pickMemory`/memory reads 1117, **`hydrate(api)`** 1137 | `hydrate` is the heart — see §5.2 |
-| **workspace** | `seedWorkspace(api)` 1207, `initWorkspace(api)` 1277, `reloadFromStorage` 1293, `resetWorkspace` 1307 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds |
-| **templates/roles** | `saveTemplate(api,name)` 1326, `loadTemplate(api,id)` 1382, `saveRoleFromNode(api,nodeId)` 1439 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
-| **portability** | `applyRootHandle` 1525, `attachWorkspaceFolder` 1539, `detachWorkspaceFolder` 1556, `pickCanvasFolder` 1567, `exportBundleText` 1589, `exportToJsonFile` 1603, `exportToFolder` 1619, `ImportPreview` 1640, `previewImportText` 1673, `applyImport` 1680, `importFromText` 1704, `importFromFolder` 1713, `importFromFile` 1743, `maybeResumeWorkspace` 1754 | see §5.5-§5.8 |
+| **memory** | `MemoryManager.read/write/list` 231 | conflict rule: incoming `confidence` must strictly exceed the stored one, else the old entry is kept and a `memory.updated` event explains it; equal weight → replaced + "ask the user later". A write into a locked node is refused. Writes are checked against `allowed_write_paths`; reads resolve **any** allowed path against the real tree |
+| **self-checks** | `testFallback` 314, `contractSelfTest` 336 | `contractSelfTest` = one allowed write + two attempted intrusions (global memory, another agent's memory) and reports in the console. This is the executable form of the context contract |
+| **outputs** | `FIELD_DESC` 368, `writeOutputs(api,nodeId,entries,shared)` 385 | writes `outputs/<node>/index.yaml` + one file per entry; `shared=true` puts it under `outputs/shared/<node>/` (used by the collection box) |
+| **LLM** | `askModel` (private) 397, `simFields` (private) 412, `buildEntries`/`validateOutput` 380 | provider `sim` returns templated, plausible phase-1 answers; `deepseek` POSTs to the configured endpoint and falls back to `sim` on any error (§12.6). `throw` on an empty response |
+| **tools** | `TOOL_NAMES` 477, `hasTool` 481, `unknownTools` 488 | the vocabulary an agent may act through. `get_canvas_overview`/`get_agent_brief` are the harness (always on); every other name must be in `agent.tools`, or the step is skipped (`read_memory`, `write_memory`), the node fails (`write_output`), or the chat is refused (`chat_with_user`). `unknownTools` names what this app cannot run, so the log says so instead of pretending |
+| **run ledger** | `startLedger` 504, `ledgerRow` 519, `endLedger` 540 | `runs/<run-id>.md`, one row per step: read-modify-write so a reload extends the same file, capped at 300 rows, closed with `**run completed/stopped/rejected**`. Format: §4.13 |
+| **execution** | `findStart` 662, `executeNode` 669, `runPipeline` 926, `runSingle` 952, `resumeRun` 968, `rejectRun` 977, `stopRun` 985, `resetExecution` 1001 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node |
+| **contract matching** | `isPathAllowed` 564, `numericScope` 575, `evalCondition` 593 | one matcher for `allowed_read_paths` and `allowed_write_paths`: a directory entry (trailing `/`), an exact path, or a glob over **one** segment (`outputs/*/summary.md`). `evalCondition` is fail-closed and returns `{ ok, reason }` — see §5.8. `numericScope` lifts a node's numeric output fields into `execution.context`, so a condition reads data, not prose |
+| **chat** | `sendChat(api,nodeId,text)` 1045 | appends to `chats/chat-<id>.md`; the simulated replies are per-role |
+| **snapshots** | `takeSnapshot(api,label,quiet)` 1092, `restoreSnapshot(api,id)` 1113 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
+| **strokes** | `clusterStrokes(strokes,gap=80)` 1157, `addStroke` 1194, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1226 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
+| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1253, `deleteNode` 1286, `createEdge` 1306, `deleteEdge` 1318 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
+| **loaders** | `loadStrokes` 1328, `loadTemplates` 1347, `pickMemory`/memory reads 1367, **`hydrate(api)`** 1137 | `hydrate` is the heart — see §5.2 |
+| **workspace** | `seedWorkspace(api)` 1456, `initWorkspace(api)` 1526, `reloadFromStorage` 1542, `resetWorkspace` 1556 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds |
+| **templates/roles** | `saveTemplate(api,name)` 1575, `loadTemplate(api,id)` 1631, `saveRoleFromNode(api,nodeId)` 1689 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
+| **portability** | `applyRootHandle` 1774, `attachWorkspaceFolder` 1788, `detachWorkspaceFolder` 1805, `pickCanvasFolder` 1816, `exportBundleText` 1838, `exportToJsonFile` 1852, `exportToFolder` 1868, `ImportPreview` 1889, `previewImportText` 1922, `applyImport` 1929, `importFromText` 1953, `importFromFolder` 1962, `importFromFile` 1992, `maybeResumeWorkspace` 2003 | see §5.5-§5.8 |
 
 ## 3.5 `src/lib/portable.ts` (439 lines) — the bundle and the file-first rebuild
 
@@ -441,14 +447,16 @@ dependency of the thing that reads its files). Three responsibilities:
    Helpers for the UI: `suggestFileName(canvasId, ext, taken)`, `downloadJson(name, text)`,
    `readFileAsText(file)`, `installFiles(files, {replace})`.
 
-## 3.6 `src/lib/fs-access.ts` (340 lines) — the folder seam
+## 3.6 `src/lib/fs-access.ts` (343 lines) — the folder seam
 
 ```ts
 export function isFsAccessSupported(): boolean            // "showDirectoryPicker" in window
 export async function pickCanvasDirectory(): Promise<FsDirHandle>   // readwrite; AbortError on cancel
 export async function ensurePermission(h, mode): Promise<boolean>   // query → prompt → grant
 export function toRelativePath(logical, rootPrefix): string|null     // the map/reverse-map of Law 4
-export const CANVAS_SUBDIRS: readonly string[]            // nodes, edges, memory/agents, outputs, logs, chats, strokes, library/{templates,roles,shapes}, history
+export const CANVAS_SUBDIRS: readonly string[]            // nodes, edges, memory/agents, outputs, logs, chats,
+                                                           //   strokes, library/{templates,roles,shapes}, history,
+                                                           //   assets, runs — the tree ensureStructure creates
 export async function ensureStructure(dir): Promise<void> // creates the §2 skeleton; idempotent
 export class FsAccessStorageAdapter implements StorageAdapter  // adapterKind = "fs"
 export async function readCanvasFromDirectory(dir, opts?): Promise<CanvasFiles>   // read-only walk, skips >2MB files
@@ -495,7 +503,8 @@ canvases/nexus-edu-001/
 │   ├── global.md  decisions.md  progress.md  user.md      the four shared docs
 │   └── agents/<node-id>.md  private memory per agent      §4.4
 ├── outputs/<node-id>/index.yaml + <file>                   §4.5
-├── logs/<node-id>/run.log                                  §4.7
+├── logs/<node-id>/<date>.log                               §4.7
+├── runs/<run-id>.md             one append-only ledger per run  §4.13
 ├── chats/chat-<node-id>.md                                 §4.6
 ├── strokes/<stroke-id>.json                                §4.8
 ├── library/
@@ -559,6 +568,7 @@ agent:
       - canvas-overview.md
       - nodes/node-001.md
       - memory/agents/node-001.md
+      - "outputs/*/summary.md"
     allowed_write_paths:
       - outputs/node-001/
       - memory/agents/node-001.md
@@ -588,6 +598,9 @@ must respect):
 - `agent` present without `system_prompt` ⇒ the role's prompt is substituted, so a partial hand edit
   cannot produce a contentless agent.
 - Body (everything after the fence) ⇒ `data.content`.
+- `context_contract.allowed_*_paths` entries are matched by `isPathAllowed` (§3.4): a trailing `/` grants a whole
+  directory, an exact path grants that file, and `*` grants exactly one path segment. A hand-written file may use
+  any of the three; anything else is read literally, which is the same as granting nothing.
 
 ## 4.3 `edges/<id>.yaml` — one edge (the whole file is YAML; no frontmatter)
 
@@ -663,7 +676,12 @@ Engagement in week three.
 Append-only from the app's side. It is a document first, a transcript second — that is why it is Markdown
 and not JSON.
 
-## 4.7 `logs/<node>/run.log` — plain lines, newest last, capped at 120 in memory: `[16:34:09] tool write_output → validation passed (3/3 fields)`.
+## 4.7 `logs/<node>/<date>.log` — plain lines, newest last, capped at 120 entries in state
+
+The file is date-sharded (`logs/node-001/2026-09-01.log`) so a run across midnight does not rewrite yesterday's log.
+`logs/<node-id>/` is inside every agent's `allowed_write_paths`, and it is what the console's log tab shows. Example line:
+`[16:34:09] tool write_output → validation passed (3/3 fields)`. Per-step *cross-node* history is not here — that is the
+run ledger, §4.13.
 
 ## 4.8 `strokes/<id>.json` — one file per freehand stroke
 
@@ -715,6 +733,52 @@ total size > 32 MB. A missing `manifest.json` ⇒ a `warning`, not an error.
 - `history/index.json` + `history/snapshot-<nowStamp()>.json` — snapshot metadata lives in the index, the
   full graph in the snapshot file. Restore replaces the graph only (artifacts are not deleted — a
   checkpoint is a view of the canvas, not a backup of the folder).
+
+## 4.13 `runs/<run-id>.md` — the run ledger (one file per run)
+
+A run is a moment of execution (Law 3), but **what it did** is data. The executor writes `runs/<run-id>.md`
+through the adapter (`startLedger` → `ledgerRow` → `endLedger`): one row per tool call, so a reload, a crash, or
+an outside `git diff` answers "who ran what, in which order, and what refused it". Verbatim output of a real
+two-node run (the same `MemoryStorageAdapter` the tests use):
+
+```markdown
+---
+run_id: run-mtixxmkn-0lbyv
+canvas_id: nexus-edu-001
+started_at: "2026-09-01T17:28:05.255Z"
+queued: 2
+app: 0.1.0
+---
+
+# Run run-mtixxmkn-0lbyv
+
+Full pipeline run from “a”.
+
+| # | node | tool / step | status | detail |
+| --- | --- | --- | --- | --- |
+| 1 | a | get_canvas_overview | ok | canvas-overview.md |
+| 2 | a | get_agent_brief | ok | role risk-analyst |
+| 3 | a | read_memory | ok | 2 documents |
+| 4 | a | write_output | ok | 4/4 fields → outputs/a/ |
+| 5 | a | write_memory | ok | memory/agents/a.md at confidence 0.8 |
+| 6 | b | edge_condition | ok | {{ risk_score < 7 }} |
+| 7 | b | get_canvas_overview | ok | canvas-overview.md |
+| 8 | b | get_agent_brief | ok | role solution-designer |
+| 9 | b | read_memory | ok | 3 documents |
+| 10 | b | write_output | ok | 3/3 fields → outputs/b/ |
+| 11 | b | write_memory | ok | memory/agents/b.md at confidence 0.8 |
+
+**run completed** — 2 of 2 queued nodes done, 2026-09-01T17-28-05
+```
+
+Rules a reader needs:
+- `status` is `ok`, `denied` (the contract or `tools` refused it), `blocked` (a conditional edge stopped the
+  hop), `rejected` (validation refused the output) or `failed`. A refusal *must* appear as a row: nothing is
+  quietly skipped.
+- rows are appended by read-modify-write, capped at 300 rows: a writer after a reload extends the file instead
+  of overwriting it.
+- `runs/` is part of the tree (exported, cloned, shown in the file tree) but `hydrate()` ignores it — a canvas
+  rebuilds with `runs/` deleted. It is an append-only audit, never an input.
 
 ## 4.12 What is *not* in a file (and why that is fine)
 
@@ -844,22 +908,38 @@ same code path.
 
 ```
 actions.runAll → runPipeline(api)
-  execution.run_id = uid("run"); status = "running"; queue = computeOrder(graph)  // BFS from findStart
+  findStart(graph) → computeOrder = Kahn over every runnable node (§3.4 execution)
+      · diamond joins run after both inputs · a node the start cannot reach is still queued
+      · flow cycles: queued last + a validation.failed event naming them        // nothing is dropped silently
+  execution.run_id = uid("run"); status = "running"; queue = order
+  startLedger → runs/<run-id>.md with frontmatter + the table header (§4.13)
   for each node in queue:
      if run_id changed → stop (someone pressed Stop/Reject)         // guard()
+     edge into this node has trigger.type=="condition"?
+        evalCondition(cond, execution.context) → {ok,reason}
+        not ok → node marked completed-without-running, reason in the log + ledger row `blocked`
+                 (fail-closed: an unparsable condition or an unknown variable blocks the edge, §3.4)
      lock the node (locked_by = run_id); emit lock.acquired
-     tools: get_canvas_overview → read canvas-overview.md
-            get_agent_brief     → role + max_steps
-            read_memory         → every allowed_read_paths entry (§9 caveat: only memory docs resolve)
-     askModel (or sim) → parse required_fields → validateOutput
-     writeOutputs → outputs/<id>/index.yaml + files ; appendLog per step
-     memory write (own agent doc, confidence 0.7) → MemoryManager.write
+     tools (each step checks hasTool first; a refusal is a `denied` ledger row, never silence):
+        get_canvas_overview → read canvas-overview.md          // harness, always on
+        get_agent_brief     → role + max_steps                 // harness, always on
+        read_memory         → allowed_read_paths, resolved against the real files (§4.4/§4.5)
+        (no read_memory in tools → skipped with a log line; no write_memory → memory untouched)
+     upstream: predecessor outputs/**filtered by THIS node's allowed_read_paths** — an ungranted path is
+               not read at all and emits validation.failed
+     askModel (or sim) → required_fields → validateOutput (missing *or* empty field ⇒ rejected)
+     write_output not in tools → the node fails here, because an agent that cannot write cannot deliver
+     writeOutputs → outputs/<id>/index.yaml + files ; appendLog + ledger row per step
+     memory write (own agent doc, confidence 0.8) → MemoryManager.write
+     execution.context gains: nodeId → summary, plus every *numeric* output field (numericScope)
      require_approval? → status "waiting_approval", pause, return
      snapshot("end of …") ; unlock ; emit node.completed
-  collect output-boxes (shared outputs) → run.completed
+  endLedger("completed") ; collect output-boxes (shared outputs) → run.completed
 ```
 `steps > max_steps` throws (§12.3). Any error marks the node `failed`, emits `node.failed`, appends the
-error to the log, stops the run and toasts — **it never auto-retries**, so a run's history stays readable.
+error to the log **and to the ledger**, stops the run and toasts — **it never auto-retries**, so a run's history
+stays readable. `stopRun`/`rejectRun` close the ledger with `**run stopped/rejected**` before they clear
+`run_id`, so an interrupted run leaves a file that says it was interrupted.
 
 ## 5.9 Undo-ish: snapshots
 
@@ -919,13 +999,13 @@ selector returning a fresh array/object re-renders forever. Every empty fallback
 | `ActivityConsole` | `events` (cap 250) | `toggleConsole` |
 
 Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Enter in "save template").
-There are no canvas shortcuts, no focus rings on nodes, no `aria-live` on toasts — see §9.12.
+There are no canvas shortcuts, no focus rings on nodes, no `aria-live` on toasts — see §9.8.
 
 ---
 
 # 7. Immune system — tests
 
-`npx vitest run` → **5 files, 63 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **6 files, 90 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
 Every test runs the **production** functions — no re-implementations. `src/lib/test-helpers.ts` exists so a
 test cannot accidentally grow its own serialiser (that is how a fixture hides a bug).
 
@@ -935,6 +1015,7 @@ test cannot accidentally grow its own serialiser (that is how a fixture hides a 
 | `portable.test.ts` | 22 | bundle round-trip identity; escaping paths rejected; non-string content rejected; newer `version` rejected; foreign canvas skipped with a reason; missing manifest = warning; long/multiline `system_prompt` survives; files-only rebuild (nodes/edges/memory, canvas title, no truncation); a manual Obsidian edit wins; dangling edge dropped; locks not restored; `running→idle`, `done` kept; invalid colour/edge-type/clipped confidence; `parseYaml∘toYaml` identity; **YAML interop** (no bare flow mapping, no type drift for `"1.0"`) |
 | `fs-access.test.ts` | 13 | a Map-backed fake of the File System Access API: `toRelativePath` mapping and rejection; adapter CRUD + `listDirectory` + `allPaths` (files only, no dotfiles) + `..` throws + `clear` scoped; `ensureStructure` creation & idempotence; `writeFilesToDirectory` (valid files land, invalid ones are reported, prefix-escape rejected); `readCanvasFromDirectory` |
 | `roundtrip.test.ts` | 4 | seed → collect → bundle → parse → **compare file maps byte for byte**; hydration from real Markdown; the template-folder regression at workspace level; export *without* `graph.json`/`state.json` still rebuilds |
+| `execution.test.ts` | 27 | the run rules: `evalCondition` fail-closed (unsatisfied / unknown variable / unparsable / non-numeric data / string compare), `numericScope`, `isPathAllowed` (dir, exact, one-segment glob, no neighbour leakage), `computeOrder` (diamond, disconnected, cycle, parallel edges, determinism, mid-graph start), `hasTool`/`unknownTools`; plus `runPipeline` end to end on a two-agent graph — an ungranted upstream path is not read, `write_output` missing makes the node fail with no output files, a conditional edge skips the node and logs the reason, the run ledger is written row by row and closed, and `MemoryManager.read` returns a granted `outputs/` file |
 | `hydrate.test.ts` | 8 | the real `hydrate()` against `MemoryStorageAdapter`: no manifest → `false` and nothing deleted; custom template found after reload; several templates + neighbouring files; files-only mode builds the canvas; locked node not restored; `graph.json` supplies geometry while the file overrides title/content/prompt; broken `state.json` tolerated; the adapter in play is the adapter read (no stale cache between tests) |
 
 Rules for adding a test:
@@ -964,9 +1045,10 @@ Written down so nobody "helpfully" adds them back:
 - **No auto-retry in the executor**, no background queue, no optimistic LLM calls.
 - **No CSS framework other than Tailwind v4 tokens**; no component kit (they bring their own opinions about
   direction, density and focus, and this UI is deliberately dense).
-- **No i18n layer.** English is the source language; there is no translation table and that is a decision,
+- **No i18n layer, and no RTL text anywhere in the repository.** English is the source language; there is no translation table and that is a decision,
   not an oversight. Adding one means deciding what gets localised (dates/numbers via `Intl` — the code
-  currently avoids `Intl` for exactly that reason).
+  currently avoids `Intl` for exactly that reason). `scripts/check-english.mjs` fails CI on any RTL-script or bidi-control
+  character in a tracked file, so this stays a rule rather than a habit.
 - **Not a multiplayer doc.** No CRDT, no awareness, no per-file locking. `lock` is an execution mutex, not a
   collaboration primitive. Do not let it grow into one.
 
@@ -974,50 +1056,42 @@ Written down so nobody "helpfully" adds them back:
 
 # 9. Known wounds (debt, precise)
 
-Ordered by how much they will cost to fix later. The first four are **blockers before AI tools are wired in**.
+Ordered by how much they will cost to fix later. **Retired in the post-review pass** (each has a test in
+`execution.test.ts`, so they stay retired): `executeNode` used to collect upstream output around the read contract;
+`MemoryManager.read` resolved only the five memory documents; `agent.tools` was decorative; `evalCondition` failed
+open; `risk_score` was hardcoded `5` for one role; `computeOrder` was a BFS that dropped disconnected nodes; the
+contract of `makeAgentConfig(...)` was replaced instead of merged; `validateOutput` could not fail; eleven unused
+npm dependencies and a 40 MB tracked snapshot; no CI.
 
-1. **`executeNode` ignores `allowed_read_paths` when it collects upstream input.** It walks graph edges and
-   reads whatever outputs the predecessors have, instead of filtering through the contract. The contract is
-   enforced on the *write* side (`MemoryManager.write` → allowed_write_paths, tested) and by the self-test,
-   but not on the read side. Fix: one filter in the input-collection loop + a test that a node without the
-   path in its contract cannot read a sibling's output.
-2. **`MemoryManager.read` resolves only the five memory documents.** A path like `outputs/node-002/report.md`
-   in `allowed_read_paths` currently yields nothing.
-3. **`askModel` hardcodes the endpoint** (`https://api.deepseek.com/chat/completions`), sends
-   `max_tokens: 900` while the UI and `AgentConfig` carry 4000, and **never gates on `agent.tools`** — the
-   tool list is decorative. There is no function-calling loop: the model is asked for a JSON-ish blob and the
-   fields are parsed out. Phase 2's tool use must start by making `tools` real (dispatch table + permission
-   check against the contract), not by adding a provider.
-4. **`validateOutput` is unfailable** (it only checks that `required_fields` are non-empty strings) and the
-   validator it pretends to use does not exist: every role writes `validator: "schemas/<role>.schema.json"`
-   into its output contract (`engine.ts:1237`, `:1458`), but no `schemas/` directory is seeded and nothing
-   reads that field. Either seed the schema files and validate against them, or delete the field — a
-   documented-but-nonexistent validator is worse than none, because agents (and humans) will trust it.
-   Either wire a JSON-schema validator or delete the field; a documented-but-unused validator is the worst
-   of both.
-5. `risk_score` is hardcoded to 5 in the conditional-edge demo, so `{{ risk_score < 7 }}` always passes —
-   the condition engine is one regex away from being real (`evaluateCondition(scope)`), and the scope should
-   come from `execution.context` + the predecessor's output fields.
-6. Snapshots store the **full graph** per step, unbounded, and `restoreSnapshot` restores the graph only. A
-   long run = many near-duplicate JSON files. Next iteration: diff-based snapshots (`{node_id: patch}`) plus
-   a keep-last-N policy with "pinned" manual checkpoints.
-7. `apiKey` is in `localStorage` and the browser calls the LLM provider directly (CORS-permissive proxying
-   aside, the key leaks to anyone with XSS — which is why Law 2 is not optional). The honest phase-2 shape is
-   a thin proxy that holds the key; until then, the settings panel must keep saying where the key lives.
-8. `computeOrder` is a BFS from `findStart`: disconnected nodes are never queued, and a diamond join can be
-   ordered before both its inputs. A real topological sort with deterministic tie-breaking (by `created_at`,
-   then id) is ~15 lines and kills a whole class of "why did it run in this order" reports.
-9. `defaultSettings()` in `state.ts` reads `localStorage["lc-settings"]` — the one place a data module does
-   I/O (Law 5 breach, harmless today, ugly tomorrow). Move it to `store.ts` next to `saveSettingsLocal`.
-10. `makeAgentConfig(nodeId, roleId, opts)`: `...opts` is spread last, so an `opts.context_contract`
-    **replaces** the whole contract instead of merging `extraRead`; and `makeNodeData` uses the placeholder id
-    `"pending"` for its default agent, which callers must overwrite (`createNode` and `loadTemplate` do). Any
-    new call site that forgets produces a node whose contract points at `nodes/pending.md`.
-11. Ten of fourteen npm dependencies are unused in `src/` (verify with a quick import audit before deleting —
-    `package.json` still lists them); there is no CI, no eslint config, no LICENSE, and the 40 MB
-    `Living_Canvas-main.zip` + the divergent `Living_Canvas-main/` snapshot are still tracked.
-12. a11y: no focus ring on canvas nodes, no keyboard traversal of the graph, toasts are not announced, the
-    draw mode has no escape-to-cancel (only the ✕ button), and the modals do not trap focus.
+1. **`askModel` still hardcodes the endpoint and the sampling budget** (`https://api.deepseek.com/chat/completions`,
+   `max_tokens: 900` while `AgentConfig`/UI carry 4000). More structurally: the model does not *choose* tools — the
+   executor walks the six steps and `agent.tools` only decides which of them are permitted. Function calling means
+   handing `TOOL_NAMES` to the provider as JSON-schema tools and looping on the calls it returns; the gate it needs
+   is already in place (`hasTool`), so this is now an additive change rather than a rewrite.
+2. **The `validator` pointer still dangles.** Roles write `validator: "schemas/<role>.schema.json"`
+   (`engine.ts:1486`, `:1707`) and nothing reads it; no `schemas/` directory exists. What changed: `validateOutput`
+   can now fail — `buildEntries` no longer fabricates an empty file for a field the model did not return, so a
+   missing **or blank** required field is rejected. What is missing: types, bounds, enum membership. That is Q1,
+   and it also has to decide *where* the schemas live (`library/schemas/<role>.schema.json`, inside the canvas, or a
+   repo-level `schemas/` shared by canvases — today the string points outside `library/`, which no folder-mode tree
+   contains).
+3. **Snapshots store the full graph per step, unbounded**, and `restoreSnapshot` restores the graph only. A long run
+   = many near-duplicate JSON files. Next: `{node_id: patch}` deltas + keep-last-N with pinned manual checkpoints.
+   This pairs with Q3/Q6: if positions live only in node files, the graph delta gets small enough not to care.
+4. **`apiKey` is in `localStorage` and the browser calls the provider directly** (the key leaks to anyone who gets
+   script in — which is why Law 2 is not optional). The honest phase-2 shape is a thin proxy that holds the key.
+   Do **not** reuse `HttpStorageAdapter` for it: that adapter is file I/O against a storage backend, not an LLM
+   gateway — a proxy needs a new contract of its own (`POST /api/llm`, provider+key server-side, no canvas
+   semantics). Until then the settings panel must keep naming where the key lives.
+5. `defaultSettings()` in `state.ts` reads `localStorage["lc-settings"]` — the one place a data module does I/O
+   (Law 5 breach, harmless today, ugly tomorrow). Move it to `store.ts` next to `saveSettingsLocal`.
+6. `makeNodeData` stamps a placeholder id `"pending"` on its default agent, which callers must overwrite
+   (`createNode` and `loadTemplate` do). Any new call site that forgets produces a node whose contract points at
+   `nodes/pending.md`. Fix: pass the id in, no default agent at all.
+7. **`logs/<node>/<date>.log` vs `run.log` in prose.** The code shards logs by date; some legacy wording (and older
+   notes) still says `run.log`. Cosmetic today, a wrong filename in someone else's reader tomorrow — pick one.
+8. no eslint/prettier config and no LICENSE file; a11y: no focus ring on canvas nodes, no keyboard traversal of the
+   graph, toasts are not announced, draw mode has no escape-to-cancel (only the ✕ button), modals do not trap focus.
 
 ---
 
@@ -1027,12 +1101,16 @@ These are the decisions that change the shape of the thing, so they should be ma
 document, before the code moves. My recommendation is attached to each; the ones marked ⚑ are the ones I
 would not start phase 2 without.
 
-⚑ **Q1 — Where does the file contract become load-bearing?** Today the schema field in every role points
-at a file that does not exist, and `validateOutput` cannot fail. Two coherent futures: (a) *canvas as editor* — keep
+⚑ **Q1 — Where does the file contract become load-bearing?** `validateOutput` now rejects a missing or blank
+required field, but the schema pointer in every role still points at a file that does not exist. Two coherent futures: (a) *canvas as editor* — keep
 validation soft, delete the schema promise, ship phase 2 as "tools that propose diffs"; (b) *canvas as
 orchestrator* — schemas become the contract between agents, validation is hard, and an output that fails
 schema stops the run (and the node shows the error inline). (b) is what the docs imply and what the
-folder-first design earns; it also forces Q2. Pick one.
+folder-first design earns; it also forces Q2. Pick one — and with it, **where the schemas live**: roles currently
+emit `schemas/<role>.schema.json`, a path *outside* `canvases/<id>/library/`, so in folder mode it points at nothing
+that any adapter can read. Either `library/schemas/<role>.schema.json` (per canvas, travels with the export) or a
+repo-level `schemas/` (shared, but then a hand-made vault cannot ship its own roles). My vote: `library/schemas/`,
+because Law 1 says the canvas folder holds everything the canvas needs.
 
 ⚑ **Q2 — One canvas per folder, or many?** `FsAccessStorageAdapter` maps `canvases/<id>/` → the picked
 folder root, i.e. the picked folder **is** one canvas. That is right for a Git repo per project, wrong for an
@@ -1051,20 +1129,24 @@ adapters. It is honest today (one place where file shapes are decided) and it wi
 split when it does: `types.ts` (no imports), `yaml.ts`, `html.ts`, `storage/*.ts`. Law 5 keeps the edges
 acyclic either way. Do it when adding the fifth adapter, not before.
 
-**Q5 — Does the run need its own ledger file?** `logs/<node>/run.log` is per-node; there is no run-level
-record (who ran what, in which order, with which model, at what cost). The moment real LLM calls arrive you
-want `runs/<run-id>.md` with a per-step table — and it should be append-only text so it survives a crash
-mid-run. Cheap today, awkward after phase 2.
+**Q5 — Does the run need its own ledger file?** *Answered and built*: `runs/<run-id>.md`, one row per step
+(§4.13), because `logs/<node>/<date>.log` is per-node and cannot answer "what did this run do, in order, and what
+refused it". It is append-only text written through the adapter, so it survives a crash mid-run and shows up in
+`git diff`. Not yet in it: model name, token counts, latency — the row schema has a `detail` column free for them
+when function calling lands (§9.1). If you want a different table shape, change `LEDGER_HEADER`, nothing else.
 
 **Q6 — Is `hydrate`'s "file overrides cache" rule right for geometry too?** Today: files win for
 title/content/prompt, cache wins for position. If Q3 removes `graph.json`, positions come from files only,
 and this question disappears — which is another argument for Q3.
 
-Ideas I would try, in this order, once Q1-Q3 are answered: (1) make `agent.tools` a real dispatch table and
-gate every tool by the contract — it is the security model *and* the feature; (2) `runs/<run-id>.md`;
-(3) a "diff" view in FileViewer (what the last run changed in this file), because a canvas whose files can
-be edited outside the app is a canvas that needs `git diff` in the UI; (4) then — and only then — function
-calling, on top of tools that are already gated.
+Done since this document was written: ~~(1) gate every tool by the contract~~ and ~~(2) `runs/<run-id>.md`~~.
+Still in order, once Q1-Q3 are answered: (a) function calling — the executor hands `TOOL_NAMES` to the provider and
+loops on the model's tool calls, now that `hasTool` makes refusal cheap; (b) a "diff" view in FileViewer (what the
+last run changed in this file), because a canvas whose files can be edited outside the app is a canvas that needs
+`git diff` in the UI; (c) delta snapshots + keep-last-N (§9.3); (d) providers beyond DeepSeek, reusing
+`settings.provider`/`MODELS` (`deepseek-chat`, `glm-4-flash`, `ollama:qwen2.5`) rather than inventing a second key
+setting. A full `Tool` interface (`{name, description, execute}`) is deliberately *not* in yet: until the model
+picks the tool, the only caller is the executor and a dispatch table would be decoration — it arrives with (a).
 
 ---
 
@@ -1072,9 +1154,10 @@ calling, on top of tools that are already gated.
 
 ## 11.1 `§` references in code comments
 
-`src/` carries `§` markers that point at the original Persian specification (`Living_Canvas-main/`,
-doc v1.3). They are kept because they are already in the tests' names and in the UI strings; this is the
-translation table into this document:
+`src/` carries `§` markers that point at the original Persian specification (doc v1.3, kept in the
+`Living_Canvas-main/` snapshot — **local material only, no longer tracked in git**). They are kept because they are
+already in the tests' names and in the section banners; this is the translation table into this document, and after
+this pass it is the only complete one:
 
 | anchor | meaning | here |
 |---|---|---|
@@ -1084,11 +1167,11 @@ translation table into this document:
 | §5.1 / §5.2 | StorageAdapter / its four implementations | §3.1.4 |
 | §6 | memory architecture (5 docs, conflicts) | §3.4 memory, §4.4 |
 | §8 | the three agent tools | §3.4 execution, §10 ideas |
-| §9 | context contract | §3.1.1, §3.4 self-checks, §9.1 |
-| §10 | snapshots | §5.9, §9.6 |
+| §9 | context contract | §3.1.1, §3.4 self-checks + contract matching, §5.8 |
+| §10 | snapshots | §5.9, §9.3 |
 | §12.3 / §12.5 / §12.6 | max_steps / locks / LLM fallback | §3.4 execution, Law 3, §3.4 LLM |
 | §13 | templates | §4.9 |
-| §15 | provider settings | §3.1.1 Settings, §9.7 |
+| §15 | provider settings | §3.1.1 Settings, §9.1 |
 
 ## 11.2 Vocabulary
 
@@ -1109,11 +1192,17 @@ translation table into this document:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 5 files / 63 tests
+npm test            vitest run            → 6 files / 90 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
-npm run build       tsc --noEmit && vite build → ~517 kB js / 159 kB gzip (chunk ceiling 600)
+npm run build       tsc --noEmit && vite build → ~524 kB js / 161 kB gzip (chunk ceiling 600)
+node scripts/check-english.mjs   English-only gate: scans `git ls-files`, exits 1 on any RTL/bidi character
 ```
 
-No lint step, no formatter config (§9.11). If you add one, make it match the four conventions already in use:
-double quotes, semicolons, 2-space indent, ~120 column soft limit, `/* */` section banners inside long files.
+Those four checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**`. The workflow file is written
+and on disk at `.github/workflows/ci.yml`, **but it is not committed**: the agent's GitHub connection is not allowed to
+create files under `.github/workflows/`, so it needs one commit by a human with repo access. Until that commit exists
+there is no automation guarding `main` — the four commands above are the gate, run by hand. No lint step and no formatter config (§9.8) — adding
+one is a decision, not a cleanup, because it would reformat 8.7k lines in one commit. If you add one, match the four
+conventions already in use: double quotes, semicolons, 2-space indent, ~120 column soft limit, `/* */` section
+banners inside long files.

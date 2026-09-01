@@ -1,0 +1,27 @@
+# Living Canvas CI definition. This repository is English-only and the agent account that maintains
+# the branch cannot write under .github/workflows/ (GitHub App permission), so the file lives here.
+# To activate:  cp ci/github-actions.yml .github/workflows/ci.yml && git add .github/workflows
+#
+# The three commands the codebase is judged by (docs/ARCHITECTURE.md §11.3).
+# `npm run build` already runs `tsc --noEmit` first, so the type gate is not optional here.
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: English-only repository check
+        run: node scripts/check-english.mjs
