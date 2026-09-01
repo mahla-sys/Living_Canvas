@@ -22,9 +22,10 @@ npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
 npm run build       # tsc --noEmit && vite build — types are part of the build
 node scripts/check-english.mjs   # the English-only rule, as CI runs it
 ```
-CI is prepared at `.github/workflows/ci.yml` (typecheck → test → build → English gate). It is on disk but
-uncommitted: the agent account used for this branch cannot write under `.github/workflows/`, so adding it takes one
-commit from someone with repository access. Until then, run the four commands above yourself before merging.
+CI is committed as `ci/github-actions.yml` (typecheck → test → build → English gate). Activating it is one command:
+`cp ci/github-actions.yml .github/workflows/ci.yml`. The agent account on this branch is not allowed to create files
+under `.github/workflows/` (a GitHub App permission), so that copy needs someone with repository access. Until it
+lands, the four commands above are the gate.
 
 ## Read it
 
