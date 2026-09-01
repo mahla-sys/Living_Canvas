@@ -2,8 +2,10 @@
 # the branch cannot write under .github/workflows/ (GitHub App permission), so the file lives here.
 # To activate:  cp ci/github-actions.yml .github/workflows/ci.yml && git add .github/workflows
 #
-# The three commands the codebase is judged by (docs/ARCHITECTURE.md §11.3).
+# The commands the codebase is judged by (docs/ARCHITECTURE.md §11.3).
 # `npm run build` already runs `tsc --noEmit` first, so the type gate is not optional here.
+# The last step is a documentation gate: ARCHITECTURE.md §3.4 quotes line numbers inside engine.ts, and a
+# stale number in a reference doc is worse than no number. Fixing it is one command: node scripts/doc-anchors.mjs
 
 on:
   push:
@@ -25,3 +27,5 @@ jobs:
       - run: npm run build
       - name: English-only repository check
         run: node scripts/check-english.mjs
+      - name: Architecture doc anchors are current
+        run: node scripts/doc-anchors.mjs --check

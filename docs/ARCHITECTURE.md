@@ -47,16 +47,20 @@ Every design decision below follows from one bet: **files are the source of trut
 cache of them.** Consequences that look like costs and are actually the point:
 
 - An external edit (Obsidian, `git pull`, a text editor) is a first-class operation. There is a
-  "reload from disk" button, and file content **overrides** the machine cache on load (§5.2).
-- A canvas can be rebuilt from files alone, with no `graph.json`/`state.json` at all. That path is tested.
+  "reload from disk" button, and on load the files win outright — not because of an override rule, but because
+  after structure `1.4` there is no cache that describes the graph to override (§5.2, §4.11).
+- A canvas can be rebuilt from files alone, with no `state.json` at all — and there is no `graph.json` left to
+  miss (§4.11). Both paths are tested.
 - Export is not a state dump; it is a copy of the tree (`§4.10`). Import is not "load state"; it is
   "write these files, then hydrate from them".
 - The unit of portability is `canvases/<id>/`, not a database row.
 
-The consequence we paid for, and keep paying: **there are two readers of the same data** (the fast JSON
-path and the Markdown path) and they must never disagree. That is why the serialisers and parsers live in
-exactly one file (`src/lib/core.ts`) and why the tests round-trip through them instead of hand-writing
-fixtures (§7).
+The consequence we paid for, and still pay: **the same data has two readers** — a JSON cache for the slices no
+file expresses (`execution`, chat, snapshot metadata) and Markdown/YAML for everything else — so the writers and
+the readers must stay in lockstep. The cure is the same one that deleted `graph.json`: one place decides a shape,
+and the smaller the second reader's remit, the less there is to disagree about. That is why the serialisers and
+parsers live in exactly one file (`src/lib/core.ts`), why `state.json` carries only what files cannot, and why the
+tests round-trip through the real serialisers instead of hand-writing fixtures (§7).
 
 ## 0.3 The shape, in one diagram
 
@@ -82,12 +86,13 @@ fixtures (§7).
                    │                              │
         ┌──────────▼──────────────────────────────▼─────────────────┐
         │ lib/core.ts  types · YAML · frontmatter · StorageAdapter   │   ← no imports from inside the project
-        │ (IndexedDB / HTTP / memory / folder) · HTML safety         │
+        │ (IndexedDB / HTTP / memory / folder) · HTML safety · JSON   │
+        │ Schema subset (the thing that makes output contracts real) │
         └──────────▲────────────────────────────────────────────┬────┘
                    │                                            │
         ┌──────────┴───────────────┐              ┌─────────────▼──────────┐
         │ state.ts  constants,     │              │ components/icons.tsx    │  (pure SVG, no deps)
-        │ factories, seed data     │              └─────────────────────────┘
+        │ factories, roles, seed   │              └─────────────────────────┘
         └──────────────────────────┘
 ```
 
@@ -155,26 +160,26 @@ instead of growing the exceptions.
 src/
 ├── main.tsx                    100  L   boot, global error surface, React error boundary
 ├── App.tsx                      38  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
-├── state.ts                    474  L   ★ constants, types re-exports, factories, seed workspace data
-├── store.ts                    381  L   ★ zustand store + Actions façade (the only UI-facing API)
+├── state.ts                    494  L   ★ constants, types re-exports, factories, role schemas, seed
+├── store.ts                    382  L   ★ zustand store + Actions façade (the only UI-facing API)
 ├── index.css                   342  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
-│   ├── core.ts                 865  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety
-│   ├── engine.ts              2032  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
+│   ├── core.ts                 998  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
+│   ├── engine.ts              2096  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             439  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
-│   ├── fs-access.ts            343  L   ★ File System Access adapter, ensureStructure, read/write a folder
+│   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             1226  L   92 tests in 6 files (§7)
+│   └── __tests__/             1541  L   118 tests in 7 files (§7)
 └── components/
-    ├── CanvasArea.tsx           729  L   ★ React Flow: node shapes, drawing layer, approval banner
-    ├── SidePanels.tsx          839  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx             753  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    ├── CanvasArea.tsx           749  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
+    ├── SidePanels.tsx          847  L   ★ library/files tabs, file tree, live folder tree, inspector
+    ├── Overlays.tsx             754  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **8 743 lines** in 20 files (8 401 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **9 310 lines** in 21 files (8 968 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
-`scripts/check-english.mjs` is not a dependency: a plain node script that CI calls (§11.3).
+the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
 `index.html` script tag other than the module entry.
 
@@ -187,10 +192,10 @@ decision that must not change behaviour (§10 Q3).
 
 # 3. Branches — one section per module
 
-## 3.1 `src/lib/core.ts` (865 lines) — types, serialisers, storage, HTML safety
+## 3.1 `src/lib/core.ts` (998 lines) — types, serialisers, storage, HTML safety, schemas
 
 No imports from inside the project. This is the only file allowed to know how a file looks on disk and how
-a folder is listed. Six sections, in this order:
+a folder is listed. Seven sections, in this order:
 
 ### 3.1.1 Domain types (verbatim contracts; the UI renders exactly these)
 
@@ -353,7 +358,34 @@ export function safeRelPath(p: string): string | null
 `safeRelPath` is called **after** any prefix stripping, on the final path (see `writeFilesToDirectory`) —
 the first version stripped, then validated, which let `canvases/x/../evil.md` escape the folder.
 
-## 3.2 `src/state.ts` (474 lines) — constants, factories, seed
+### 3.1.7 Output schemas — the validator `core` owns (in the file this block sits between HTML safety and `StorageAdapter`)
+
+```ts
+export interface SchemaField   { type? description? minLength? maxLength? minimum? maximum? pattern? enum? }
+export interface OutputSchema  { $schema? title? description? type?: "object" required? additionalProperties? properties? }
+export const SUPPORTED_SCHEMA_KEYWORDS   // 7 root keywords
+export const SUPPORTED_FIELD_KEYWORDS    // 8 field keywords
+export function validateAgainstSchema(fields: Record<string,string>, schema: OutputSchema): string[]
+export function parseOutputSchema(text: string): { ok: true; schema } | { ok: false; error: string }
+```
+
+Three decisions are packed in here, and all three exist because the alternative was a lie:
+
+- **an unknown keyword is an error, not a skip.** `SUPPORTED_*_KEYWORDS` are exported precisely so a test can
+  pin the promise; a validator that silently ignored `oneOf` would approve output the schema forbids, and would
+  then be *trusted*. Field-level complaints are named by path (`a.items`).
+- **presence is checked before shape** (`“summary” is required by the contract and came back empty`), and a field
+  that is absent is not type-checked — otherwise one missing field produces four complaints about one problem.
+- **numeric types mean "nothing but a number"**, because a value read from Markdown is a string:
+  `/^-?\d+(\.\d+)?$/` on the trimmed text. `"Total: 5 out of 10"` fails as an integer, and that is the point —
+  it is what lets `{{ risk_score < 7 }}` (§3.7) compare data instead of prose.
+
+`validateAgainstSchema` is pure and synchronous and returns messages, never throws: the caller decides whether a
+problem kills a node (`engine.validateAgainstContract`, §5.8 does). A malformed `pattern` in the schema is
+reported as the *schema's* failure (`“a” declares an invalid pattern in the schema`), not swallowed. Full format
+and ownership in §4.9.1.
+
+## 3.2 `src/state.ts` (494 lines) — constants, factories, role schemas, seed
 
 Pure data + construction; no behaviour, no async, no I/O (one exception: `defaultSettings()` reads
 `localStorage["lc-settings"]`, see debt §9.5).
@@ -369,11 +401,17 @@ Pure data + construction; no behaviour, no async, no I/O (one exception: `defaul
 | `makeNodeData(type, title, owner, partial?)` | the single place a node's defaults are decided (also stamps `updated_at: nowIso()` — this is why tests project instead of deep-comparing) |
 | `makeEdgeData(partial?)`, `makeMemDoc(path,title,body,confidence,source)` | same, for edges/memories |
 | `makeAgentConfig(nodeId, roleId, opts?)` + `AgentConfigOverrides` | role defaults → a node's `AgentConfig`. `opts.context_contract` is merged **list by list**, because a caller that narrows `allowed_read_paths` must not silently drop `allowed_write_paths` or the output contract |
-| `emptyExecution()`, `defaultSettings()`, `builtinTemplateInfo()` | initial slices |
-| `BUILTIN_TEMPLATE: TemplateSpec` | the 5-node/4-edge "Fast pipeline" shipped in code and mirrored to `library/templates/quick-pipeline/` on first boot |
-| `seedNodes/seedEdges/seedMemories` (internal) | the demo workspace: 1 note + 4 agents + 1 output box + 5 edges |
+| `emptyExecution()`, `defaultSettings()` | initial slices. `emptyExecution()` now carries `errors: Record<nodeId,string>` — the refusal text a run leaves on a node card (§5.8, §6) |
+| `STRUCTURE_VERSION = "1.4"` | stamped into `manifest.json` and the export envelope. `1.4` = `graph.json` deleted, `runs/` added, `library/schemas/` made real (§4.1) |
+| `ROLE_SCHEMAS: Record<roleId, OutputSchema>` + `makeRoleSchema(roleId, fields?)` + `schemaPathFor(roleId)` | the four output contracts, as data, and the one place the path `library/schemas/<role>.schema.json` is spelled (§4.9.1) |
+| `buildSeed(owner)` | what a fresh canvas is: one `note` ("Start here"), no edges, four empty memory docs. **No demo pipeline, no output box, no built-in template** — the reasoning is in §5.3 |
 
-## 3.3 `src/store.ts` (381 lines) — zustand store and the `actions` façade
+There is deliberately no `BUILTIN_TEMPLATE` and no `builtinTemplateInfo()` in this file any more. They used to
+ship a five-node pipeline and register it as a template on first boot, which meant the template list, the first
+screenshot, and the "load a template" flow all pointed at fabricated data. `loadTemplates()` returns exactly
+what is in `library/templates/`, which for a new canvas is nothing.
+
+## 3.3 `src/store.ts` (382 lines) — zustand store and the `actions` façade
 
 ```ts
 export const useStore = create<AppState & { actions: Actions }>()((set, get) => ({ ...initialState, actions }))
@@ -396,35 +434,40 @@ Notable behaviour living here (small but load-bearing):
   attachFolder, detachFolder, exportJson, exportFolder, importFolder, importJsonFile, previewImport,
   commitImport, setPortOpen, openStorageFile`.
 - `openStorageFile(path)` reads the file **through the adapter**, not from state, in folder mode — so the
-  File Tree shows bytes on disk, including files the app did not write.
+  File Tree shows bytes on disk, including files the app did not write. `state.json` is previewable through the
+  same path (it replaced the old `graph.json` preview, which showed a cache nobody should have to reason about).
+- `templates: []` and `runs: []` are the initial slices: nothing in the store is pre-fabricated, and the file
+  tree builds `runs/` from `state.runs` (a projection of the folder, refreshed by `hydrate` and by each ledger
+  open, §4.13).
 
-## 3.4 `src/lib/engine.ts` (2032 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (2096 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
 
 | section | exports (with line anchors) | contract |
 |---|---|---|
-| **events** | `emit(api,type,msg)` 32, `toast(api,kind,text)` 37 | `emit` builds a `BusEvent` through `bus` and prepends it to `state.events` (cap 250). `bus.on` currently has **zero subscribers** — it is the seam for SSE/plugins later (§10 ideas) |
-| **patching** | `getNode` 48, `patchNode(api,id,data,internal=false)` 55 | user edits are refused when `lock.status==="locked"` (§12.5); `internal=true` is how the executor itself writes |
-| **artifacts** | `writeNodeArtifact(api,id,quiet)` 75, `writeEdgeArtifact` 82, `appendLog` 91, `writeCanvasOverview` → `overviewMd` (private) 103 | one node = one file; `quiet` suppresses the event (used in bulk loops). `nodePath`/`edgePath` are the only path builders |
-| **saving** | `touch(api)` 181 (debounced 700 ms, flips `saveState`), `flushPending()` 187, `saveNow` (private) | every write sits on one promise chain so `flushPending` can await them all. **Export, reload and shutdown call it first** |
+| **events** | `emit(api,type,msg)` 33, `toast(api,kind,text)` 38 | `emit` builds a `BusEvent` through `bus` and prepends it to `state.events` (cap 250). `bus.on` currently has **zero subscribers** — it is the seam for SSE/plugins later (§10 ideas) |
+| **patching** | `getNode` 49, `patchNode(api,id,data,internal=false)` 56 | user edits are refused when `lock.status==="locked"` (§12.5); `internal=true` is how the executor itself writes |
+| **artifacts** | `writeNodeArtifact(api,id,quiet)` 76, `writeEdgeArtifact` 83, `appendLog` 92, `writeCanvasOverview` → `overviewMd` (private) 104 | one node = one file; `quiet` suppresses the event (used in bulk loops). `nodePath`/`edgePath` are the only path builders |
+| **saving** | `touch(api)` 168 (debounced 700 ms, flips `saveState`), `flushPending()` 174, `saveNow` (private) | every write sits on one promise chain so `flushPending` can await them all. **Export, reload and shutdown call it first** |
 | **memory** | `MemoryManager.read/write/list` 231 | conflict rule: incoming `confidence` must strictly exceed the stored one, else the old entry is kept and a `memory.updated` event explains it; equal weight → replaced + "ask the user later". A write into a locked node is refused. Writes are checked against `allowed_write_paths`; reads resolve **any** allowed path against the real tree |
-| **self-checks** | `testFallback` 314, `contractSelfTest` 336 | `contractSelfTest` = one allowed write + two attempted intrusions (global memory, another agent's memory) and reports in the console. This is the executable form of the context contract |
-| **outputs** | `FIELD_DESC` 368, `writeOutputs(api,nodeId,entries,shared)` 385 | writes `outputs/<node>/index.yaml` + one file per entry; `shared=true` puts it under `outputs/shared/<node>/` (used by the collection box) |
-| **LLM** | `askModel` (private) 397, `simFields` (private) 412, `buildEntries`/`validateOutput` 380 | provider `sim` returns templated, plausible phase-1 answers; `deepseek` POSTs to the configured endpoint and falls back to `sim` on any error (§12.6). `throw` on an empty response |
-| **tools** | `TOOL_NAMES` 477, `hasTool` 481, `unknownTools` 488 | the vocabulary an agent may act through. `get_canvas_overview`/`get_agent_brief` are the harness (always on); every other name must be in `agent.tools`, or the step is skipped (`read_memory`, `write_memory`), the node fails (`write_output`), or the chat is refused (`chat_with_user`). `unknownTools` names what this app cannot run, so the log says so instead of pretending |
-| **run ledger** | `startLedger` 504, `ledgerRow` 519, `endLedger` 540 | `runs/<run-id>.md`, one row per step: read-modify-write so a reload extends the same file, capped at 300 rows, closed with `**run completed/stopped/rejected**`. Format: §4.13 |
-| **execution** | `findStart` 662, `executeNode` 669, `runPipeline` 926, `runSingle` 952, `resumeRun` 968, `rejectRun` 977, `stopRun` 985, `resetExecution` 1001 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node |
-| **contract matching** | `isPathAllowed` 564, `numericScope` 575, `evalCondition` 593 | one matcher for `allowed_read_paths` and `allowed_write_paths`: a directory entry (trailing `/`), an exact path, or a glob over **one** segment (`outputs/*/summary.md`). `evalCondition` is fail-closed and returns `{ ok, reason }` — see §5.8. `numericScope` lifts a node's numeric output fields into `execution.context`, so a condition reads data, not prose |
-| **chat** | `sendChat(api,nodeId,text)` 1045 | appends to `chats/chat-<id>.md`; the simulated replies are per-role. A node without `chat_with_user` in `tools` still gets the user's message recorded, followed by an explicit refusal line — the gate stops the *reply*, never the record |
-| **snapshots** | `takeSnapshot(api,label,quiet)` 1106, `restoreSnapshot(api,id)` 1127 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
-| **strokes** | `clusterStrokes(strokes,gap=80)` 1171, `addStroke` 1208, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1240 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
-| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1267, `deleteNode` 1300, `createEdge` 1320, `deleteEdge` 1332 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
-| **loaders** | `loadStrokes` 1342, `loadTemplates` 1361, `pickMemory`/memory reads 1367, **`hydrate(api)`** 1137 | `hydrate` is the heart — see §5.2 |
-| **workspace** | `seedWorkspace(api)` 1470, `initWorkspace(api)` 1540, `reloadFromStorage` 1556, `resetWorkspace` 1570 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds |
-| **templates/roles** | `saveTemplate(api,name)` 1589, `loadTemplate(api,id)` 1645, `saveRoleFromNode(api,nodeId)` 1703 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
-| **portability** | `applyRootHandle` 1788, `attachWorkspaceFolder` 1802, `detachWorkspaceFolder` 1819, `pickCanvasFolder` 1830, `exportBundleText` 1852, `exportToJsonFile` 1866, `exportToFolder` 1882, `ImportPreview` 1903, `previewImportText` 1936, `applyImport` 1943, `importFromText` 1967, `importFromFolder` 1976, `importFromFile` 2006, `maybeResumeWorkspace` 2017 | see §5.5-§5.8 |
+| **self-checks** | `testFallback` 301, `contractSelfTest` 323 | `contractSelfTest` = one allowed write + two attempted intrusions (global memory, another agent's memory) and reports in the console. This is the executable form of the context contract, and since `1.4` it also parses the role's declared schema file, naming in the event which dimension failed (a missing file, a bad JSON object, an unsupported keyword), so a broken contract is caught before a run instead of during one |
+| **outputs** | `FIELD_DESC` 372, `writeOutputs(api,nodeId,entries,shared)` 435 | writes `outputs/<node>/index.yaml` + one file per entry; `shared=true` puts it under `outputs/shared/<node>/` (used by the collection box) |
+| **contract enforcement** | `setNodeError` 389, `validateAgainstContract` 408 | the seam between "the model answered" and "the canvas accepted it": `required_fields` must be non-empty, and a named `validator` must be a file under `library/schemas/`, present in the canvas, one parseable JSON object, and satisfied by these fields (§4.9.1, §5.8). Returns messages; the caller decides. `setNodeError` is the only writer of `execution.errors`, so the reason appears on the card exactly as often as it exists |
+| **LLM** | `askModel` (private) 447, `simFields` (private) 462, `buildEntries` 494 | `buildEntries` turns validated fields into output files (it filters to what is present; it no longer *decides* validity — that is the row above). provider `sim` returns templated, plausible phase-1 answers; `deepseek` POSTs to the configured endpoint and falls back to `sim` on any error (§12.6). `throw` on an empty response |
+| **tools** | `TOOL_NAMES` 527, `hasTool` 531, `unknownTools` 538 | the vocabulary an agent may act through. `get_canvas_overview`/`get_agent_brief` are the harness (always on); every other name must be in `agent.tools`, or the step is skipped (`read_memory`, `write_memory`), the node fails (`write_output`), or the chat is refused (`chat_with_user`). `unknownTools` names what this app cannot run, so the log says so instead of pretending |
+| **run ledger** | `startLedger` 554, `ledgerRow` 570, `endLedger` 591 | `runs/<run-id>.md`, one row per step: read-modify-write so a reload extends the same file, capped at 300 rows, closed with `**run completed/stopped/rejected**`. Format: §4.13 |
+| **execution** | `findStart` 713, `executeNode` 720, `runPipeline` 985, `runSingle` 1011, `resumeRun` 1027, `rejectRun` 1036, `stopRun` 1044, `resetExecution` 1060 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node. `execution.errors` is written only by `setNodeError` — cleared at `node.started`, set by a contract refusal or by the generic catch |
+| **contract matching** | `isPathAllowed` 615, `numericScope` 626, `evalCondition` 644 | one matcher for `allowed_read_paths` and `allowed_write_paths`: a directory entry (trailing `/`), an exact path, or a glob over **one** segment (`outputs/*/summary.md`). `evalCondition` is fail-closed and returns `{ ok, reason }` — see §5.8. `numericScope` lifts a node's numeric output fields into `execution.context`, so a condition reads data, not prose |
+| **chat** | `sendChat(api,nodeId,text)` 1104 | appends to `chats/chat-<id>.md`; the simulated replies are per-role. A node without `chat_with_user` in `tools` still gets the user's message recorded, followed by an explicit refusal line — the gate stops the *reply*, never the record |
+| **snapshots** | `takeSnapshot(api,label,quiet)` 1165, `restoreSnapshot(api,id)` 1186 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
+| **strokes** | `clusterStrokes(strokes,gap=80)` 1230, `addStroke` 1267, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1299 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
+| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1326, `deleteNode` 1359, `createEdge` 1379, `deleteEdge` 1391 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
+| **loaders** | `loadStrokes` 1401, `loadTemplates` 1420, `pickMemory` (private) 1450 (the memory reads), `loadRunIds` 1440, **`hydrate(api)`** 1470 | `hydrate` is the heart — see §5.2. It has one branch now: files first, `state.json` for the slices the tree does not carry, and `loadRunIds` to project `runs/` into `state.runs` for the file tree. `loadTemplates` starts from `[]` — there is no built-in template to prepend, in this file or anywhere |
+| **workspace** | `seedWorkspace(api)` 1526, `initWorkspace(api)` 1594, `reloadFromStorage` 1610, `resetWorkspace` 1624 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds. The seed writes the four role files, the two shapes and the four `library/schemas/*.json`, and nothing else: one note, no edges, no template, no `graph.json` (§5.3) |
+| **templates/roles** | `saveTemplate(api,name)` 1643, `loadTemplate(api,id)` 1699, `saveRoleFromNode(api,nodeId)` 1758 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
+| **portability** | `applyRootHandle` 1845, `attachWorkspaceFolder` 1859, `detachWorkspaceFolder` 1876, `pickCanvasFolder` 1887, `exportBundleText` 1909, `exportToJsonFile` 1924, `exportToFolder` 1940, `ImportPreview` 1961, `previewImportText` 1994, `applyImport` 2001, `importFromText` 2031, `importFromFolder` 2040, `importFromFile` 2070, `maybeResumeWorkspace` 2081 | see §5.5-§5.8. `applyImport` deletes a legacy `graph.json` from the incoming file map before installing anything, emits why, and lets `hydrate` rebuild from the files — the bundle's cache never becomes the canvas |
 
 ## 3.5 `src/lib/portable.ts` (439 lines) — the bundle and the file-first rebuild
 
@@ -447,7 +490,7 @@ dependency of the thing that reads its files). Three responsibilities:
    Helpers for the UI: `suggestFileName(canvasId, ext, taken)`, `downloadJson(name, text)`,
    `readFileAsText(file)`, `installFiles(files, {replace})`.
 
-## 3.6 `src/lib/fs-access.ts` (343 lines) — the folder seam
+## 3.6 `src/lib/fs-access.ts` (348 lines) — the folder seam
 
 ```ts
 export function isFsAccessSupported(): boolean            // "showDirectoryPicker" in window
@@ -455,8 +498,8 @@ export async function pickCanvasDirectory(): Promise<FsDirHandle>   // readwrite
 export async function ensurePermission(h, mode): Promise<boolean>   // query → prompt → grant
 export function toRelativePath(logical, rootPrefix): string|null     // the map/reverse-map of Law 4
 export const CANVAS_SUBDIRS: readonly string[]            // nodes, edges, memory/agents, outputs, logs, chats,
-                                                           //   strokes, library/{templates,roles,shapes}, history,
-                                                           //   assets, runs — the tree ensureStructure creates
+                                                           //   strokes, library/{templates,roles,schemas,shapes},
+                                                           //   history, assets, runs — the tree ensureStructure creates
 export async function ensureStructure(dir): Promise<void> // creates the §2 skeleton; idempotent
 export class FsAccessStorageAdapter implements StorageAdapter  // adapterKind = "fs"
 export async function readCanvasFromDirectory(dir, opts?): Promise<CanvasFiles>   // read-only walk, skips >2MB files
@@ -490,7 +533,7 @@ These samples were produced by the real serialisers (`nodeToMarkdown`, `edgeToYa
 not written by hand. Copy them: if you change a writer, these change, and the tests that compare
 export→import byte-for-byte will tell you.
 
-## 4.1 The tree (structure version `1.3`, everything below `canvases/<canvas-id>/`)
+## 4.1 The tree (structure version `1.4`, everything below `canvases/<canvas-id>/`)
 
 ```
 canvases/nexus-edu-001/
@@ -504,21 +547,28 @@ canvases/nexus-edu-001/
 │   └── agents/<node-id>.md  private memory per agent      §4.4
 ├── outputs/<node-id>/index.yaml + <file>                   §4.5
 ├── logs/<node-id>/<date>.log                               §4.7
-├── runs/<run-id>.md             one append-only ledger per run  §4.13
+├── runs/<run-id>.md         one append-only ledger per run  §4.13
 ├── chats/chat-<node-id>.md                                 §4.6
 ├── strokes/<stroke-id>.json                                §4.8
 ├── library/
 │   ├── templates/<template-id>/template.json|yaml + nodes/…  §4.9
 │   ├── roles/<role-id>.json
+│   ├── schemas/<role-id>.schema.json    output contracts as files  §4.9
 │   └── shapes/<shape-id>.json
 ├── history/index.json + snapshot-<stamp>.json              §4.11
-├── graph.json               machine cache (React Flow nodes+edges)
-└── state.json               machine cache (everything else in AppState)
+└── state.json               machine cache (everything except nodes/edges)  §4.11
 ```
 
-`library/` and `history/` and `graph.json`/`state.json` are **not** required: a folder containing only
+`library/`, `history/` and `state.json` are **not** required: a folder containing only
 `manifest.json`, `canvas.yaml`, `nodes/`, `edges/`, `memory/` is a valid canvas and hydrates fully (§5.2,
 tested). That is the whole point of the file-first design.
+
+**There is no `graph.json`.** Until structure `1.4` the tree carried a second copy of the graph — a cache of
+React Flow nodes and edges that could, and did, disagree with the node files. It was deleted: geometry lives in
+each `nodes/<id>.md` frontmatter (`position: {x, y, z}`), so one file says where one node is, and the
+`nodes/` folder *is* the graph. `hydrate()` never reads a `graph.json`, and Import drops one that arrives inside
+an older bundle, with a `system` event saying why (§5.7). A `1.3`-era folder that still has one hydrates
+unchanged — the extra file is simply inert.
 
 ## 4.2 `nodes/<id>.md` — one node
 
@@ -593,7 +643,9 @@ must respect):
   is unreadable too — it does not create an empty node.
 - `type` not in `NodeType` ⇒ `note`. `color` not matching `^#[0-9a-f]{3,8}$` ⇒ the per-type default.
   `shape`/`viewMode` invalid ⇒ defaults (`card`/`markdown` by type).
-- `position` absent ⇒ `{x:0,y:0}` — the value from `graph.json` wins when that cache exists (§5.2).
+- `position` absent ⇒ `{x:0,y:0}`, and that is the end of it: frontmatter is where geometry lives, and there is
+  no second file for it to lose to (§4.11). A node dragged somewhere new gets the value written back into this
+  same file by the next debounced save (§5.4).
 - `lock` is read and **discarded** (Law 3). `agent.status === "running"` ⇒ `idle`; `done` is kept.
 - `agent` present without `system_prompt` ⇒ the role's prompt is substituted, so a partial hand edit
   cannot produce a contentless agent.
@@ -693,43 +745,89 @@ Coordinates are in **canvas space**, not screen space, so a stroke stays where t
 zoom/pan. The drawing layer is a document, which is what makes "convert strokes to a graph" (§3.4 strokes)
 a real operation rather than a demo.
 
-## 4.9 `library/templates/<id>/template.json` (+ optional `nodes/` payload)
+## 4.9 `library/templates/…` and `library/schemas/…` — what the canvas reuses
 
 ```json
 { "template_id": "my-flow", "name": "My flow", "description": "saved from the canvas …",
   "version": "1.0", "nodes": [ … ], "edges": [ … ] }
 ```
-The built-in template is mirrored as `library/templates/quick-pipeline/template.yaml` on first boot.
+A template is a user's shape, nothing more: **the app ships no built-in template** and mirrors no
+`quick-pipeline` on first boot. What a fresh canvas gets is structure — see §5.3.
 Discovery path: `storage.listDirectory("canvases/<id>/library/templates")` → directory names with a
 trailing `/` → stripped → `template.json`/`template.yaml` read from each. **This is the exact chain the
 Law-4 bug broke.**
 
+### 4.9.1 `library/schemas/<role-id>.schema.json` — the contract, enforceable
+
+Every built-in role's `output_contract.validator` names one of these files, and the executor treats it as a
+**hard** requirement: the run reads the schema and validates the node's output against it before a single byte
+is delivered (§5.8). The file is a JSON Schema *subset*, and the subset is not a matter of taste — an
+unsupported keyword is reported rather than skipped, because a validator that quietly ignores `oneOf` passes
+output the schema forbids, and is then trusted for it.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "risk-analyst output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "risks", "decision", "risk_score"],
+  "properties": {
+    "summary":    { "type": "string", "minLength": 40, "maxLength": 400 },
+    "risk_score": { "type": "integer", "minimum": 1, "maximum": 10, "description": "1 = safe … 10 = stop" }
+  }
+}
+```
+
+| level | keywords this app implements | anything else |
+|---|---|---|
+| schema root | `$schema title description type required additionalProperties properties` | rejected: "unsupported keyword “oneOf” in the schema — refusing to ignore it" |
+| one field | `type description minLength maxLength minimum maximum pattern enum` | rejected, named by path (`a.items`) |
+
+A field's value arrives as a *string*, because output files are Markdown, so `"type": "integer"` is read as
+"nothing but a number" — which is what makes `{{ risk_score < 7 }}` a check instead of a decoration (§3.7).
+
+Ownership, so nothing is guessed: `core.validateAgainstSchema(fields, schema) → string[]` (empty ⇒ valid) and
+`core.parseOutputSchema(text)` (one JSON object or a loud error) are the whole engine; `state.ts` holds
+`ROLE_SCHEMAS` + `schemaPathFor(roleId)` + `makeRoleSchema` and stamps a node's `validator` from the role;
+`seedWorkspace` writes the four files; `saveRoleFromNode` rewrites the schema when a node's contract changes;
+`contractSelfTest` parses the declared schema so a broken file is caught before a run, not during one.
+`validator: null` in a node file is the only opt-out, and it is a decision the *user* wrote into that file — the
+engine then checks presence (`required_fields`) and nothing else. Full rules in §5.8 and in the tests
+(`schema.test.ts`, `execution.test.ts`).
+
 ## 4.10 `manifest.json` and the export bundle
 
 ```json
-{ "version": "1.0", "app_version": "0.1.0", "canvas_id": "nexus-edu-001", "structure_version": "1.3" }
+{ "version": "1.0", "app_version": "0.1.0", "canvas_id": "nexus-edu-001", "structure_version": "1.4" }
 ```
 
 ```json
-{ "kind": "living-canvas-export", "version": 1, "app_version": "0.1.0", "structure_version": "1.3",
+{ "kind": "living-canvas-export", "version": 1, "app_version": "0.1.0", "structure_version": "1.4",
   "canvas_id": "nexus-edu-001", "exported_at": "2026-09-01T16:34:09.949Z",
   "files": { "canvases/nexus-edu-001/nodes/node-001.md": "<full file text>", "…": "…" },
   "stats": { "files": 4, "bytes": 1782 } }
 ```
 `files` is a map of **logical path → exact file text** — no re-encoding, no sidecars, no excluded runtime
-data. `graph.json` and `state.json` travel inside it as ordinary files, which is why an import restores the
-canvas byte-for-byte (asserted in `roundtrip.test.ts`). Import also accepts a bare path→content map (a
+data. `state.json` travels inside it as an ordinary file (it is only a cache — the rebuild reads the node and
+edge files), and a `graph.json` that an older folder still carries is dropped on the way in. Everything that is
+real data is restored byte-for-byte (asserted in `roundtrip.test.ts`). Import also accepts a bare path→content map (a
 folder zipped by hand, someone's `cat *.json`), reported as `source: "raw-files"`.
 Guards, each with a user-visible reason in `skipped[]`: `..`/absolute/backslash paths; a path under
 `canvases/` that is not *this* canvas; non-string content; `kind` mismatch; `version > BUNDLE_VERSION`;
 total size > 32 MB. A missing `manifest.json` ⇒ a `warning`, not an error.
 
-## 4.11 The two caches, and history
+## 4.11 The one cache, and history
 
-- `graph.json` — `{ nodes: RFNode[], edges: RFEdge[] }`. **Fast path only.** Node Markdown overrides
-  `title`, `content`, `agent.system_prompt` on top of it (§5.2).
-- `state.json` — the rest of `AppState` (`canvas`, `memory`, `settings`, `execution`, `templates`,
-  `snapshots` metadata). Restoring it never restores locks; `execution.status` mid-run becomes `idle`.
+- `state.json` — `{ canvas, memory, outputs, chats, logs, snapshots, execution, saved_at }`. A **cache**, never
+  an input: `hydrate()` takes from it only the slices the file tree does not carry, and every field a file can
+  express (title, content, position, the whole agent config) is taken from the file, always. Restoring it never
+  restores locks; `execution.status` mid-run becomes `idle`; `execution.errors` is cleared, because a refusal
+  belongs to the run that made it.
+- **there is no `graph.json` any more.** The reason is a fact about this project, not a style preference: while
+  two files described the same nodes, the app needed a rule for which one won, and it had one ("Markdown
+  overrides the cache") instead of a single source. Deleting the cache deleted the rule. `saveCore` writes only
+  `state.json`, and the file tree labels the row `state.json (cache)` so nobody mistakes it for the document.
 - `history/index.json` + `history/snapshot-<nowStamp()>.json` — snapshot metadata lives in the index, the
   full graph in the snapshot file. Restore replaces the graph only (artifacts are not deleted — a
   checkpoint is a view of the canvas, not a backup of the folder).
@@ -805,41 +903,49 @@ tests for `deriveCanvasFromFiles` must be updated — that is the intended frict
    3. `hydrate(api)` (§5.2). `false` ⇒ `seedWorkspace(api)` (§5.3).
 3. `booted: true` flips the boot overlay off; the TopBar chip shows `storageMode()`.
 
-## 5.2 `hydrate(api)` — the load path, both branches
+## 5.2 `hydrate(api)` — one load path, from the files
 
 ```
 exists(`${ROOT}/manifest.json`)?  no  → return false (nothing was ever seeded here; do not wipe anything)
                                     yes ↓
-graph = readJson(`${ROOT}/graph.json`) (catch → null)
-files = graph?.nodes?.length
-        ? collectCanvasFiles({ filter: p => ^canvases/<id>/nodes/[^/]+\.md$  or  canvas.yaml })   // cheap overlay
-        : collectCanvasFiles()                                                                     // full §2 tree
+files   = collectCanvasFiles({ filter: p => ^canvases/<id>/nodes/[^/]+\.md$
+                                                  or  edges/[^/]+\.yaml  or  canvas.yaml })   // the graph itself
 derived = deriveCanvasFromFiles(files)      // nodes, edges, memory, canvasTitle, unreadable[]
-state   = readJson(`${ROOT}/state.json`)    (optional)
-
-if graph exists:
-    nodes/edges = graph   // positions, ids, style from the cache
-    for each node: title, content, agent.system_prompt ← derived (the FILE wins)
-else:
-    nodes/edges = derived // files are the only truth
-execution = state?.execution with status normalised (running/paused → idle, locks dropped)
+state   = readJson(`${ROOT}/state.json`)    (optional; may be broken — never fatal)
+execution = state?.execution with status normalised (running/paused → idle, locks dropped, errors cleared)
 memory    = derived.memory ∪ state?.memory
-templates = loadTemplates()   // listDirectory → per-folder spec (needs Law 4)
-strokes   = loadStrokes()     // strokes/*.json
+runs      = loadRunIds()                    // listDirectory(runs/) → ids, newest first — a projection, not an input
+templates = loadTemplates()                 // listDirectory → per-folder spec (needs Law 4)
+strokes   = loadStrokes()                   // strokes/*.json
 unreadable.length → emit validation.failed with the first four names
 return true
 ```
-The override direction is deliberate and is the answer to "why did my Obsidian edit disappear": the file
-always wins for the three fields an editor touches (`title`, body/`content`, `system_prompt`); the cache
-wins for geometry and ids, because a hand-edited `position` is rarer than a hand-edited title, and a
-misplaced node is recoverable while a lost prompt is not.
+
+Two rules a reader will ask about: a `manifest.json` that does not parse is still a manifest (`"{}"` is fine —
+it is a marker, not a config), and a folder with a manifest but **no node files** returns `false` on purpose, so
+`initWorkspace` seeds the skeleton rather than leaving a blank board with no explanation (§5.1.3, tested).
+
+There is no cache branch to compare against: `nodes/` + `edges/` *are* the graph, and `state.json` is read only
+for the slices the tree does not carry (`execution`, the shared memory docs when a file is missing, canvas
+metadata fallbacks). That single direction is the answer to "why did my Obsidian edit disappear" — a file
+cannot lose to a cache any more, because no cache holds a competing copy.
 
 ## 5.3 `seedWorkspace(api)` — first boot / empty folder
 
 `boot(path, text)` writes each file and appends a `bootLines` entry (the boot overlay is a real log).
-Order: `manifest.json` → `canvas.yaml` → `canvas-overview.md` → nodes → edges → memory (4 shared + one per
-agent) → `library/shapes/*.json` → `library/templates/quick-pipeline/template.yaml` → `graph.json` +
-`state.json`. Then a toast: `A new canvas is ready with the file-first layout.`
+Order: `manifest.json` → `canvas.yaml` → `canvas-overview.md` → nodes → edges (none) → memory (the four shared
+docs) → `library/roles/*.json` (4) → `library/shapes/*.json` (2) → `library/schemas/<role>.schema.json` (4) →
+`state.json` (cache) — and the last `bootLines` row says so out loud:
+`state.json (cache only — graph.json is gone)`.
+
+**What it seeds, and what it deliberately does not.** `buildSeed(owner)` returns one `note` node titled
+"Start here" (whose body points at the inspector and at `library/roles/`), no edges, and the four empty memory
+docs. No four-agent pipeline, no output box, no pre-fabricated flow, **no built-in template**: a fresh canvas
+must look like a blank board, not like a screenshot of somebody else's test. The demo pipeline used to make the
+structure easy to *see*, and it cost the app its honesty — `loadTemplates` had a fabricated entry, hydration
+had to know which nodes were fake, and every screenshot of the tool was a lie about what the tool produces. The
+role definitions and their schemas *are* seeded, because they are what the contract system needs to be real
+(§4.9.1); the graph is what the user draws.
 
 ## 5.4 Editing a node
 
@@ -848,9 +954,9 @@ textarea in the inspector → actions.updateNodeData(id, patch)
   → engine.patchNode(api, id, data)         // refused with a warn toast if locked (Law 3)
   → api.set(nodes: map over nodes)          // React Flow re-renders
   → touch(api)                              // debounced 700 ms:
-      saveNow → writeNodeArtifact(id)       // nodes/<id>.md via nodeToMarkdown
+      saveNow → writeNodeArtifact(id)       // nodes/<id>.md via nodeToMarkdown (position included)
               → writeCanvasOverview()       // counts + current step
-              → saveNow(graph.json, state.json)
+              → saveNow(state.json)         // the cache; there is nothing else to write
       saveState: "saving" → "saved"         // the TopBar chip, and the trigger for the live tree refresh
 ```
 Every keystroke costs one IndexedDB write 700 ms later — no batching layer, no queue to reason about. In
@@ -862,7 +968,7 @@ change now).
 ```
 actions.exportJson → engine.exportBundleText(api)
   1. await flushPending()            // the debounce window would drop the last edit
-  2. files = collectCanvasFiles()    // the whole §2 tree, both caches included
+  2. files = collectCanvasFiles()    // the whole §2 tree, the cache included
   3. bundle = buildBundle(files)     // envelope of §4.10
   4. bytes > 32MB ? → error toast "use folder mode"
   5. downloadJson(suggestFileName(canvasId, ".livingcanvas.json"), JSON.stringify(bundle, null, 2))
@@ -897,8 +1003,10 @@ edits" button and refuses to run while a save is in flight (so a half-written ed
              skipped list with reasons, "Replace the whole current canvas" checkbox
 user confirms → commitImport → engine.applyImport(api, files, { replace })
    replace ? storage.clear() (canvas-scoped) : merge
+   a legacy `files["canvases/<id>/graph.json"]` is deleted here, with a system event:
+     "graph.json in the bundle was dropped — positions now come from nodes/*.md only (§4.11)"
    ensure manifest.json exists (create it if the folder did not have one)
-   installFiles(files) → hydrate(api)
+   installFiles(files) → hydrate(api)      // i.e. rebuild from the files, not from the bundle's cache
 ```
 Note the last two lines: **import is "write the files, then run the normal load path"**, not "assign the
 state object". That is what makes importing a hand-made Obsidian folder and importing our own bundle the
@@ -927,9 +1035,15 @@ actions.runAll → runPipeline(api)
         (no read_memory in tools → skipped with a log line; no write_memory → memory untouched)
      upstream: predecessor outputs/**filtered by THIS node's allowed_read_paths** — an ungranted path is
                not read at all and emits validation.failed
-     askModel (or sim) → required_fields → validateOutput (missing *or* empty field ⇒ rejected)
      write_output not in tools → the node fails here, because an agent that cannot write cannot deliver
-     writeOutputs → outputs/<id>/index.yaml + files ; appendLog + ledger row per step
+     askModel (or sim) → fields → validateAgainstContract(api, agent, required_fields, fields)
+        presence: every required field non-empty            ·  then, if the node names a `validator`:
+        the file must be under library/schemas/, must exist in the canvas, must parse as one JSON object,
+        and must accept the fields (§4.9.1). Any of that failing ⇒ `problems[]`
+     problems.length → validation.failed event + log line + ledger row `rejected` + setNodeError(id, reason)
+                       → the node fails *before* writeOutputs: nothing lands in outputs/, and the card of the
+                         node shows the reason in an ember band (§6)
+     no problems     → writeOutputs → outputs/<id>/index.yaml + one file per field ; appendLog + ledger row
      memory write (own agent doc, confidence 0.8) → MemoryManager.write
      execution.context gains: nodeId → summary, plus every *numeric* output field (numericScope)
      require_approval? → status "waiting_approval", pause, return
@@ -938,7 +1052,10 @@ actions.runAll → runPipeline(api)
 ```
 `steps > max_steps` throws (§12.3). Any error marks the node `failed`, emits `node.failed`, appends the
 error to the log **and to the ledger**, stops the run and toasts — **it never auto-retries**, so a run's history
-stays readable. `stopRun`/`rejectRun` close the ledger with `**run stopped/rejected**` before they clear
+stays readable. `execution.errors[nodeId]` carries the one-line reason for as long as the canvas holds that
+run: it is set by the contract refusal above, and by the generic catch when nothing more precise is known, and
+cleared at `node.started` of the next run. It is deliberately *not* written into `nodes/<id>.md` — a failure is a
+moment of execution (Law 3), the reason is data only for the length of the run. `stopRun`/`rejectRun` close the ledger with `**run stopped/rejected**` before they clear
 `run_id`, so an interrupted run leaves a file that says it was interrupted.
 
 ## 5.9 Undo-ish: snapshots
@@ -991,12 +1108,20 @@ selector returning a fresh array/object re-renders forever. Every empty fallback
 | region | reads | writes via |
 |---|---|---|
 | `TopBar` | `saveState`, `canvas.title`, `storageMode()`, `execution.status`, lock of the selected node | `runAll` / `stop` / `resume` / `snapshot` / `setHistoryOpen` / `setSettingsOpen` / `setPortOpen` |
-| `Palette` (Library tab) | `PALETTE`, `templates`, `BUILTIN_TEMPLATE` | `addNode(type,pos)` (drag or click), `loadTemplate(id)` |
+| `Palette` (Library tab) | `PALETTE`, `templates` (whatever is in `library/templates/`, and nothing else) | `addNode(type,pos)` (drag or click), `loadTemplate(id)`, `saveTemplate(name)` |
 | `FileTree` | state-derived file list (idb) **or** `storage.listDirectory` (fs mode, refreshed whenever `saveState` returns to `saved`) | `openFile(path)` → FileViewer shows the real text; copy button |
 | `NodeInspector` | the selected `RFNode.data` | `updateNodeData`, `updateAgentField`, `saveRole`, `selfTest`, `runOne`, `removeNode`, `setChatNode` |
 | `CanvasArea` | `nodes`, `edges`, `execution`, `strokes`, `drawMode` | `onNodesChange/onEdgesChange/onConnect`, `addStroke`, `convertStrokes`, `resume/reject` |
 | `PortModal` | counts, `storageMode`, `settings.workspaceRoot`, `isFsAccessSupported()` | `exportJson`, `exportFolder`, `attachFolder`, `detachFolder`, `reloadFromDisk`, `previewImport` → `commitImport`, `importFolder`, `importJsonFile` |
 | `ActivityConsole` | `events` (cap 250) | `toggleConsole` |
+
+One row of that table deserves a sentence of its own, because it is the only place the app *explains* itself:
+`CanvasArea` reads `execution.errors[id]` and paints an ember band along the bottom of the node card (card and
+markdown views; dot and name views get a corner badge plus the `title` tooltip, because there is no room for a
+sentence in 24 px). The band is the run's refusal, verbatim — "output rejected —
+`library/schemas/risk-analyst.schema.json`: "risk_score" = 11 is above the maximum 10". The alternative was to
+make the user open the console and find the node's line among 250 events; a pipeline whose failure is only
+visible in a log is a pipeline nobody trusts. The text is never written into `nodes/<id>.md` (§5.8, Law 3).
 
 Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Enter in "save template").
 There are no canvas shortcuts, no focus rings on nodes, no `aria-live` on toasts — see §9.9.
@@ -1005,7 +1130,7 @@ There are no canvas shortcuts, no focus rings on nodes, no `aria-live` on toasts
 
 # 7. Immune system — tests
 
-`npx vitest run` → **6 files, 92 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **7 files, 118 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
 Every test runs the **production** functions — no re-implementations. `src/lib/test-helpers.ts` exists so a
 test cannot accidentally grow its own serialiser (that is how a fixture hides a bug).
 
@@ -1014,9 +1139,10 @@ test cannot accidentally grow its own serialiser (that is how a fixture hides a 
 | `storage.test.ts` | 16 | `listChildren` contract (files bare, dirs with `/`, sorted, deduped, no leakage across prefixes); `safeRelPath` rejections; `readJson` rejecting a missing file (so hydrate cannot fall back to the seed); `escapeHtml`/`mdInline` (no tag survives, only `strong/em/code`, payloads inside `**bold**`) |
 | `portable.test.ts` | 22 | bundle round-trip identity; escaping paths rejected; non-string content rejected; newer `version` rejected; foreign canvas skipped with a reason; missing manifest = warning; long/multiline `system_prompt` survives; files-only rebuild (nodes/edges/memory, canvas title, no truncation); a manual Obsidian edit wins; dangling edge dropped; locks not restored; `running→idle`, `done` kept; invalid colour/edge-type/clipped confidence; `parseYaml∘toYaml` identity; **YAML interop** (no bare flow mapping, no type drift for `"1.0"`) |
 | `fs-access.test.ts` | 13 | a Map-backed fake of the File System Access API: `toRelativePath` mapping and rejection; adapter CRUD + `listDirectory` + `allPaths` (files only, no dotfiles) + `..` throws + `clear` scoped; `ensureStructure` creation & idempotence; `writeFilesToDirectory` (valid files land, invalid ones are reported, prefix-escape rejected); `readCanvasFromDirectory` |
-| `roundtrip.test.ts` | 4 | seed → collect → bundle → parse → **compare file maps byte for byte**; hydration from real Markdown; the template-folder regression at workspace level; export *without* `graph.json`/`state.json` still rebuilds |
-| `execution.test.ts` | 29 | the run rules: `evalCondition` fail-closed (unsatisfied / unknown variable / unparsable / non-numeric data / string compare), `numericScope`, `isPathAllowed` (dir, exact, one-segment glob, no neighbour leakage), `computeOrder` (diamond, disconnected, cycle, parallel edges, determinism, mid-graph start), `hasTool`/`unknownTools`; plus `runPipeline` end to end on a two-agent graph — an ungranted upstream path is not read, `write_output` missing makes the node fail with no output files, a conditional edge skips the node and logs the reason, the run ledger is written row by row and closed, and `MemoryManager.read` returns a granted `outputs/` file |
-| `hydrate.test.ts` | 8 | the real `hydrate()` against `MemoryStorageAdapter`: no manifest → `false` and nothing deleted; custom template found after reload; several templates + neighbouring files; files-only mode builds the canvas; locked node not restored; `graph.json` supplies geometry while the file overrides title/content/prompt; broken `state.json` tolerated; the adapter in play is the adapter read (no stale cache between tests) |
+| `roundtrip.test.ts` | 4 | seed → collect → bundle → parse → **compare file maps byte for byte**; hydration from real Markdown; the template-folder regression at workspace level; export *without* `graph.json`/`state.json` still rebuilds — that last one is now the *normal* case, and its fixture is a deliberate `structure_version: "1.3"` folder, so the legacy shape stays covered |
+| `schema.test.ts` | 15 | the schema subset itself (§4.9.1): presence, `additionalProperties: false` in both directions, "a numeric field means nothing but a number", range/enum/pattern/length/boolean, **an unsupported keyword is reported at both levels and named by path**, a non-object root is refused, a broken `pattern` is the schema's own failure, `parseOutputSchema` accepts one JSON object or errors loudly, every shipped `ROLE_SCHEMAS` entry parses and promises exactly the fields its role declares |
+| `execution.test.ts` | 37 | the run rules: `evalCondition` fail-closed (unsatisfied / unknown variable / unparsable / non-numeric data / string compare), `numericScope`, `isPathAllowed` (dir, exact, one-segment glob, no neighbour leakage), `computeOrder` (diamond, disconnected, cycle, parallel edges, determinism, mid-graph start), `hasTool`/`unknownTools`; plus `runPipeline` end to end on a two-agent graph — an ungranted upstream path is not read, `write_output` missing makes the node fail with no output files, a conditional edge skips the node and logs the reason, the run ledger is written row by row and closed, and `MemoryManager.read` returns a granted `outputs/` file. The last group is the contract *enforced*: a score outside the schema's range fails the node with the reason in `execution.errors`, nothing lands in `outputs/`, the log and the ledger both record `rejected`; a schema file that is missing, outside `library/schemas/`, not one JSON object, or built from an unsupported keyword is refused before it can pass anything; and `validator: null` opts out of all of it — on purpose, with the cost asserted in the same test |
+| `hydrate.test.ts` | 11 | the real `hydrate()` against `MemoryStorageAdapter`: no manifest → `false` and nothing deleted; custom template found after reload; several templates + neighbouring files; files-only mode builds the canvas; locked node not restored; **a `graph.json` left in the folder is inert** (positions and text both come from the node file); broken `state.json` tolerated; the adapter in play is the adapter read (no stale cache between tests); `seedWorkspace` writes the four role files + the four schemas, no `graph.json`, one start-here note and no edges; an imported bundle loses its `graph.json` and says so |
 
 Rules for adding a test:
 1. Build fixtures with `nodeToMarkdown` / `edgeToYaml` / `memoryToMd` / `toYaml` from `test-helpers`, never by
@@ -1037,8 +1163,9 @@ Written down so nobody "helpfully" adds them back:
 
 - **No zip/JSZip.** A `.livingcanvas.json` bundle is plain JSON of the tree; Git already compresses text,
   and a zip would break "open the folder and look".
-- **No proprietary sidecar** (`.livingcanvas/`, `excludeRuntime`, per-file metadata dumps). `graph.json` and
-  `state.json` are ordinary files inside the tree, and are treated as caches.
+- **No proprietary sidecar** (`.livingcanvas/`, `excludeRuntime`, per-file metadata dumps). `state.json` is an
+  ordinary file inside the tree and is treated as a cache — and since structure `1.4` it is the *only* one,
+  because `graph.json` was deleted rather than documented (§4.11).
 - **No server in phase 1.** `HttpStorageAdapter` exists, the backend does not. Do not "temporarily" add an
   Express server to make a test easier.
 - **No second source of truth for node text.** If the inspector needs a field, the node file gains a field.
@@ -1060,7 +1187,9 @@ Ordered by how much they will cost to fix later. **Retired in the post-review pa
 `execution.test.ts`, so they stay retired): `executeNode` used to collect upstream output around the read contract;
 `MemoryManager.read` resolved only the five memory documents; `agent.tools` was decorative; `evalCondition` failed
 open; `risk_score` was hardcoded `5` for one role; `computeOrder` was a BFS that dropped disconnected nodes; the
-contract of `makeAgentConfig(...)` was replaced instead of merged; `validateOutput` could not fail; eleven unused
+contract of `makeAgentConfig(...)` was replaced instead of merged; `validateOutput` could not fail; the
+`output_contract` was decorative while a `graph.json` cache competed with the node files; a shipped four-agent
+demo pipeline and a fake built-in template made a fresh canvas look like someone's test; eleven unused
 npm dependencies and a 40 MB tracked snapshot; nothing that ran automatically (the CI definition now exists at
 `ci/github-actions.yml` but is not wired up yet — §11.3).
 
@@ -1069,16 +1198,19 @@ npm dependencies and a 40 MB tracked snapshot; nothing that ran automatically (t
    executor walks the six steps and `agent.tools` only decides which of them are permitted. Function calling means
    handing `TOOL_NAMES` to the provider as JSON-schema tools and looping on the calls it returns; the gate it needs
    is already in place (`hasTool`), so this is now an additive change rather than a rewrite.
-2. **The `validator` pointer still dangles.** Roles write `validator: "schemas/<role>.schema.json"`
-   (`engine.ts:1486`, `:1707`) and nothing reads it; no `schemas/` directory exists. What changed: `validateOutput`
-   can now fail — `buildEntries` no longer fabricates an empty file for a field the model did not return, so a
-   missing **or blank** required field is rejected. What is missing: types, bounds, enum membership. That is Q1,
-   and it also has to decide *where* the schemas live (`library/schemas/<role>.schema.json`, inside the canvas, or a
-   repo-level `schemas/` shared by canvases — today the string points outside `library/`, which no folder-mode tree
-   contains).
+2. **The schemas are enforced, but nobody can edit one.** A node's `validator` is now read, parsed and applied
+   before output is delivered (§4.9.1, §5.8) — the dangling pointer Q1 complained about is gone, and so is
+   `validateOutput`, which could not fail. What is still missing is authoring: the four `ROLE_SCHEMAS` in
+   `state.ts` are the only schemas in existence, `seedWorkspace` copies them into the canvas, and
+   `saveRoleFromNode` re-derives a node's schema from its `required_fields` — so a user who wants bounds on their
+   own role edits JSON in `library/schemas/` with an outside editor (which works: the file is the interface, and
+   hydrate picks it up). The UI gap is a schema editor in the inspector, or at minimum "validate this node's last
+   output against this file" next to `contractSelfTest`. Until then, `validator: null` is a real opt-out and the
+   only field of `output_contract` a node can set to *weaken* the contract deliberately.
 3. **Snapshots store the full graph per step, unbounded**, and `restoreSnapshot` restores the graph only. A long run
    = many near-duplicate JSON files. Next: `{node_id: patch}` deltas + keep-last-N with pinned manual checkpoints.
-   This pairs with Q3/Q6: if positions live only in node files, the graph delta gets small enough not to care.
+   Pairs with Q3/Q6, both now decided: positions live only in node files, so a snapshot's graph is a diff of
+   text the node files already contain — the delta idea got cheaper, and is still not done.
 4. **`apiKey` is in `localStorage` and the browser calls the provider directly** (the key leaks to anyone who gets
    script in — which is why Law 2 is not optional). The honest phase-2 shape is a thin proxy that holds the key.
    Do **not** reuse `HttpStorageAdapter` for it: that adapter is file I/O against a storage backend, not an LLM
@@ -1109,16 +1241,15 @@ These are the decisions that change the shape of the thing, so they should be ma
 document, before the code moves. My recommendation is attached to each; the ones marked ⚑ are the ones I
 would not start phase 2 without.
 
-⚑ **Q1 — Where does the file contract become load-bearing?** `validateOutput` now rejects a missing or blank
-required field, but the schema pointer in every role still points at a file that does not exist. Two coherent futures: (a) *canvas as editor* — keep
-validation soft, delete the schema promise, ship phase 2 as "tools that propose diffs"; (b) *canvas as
-orchestrator* — schemas become the contract between agents, validation is hard, and an output that fails
-schema stops the run (and the node shows the error inline). (b) is what the docs imply and what the
-folder-first design earns; it also forces Q2. Pick one — and with it, **where the schemas live**: roles currently
-emit `schemas/<role>.schema.json`, a path *outside* `canvases/<id>/library/`, so in folder mode it points at nothing
-that any adapter can read. Either `library/schemas/<role>.schema.json` (per canvas, travels with the export) or a
-repo-level `schemas/` (shared, but then a hand-made vault cannot ship its own roles). My vote: `library/schemas/`,
-because Law 1 says the canvas folder holds everything the canvas needs.
+⚑ **Q1 — Where does the file contract become load-bearing?** *Answered and built (structure `1.4`)*: the canvas
+**is** an orchestrator, because it runs a non-deterministic tool and then routes the result. (a) — soft
+validation and a decorative `validator` string — was the state of the code, and it is the option that makes the
+contract a lie: an agent whose output shape nobody checks is not an agent with a contract. So: `library/schemas/<role>.schema.json`
+inside the canvas (Law 1 — the folder holds everything the canvas needs, and a hand-made vault can ship its own
+roles), written by the seed, re-derived by `saveRoleFromNode`, and applied by `validateAgainstContract` *before*
+a byte is delivered. An output that fails schema stops the run, names its reason in the log, the ledger and the
+node card, and writes nothing into `outputs/`. `validateOutput` is deleted, not kept as a fallback. The remaining
+gap is authoring, not enforcement — §9.2.
 
 ⚑ **Q2 — One canvas per folder, or many?** `FsAccessStorageAdapter` maps `canvases/<id>/` → the picked
 folder root, i.e. the picked folder **is** one canvas. That is right for a Git repo per project, wrong for an
@@ -1126,13 +1257,16 @@ Obsidian vault. If vaults matter, the adapter should keep the `canvases/<id>/` p
 accept the *vault root* (a `pickMany` mode). This is a 30-line change now and a migration later — decide
 before anyone has a vault with three canvases.
 
-⚑ **Q3 — `graph.json`/`state.json`: cache or crutch?** They make boot fast and imports exact, and they are
-the only way for the two readers to disagree. Proposal: keep `state.json`, **delete `graph.json`**, and let
-positions live in the node files (they already do). One fewer cache to invalidate, and the files-only path
-becomes the *only* path. Cost: a boot that lists `nodes/*.md` — fine up to a few hundred nodes; if it ever
-isn't, the answer is a derived index, not a second truth.
+⚑ **Q3 — `graph.json`/`state.json`: cache or crutch?** *Answered and built*: `graph.json` is **deleted** and
+`state.json` stays a cache. `position` was the only field it held that a node file did not already carry, and a
+node file carries position now — so the "one source of truth" argument stopped being an argument and became a
+deletion: `writeCore` writes one file, `hydrate` has one branch (no override rule left to remember, §5.2),
+`applyImport` drops one from an older bundle, and the file tree says `state.json (cache)` instead of offering a
+second graph to click. Cost measured: a boot that lists `nodes/*.md`; the seed's 19 files hydrate in single-digit
+milliseconds, and if a few hundred nodes ever makes that slow the answer is a derived index that is *rebuilt*,
+never a second truth.
 
-**Q4 — How far should `core.ts` stay one file?** 851 lines holding types, YAML, HTML safety and four
+**Q4 — How far should `core.ts` stay one file?** 998 lines holding types, YAML, HTML safety, the output-schema subset and four
 adapters. It is honest today (one place where file shapes are decided) and it will hurt at ~1.5k. Natural
 split when it does: `types.ts` (no imports), `yaml.ts`, `html.ts`, `storage/*.ts`. Law 5 keeps the edges
 acyclic either way. Do it when adding the fifth adapter, not before.
@@ -1143,12 +1277,16 @@ refused it". It is append-only text written through the adapter, so it survives 
 `git diff`. Not yet in it: model name, token counts, latency — the row schema has a `detail` column free for them
 when function calling lands (§9.1). If you want a different table shape, change `LEDGER_HEADER`, nothing else.
 
-**Q6 — Is `hydrate`'s "file overrides cache" rule right for geometry too?** Today: files win for
-title/content/prompt, cache wins for position. If Q3 removes `graph.json`, positions come from files only,
-and this question disappears — which is another argument for Q3.
+**Q6 — Is `hydrate`'s "file overrides cache" rule right for geometry too?** *Answered by Q3*: there is nothing to
+override any more. Geometry, title, body and prompt all come from `nodes/<id>.md`, and the rule itself was
+deleted with the cache — a reader who arrives here looking for the precedence rule should not find one.
 
-Done since this document was written: ~~(1) gate every tool by the contract~~ and ~~(2) `runs/<run-id>.md`~~.
-Still in order, once Q1-Q3 are answered: (a) function calling — the executor hands `TOOL_NAMES` to the provider and
+Done since this document was written: ~~(1) gate every tool by the contract~~, ~~(2) `runs/<run-id>.md`~~,
+~~(3) hard schema validation (Q1)~~, ~~(4) delete `graph.json` (Q3)~~.
+Q2 (one canvas per folder, or a vault with many) is the only ⚑ left unanswered, and it is a 30-line change in
+`fs-access.ts` + the picker — deliberately not bundled with this pass, because it changes what "attach a folder"
+means to a user mid-flight.
+Still in order: (a) function calling — the executor hands `TOOL_NAMES` to the provider and
 loops on the model's tool calls, now that `hasTool` makes refusal cheap; (b) a "diff" view in FileViewer (what the
 last run changed in this file), because a canvas whose files can be edited outside the app is a canvas that needs
 `git diff` in the UI; (c) delta snapshots + keep-last-N (§9.3); (d) providers beyond DeepSeek, reusing
@@ -1171,7 +1309,7 @@ this pass it is the only complete one:
 |---|---|---|
 | §2 | the file tree | §4.1 |
 | §3.1–§3.9 | file formats | §4.2–§4.11 |
-| §4 | graph JSON schema | §4.11 |
+| §4 | graph JSON schema | §4.1 + §4.2 (the tree and the node file replaced it — `graph.json` is gone, §4.11) |
 | §5.1 / §5.2 | StorageAdapter / its four implementations | §3.1.4 |
 | §6 | memory architecture (5 docs, conflicts) | §3.4 memory, §4.4 |
 | §8 | the three agent tools | §3.4 execution, §10 ideas |
@@ -1188,32 +1326,34 @@ this pass it is the only complete one:
 | **canvas** | one folder `canvases/<id>/` + its graph. There is exactly one per tab in this build (`CANVAS_ID`). |
 | **node / edge** | `RFNode<LCNodeData>` / `RFEdge<LCEdgeData>` — React Flow items whose *data* is also a file. |
 | **artifact** | a file the app writes for a node: node md, edge yaml, memory md, output file, log, chat, stroke. |
-| **machine cache** | `graph.json` + `state.json`. Never authoritative. |
-| **contract** | `ContextContract` — the read/write path allow-list plus the output shape. Enforced on writes, self-testable. |
+| **machine cache** | `state.json`. Never authoritative, and there is only one of it since `1.4`. |
+| **contract** | `ContextContract` — the read/write path allow-list plus the output shape (`required_fields` + `validator`). Enforced on reads *and* writes, enforced on output, self-testable. A contract with no schema behind it is not a contract. |
 | **run** | one execution of the queue, identified by `run_id`; owners of node locks are `run_id`s. |
 | **hydrate** | rebuild `AppState` from files (possibly only files). Idempotent; safe to call again. |
 | **bundle** | the `.livingcanvas.json` export envelope (§4.10). |
 | **live folder mode** | the storage adapter writes into a user-picked directory, and the File Tree shows that directory. |
-| **overlay** (in hydrate) | the rule that file content wins over the cache for three fields. |
+| **schema file** | `library/schemas/<role>.schema.json` — the JSON Schema subset a node's output is validated against (§4.9.1). A file, so an outside editor can tighten it. |
 
 ## 11.3 Commands
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 6 files / 90 tests
+npm test            vitest run            → 7 files / 118 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
-npm run build       tsc --noEmit && vite build → ~524 kB js / 161 kB gzip (chunk ceiling 600)
+npm run build       tsc --noEmit && vite build → ~527 kB js / 163 kB gzip (chunk ceiling 600)
 node scripts/check-english.mjs   English-only gate: scans `git ls-files`, exits 1 on any RTL/bidi character
+node scripts/doc-anchors.mjs     rewrites the `name 412` line anchors in §3.4 from src/lib/engine.ts (--check = exit 1)
 ```
 
-Those four checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**`. The definition is committed as
+Those checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**` — including the anchor gate,
+because a reference document is only worth having if nothing can quietly make it wrong. The definition is committed as
 **`ci/github-actions.yml`** rather than under `.github/`, because the agent connection maintaining this branch may not
 create files in `.github/workflows/` (a GitHub App permission, not a code problem). Activating it is one human commit:
 `cp ci/github-actions.yml .github/workflows/ci.yml`. Until that lands there is no automation guarding `main`, so whoever
 merges runs the four commands by hand.
 
 No lint step and no formatter config (§9.9) — adding
-one is a decision, not a cleanup, because it would reformat 8.7k lines in one commit. If you add one, match the four
+one is a decision, not a cleanup, because it would reformat 9.3k lines in one commit. If you add one, match the four
 conventions already in use: double quotes, semicolons, 2-space indent, ~120 column soft limit, `/* */` section
 banners inside long files.

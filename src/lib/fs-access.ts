@@ -306,9 +306,14 @@ export async function writeFilesToDirectory(
  * `runs/` is the append-only run ledger (one file per run); a hand-made vault gets it too so the
  * tree the app writes and the tree the user sees stay the same shape.
  */
+/**
+ * The skeleton `ensureStructure` creates. Every entry here is something the app expects to write into, so a
+ * hand-made vault and an app-made folder end up the same shape (`library/schemas/` belongs to the output
+ * contracts the roles declare, §4.9; `runs/` to the ledger, §4.13).
+ */
 export const CANVAS_SUBDIRS = [
   "nodes", "edges", "strokes", "chats", "outputs", "memory/agents",
-  "history", "logs", "runs", "library/shapes", "library/roles", "library/templates", "assets",
+  "history", "logs", "runs", "library/shapes", "library/roles", "library/templates", "library/schemas", "assets",
 ];
 
 export async function ensureStructure(dir: FsDirHandle, relRoot = ""): Promise<string[]> {

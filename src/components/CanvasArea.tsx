@@ -42,7 +42,7 @@ function Md({ text, compact = false }: { text: string; compact?: boolean }) {
 
 /* ---------------- status ---------------- */
 
-const STATUS_FA: Record<AgentStatus, string> = {
+const STATUS_LABEL: Record<AgentStatus, string> = {
   idle: "Ready", running: "Running", done: "Done", failed: "Failed", waiting: "Awaiting approval",
 };
 const STATUS_COLOR: Record<AgentStatus, string> = {
@@ -80,6 +80,9 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const chatOpen = useStore((s) => s.ui.chatNodeId === id);
   const confidence = useStore((s) => s.memory.agents[id]?.confidence ?? 0.7);
   const execWaiting = useStore((s) => s.execution.status === "waiting_approval" && s.execution.current_node_id === id);
+  // why the run refused this node (§3.6) — the executor's refusal is the interesting part of a
+  // non-deterministic pipeline, so it belongs on the card, not only in a console the user has to open
+  const failReason = useStore((s) => s.execution.errors[id] ?? "");
   const actions = useStore((s) => s.actions);
   const agent = data.agent;
   const status: AgentStatus = agent?.status ?? "idle";
@@ -88,6 +91,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const locked = data.lock.status === "locked";
 
   const ring = running ? "anim-running" : waiting ? "anim-waiting" : "";
+  const wide = data.viewMode === "card" || data.viewMode === "markdown";
   const breathe = data.animation.type === "breathe" && !running ? "anim-breathe" : "";
   const breatheDur = { animationDuration: `${3.2 / data.animation.speed}s` };
 
@@ -112,6 +116,22 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
       {selected && <span className="sr-only">selected</span>}
+      {failReason && (wide ? (
+        <div
+          className="absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 px-2.5 py-1.5 rounded-b-[inherit] border-t border-ember/45 bg-[#170d0b]/95"
+          title={failReason}
+        >
+          <IWarn size={10} className="shrink-0 mt-[2px] text-ember" />
+          <p className="text-[9.5px] font-mono leading-[13px] text-ember line-clamp-2 break-words">{failReason}</p>
+        </div>
+      ) : (
+        <span
+          className="absolute -bottom-1.5 -right-1.5 z-10 w-4 h-4 rounded-full bg-ink-950 border border-ember/70 text-ember flex items-center justify-center"
+          title={failReason}
+        >
+          <IWarn size={9} />
+        </span>
+      ))}
     </div>
   );
 
@@ -175,7 +195,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         {agent && (
           <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0" style={{ color: STATUS_COLOR[status], background: `${STATUS_COLOR[status]}18` }}>
             <span className={`w-1.5 h-1.5 rounded-full ${running || waiting ? "anim-blink" : ""}`} style={{ background: STATUS_COLOR[status] }} />
-            {STATUS_FA[status]}
+            {STATUS_LABEL[status]}
           </span>
         )}
       </div>

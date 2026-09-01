@@ -10,7 +10,7 @@ import {
   evalCondition, numericScope, isPathAllowed, computeOrder, hasTool, unknownTools, MemoryManager, runPipeline, sendChat,
 } from "../engine";
 import {
-  CANVAS_ID, emptyExecution, makeAgentConfig, makeEdgeData, makeNodeData,
+  CANVAS_ID, emptyExecution, makeAgentConfig, makeEdgeData, makeNodeData, ROLE_SCHEMAS, schemaPathFor,
   type AgentConfigOverrides, type AppState, type RFEdge, type RFNode,
 } from "../../state";
 import { nodeToMarkdown, toYaml } from "../test-helpers";
@@ -183,7 +183,7 @@ function makeApi(initial?: Partial<AppState>) {
       user: { path: "memory/user.md", title: "", body: "", updated_at: "", last_accessed: "", confidence: 0, source: "user" },
       agents: {},
     },
-    outputs: {}, chats: {}, logs: {}, snapshots: [], templates: [], strokes: [],
+    outputs: {}, chats: {}, logs: {}, runs: [], snapshots: [], templates: [], strokes: [],
     execution: emptyExecution(), events: [], toasts: [],
     settings: { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 1, backendUrl: "", workspaceRoot: null },
     saveState: "saved", typing: {},
@@ -207,15 +207,28 @@ const flowEdge = (id: string, source: string, target: string, condition?: string
     data: { ...makeEdgeData(), ...(condition ? { trigger: { type: "condition" as const, condition } } : {}) },
   }) as RFEdge;
 
+/** The schemas the two roles' contracts declare — hard validation means the run needs them on disk (§4.9). */
+const roleSchemaFiles = (roles: string[]) =>
+  Object.fromEntries(roles.map((r) => [`${ROOT}/${schemaPathFor(r)}`, JSON.stringify(ROLE_SCHEMAS[r], null, 2)]));
+
 async function twoAgentGraph(opts: {
   a?: AgentConfigOverrides;
   b?: AgentConfigOverrides;
   condition?: string;
+  schemas?: Record<string, unknown> | null;
 } = {}) {
+  const custom = opts.schemas;
+  const seeded =
+    custom === null
+      ? {} // the schema files deliberately do not exist
+      : custom === undefined
+        ? roleSchemaFiles(["risk-analyst", "solution-designer"])
+        : Object.fromEntries(Object.entries(custom).map(([k, v]) => [`${ROOT}/library/schemas/${k}.schema.json`, JSON.stringify(v)]));
   const store = new MemoryStorageAdapter({
     [`${ROOT}/canvas-overview.md`]: toYaml({ title: "contract test", owner: "mahla", canvas_type: "agent-pipeline" }),
     [`${ROOT}/nodes/a.md`]: nodeToMarkdown("a", { title: "A", nodeType: "agent" }),
     [`${ROOT}/nodes/b.md`]: nodeToMarkdown("b", { title: "B", nodeType: "agent" }),
+    ...seeded,
   });
   setStorage(store);
   const api = makeApi({
@@ -335,5 +348,98 @@ describe("MemoryManager.read — allowed paths resolve against real files (§9)"
     const docs = await MemoryManager.read(api, "b");
     expect(docs.join("\n")).toContain("Memory of b");
     expect(docs.join("\n")).not.toContain("outputs/a/");
+  });
+});
+
+/** the ledger of the newest run written so far (the file name carries a timestamp) */
+async function latestRun(store: MemoryStorageAdapter): Promise<string> {
+  const ids = (await store.listDirectory(`${ROOT}/runs`)).filter((n) => n.endsWith(".md")).sort();
+  return `${ROOT}/runs/${ids[ids.length - 1]}`;
+}
+
+/* ---------------- the contract is enforced, not decorated (decision Q1) ---------------- */
+
+/** A contract that names a schema and lists the fields the run produces — the pieces that must agree. */
+function hardContract(fields: string[], validator: string | null) {
+  return { context_contract: { output_contract: { required_fields: fields, validator } } };
+}
+
+describe("hard schema validation (§4.9)", () => {
+  it("lets a conforming output through and writes the files", async () => {
+    const { api, store } = await twoAgentGraph({ a: hardContract(["summary", "risks", "decision", "risk_score"], schemaPathFor("risk-analyst")) });
+    await runPipeline(api);
+    expect(api.get().execution.errors["a"] ?? "").toBe("");
+    expect(await store.readFile(`${ROOT}/outputs/a/summary.md`)).toContain("Three main risks were identified");
+    expect(await store.readFile(`${ROOT}/outputs/a/risk_score.md`)).toContain("\n\n5");
+  });
+
+  it("refuses an output that breaks a declared range — and says so in three places", async () => {
+    const { api, store } = await twoAgentGraph({
+      // the shipped schema allows 1..10; this canvas tightened it to 1..3, and the simulated run scores 5
+      schemas: { "risk-analyst": { required: ["risk_score"], properties: { risk_score: { type: "integer", minimum: 1, maximum: 3 } } } },
+    });
+    await runPipeline(api);
+    const why = api.get().execution.errors["a"] ?? "";
+    // 1. the node carries the reason, because the canvas is the orchestrator of a non-deterministic tool
+    expect(why).toContain("output rejected");
+    expect(why).toContain("“risk_score” = 5 is above the maximum 3");
+    // 2. nothing was delivered
+    await expect(store.readFile(`${ROOT}/outputs/a/summary.md`)).rejects.toThrow(/ENOENT/);
+    // 3. the log and the ledger both record the refusal
+    expect(logOf(api, "a")).toContain("validation rejected the output");
+    const ledger = await store.readFile(await latestRun(store));
+    expect(ledger).toContain("| rejected |");
+  });
+
+  it("refuses a declared schema that is not in the canvas", async () => {
+    // the contract still names library/schemas/risk-analyst.schema.json; the folder is empty
+    const { api, store } = await twoAgentGraph({ schemas: null });
+    await runPipeline(api);
+    expect(api.get().execution.errors["a"]).toContain(
+      "library/schemas/risk-analyst.schema.json: the contract names this schema, but the file is not in the canvas"
+    );
+    await expect(store.readFile(`${ROOT}/outputs/a/summary.md`)).rejects.toThrow(/ENOENT/);
+  });
+
+  it("refuses a validator that points outside library/schemas/", async () => {
+    const { api } = await twoAgentGraph({ a: hardContract(["summary"], "memory/global.md") });
+    await runPipeline(api);
+    expect(api.get().execution.errors["a"]).toContain("must live under library/schemas/");
+  });
+
+  it("refuses a file that is not one JSON object", async () => {
+    const { api, store } = await twoAgentGraph();
+    await store.writeFile(`${ROOT}/library/schemas/risk-analyst.schema.json`, "[1, 2, 3]");
+    await runPipeline(api);
+    expect(api.get().execution.errors["a"]).toContain("the schema file must contain one JSON object");
+  });
+
+  it("refuses a schema whose keywords it does not implement rather than ignoring them", async () => {
+    const { api } = await twoAgentGraph({
+      schemas: { "risk-analyst": { required: ["summary"], properties: { summary: { type: "string", format: "email" } } } },
+    });
+    await runPipeline(api);
+    expect(api.get().execution.errors["a"]).toContain("unsupported keyword");
+  });
+
+  it("an opted-out node is still gated by required_fields", async () => {
+    const { api, store } = await twoAgentGraph({ a: hardContract(["summary", "nope"], null) });
+    await runPipeline(api);
+    // the field the run never produced fails it on presence alone — no schema needed
+    expect(api.get().execution.errors["a"]).toContain("“nope” is required and came back empty");
+    await expect(store.readFile(`${ROOT}/outputs/a/nope.md`)).rejects.toThrow(/ENOENT/);
+  });
+
+  it("opting out means opting out: the schema on disk is not consulted", async () => {
+    // the same canvas, the same impossible score — one node names the schema, the other wrote `validator: null`
+    const schemas = { "risk-analyst": { properties: { risk_score: { type: "integer", minimum: 1, maximum: 3 } } } };
+    const strict = await twoAgentGraph({ a: hardContract(["summary", "risks", "decision", "risk_score"], schemaPathFor("risk-analyst")), schemas });
+    await runPipeline(strict.api);
+    expect(strict.api.get().execution.errors["a"]).toContain("above the maximum 3");
+
+    const opted = await twoAgentGraph({ a: hardContract(["summary", "risks", "decision", "risk_score"], null), schemas });
+    await runPipeline(opted.api);
+    expect(opted.api.get().execution.errors["a"] ?? "").toBe("");
+    expect(await opted.store.readFile(`${ROOT}/outputs/a/summary.md`)).toContain("Three main risks were identified");
   });
 });

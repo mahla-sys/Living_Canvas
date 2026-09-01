@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { setStorage, storage, MemoryStorageAdapter, nodeToMarkdown, toYaml, frontmatter } from "../core";
-import { hydrate } from "../engine";
-import { emptyExecution, makeNodeData, CANVAS_ID, BUILTIN_TEMPLATE } from "../../state";
+import { applyImport, hydrate, seedWorkspace } from "../engine";
+import { emptyExecution, makeNodeData, CANVAS_ID } from "../../state";
 import type { AppState } from "../../state";
 
 /* ============================================================
@@ -31,7 +31,7 @@ function makeApi(initial?: Partial<AppState>) {
       user: { path: "memory/user.md", title: "", body: "", updated_at: "", last_accessed: "", confidence: 0, source: "user" },
       agents: {},
     },
-    outputs: {}, chats: {}, logs: {}, snapshots: [], templates: [], strokes: [],
+    outputs: {}, chats: {}, logs: {}, runs: [], snapshots: [], templates: [], strokes: [],
     execution: emptyExecution(), events: [], toasts: [],
     settings: { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 1, backendUrl: "", workspaceRoot: null },
     saveState: "saved", typing: {},
@@ -79,7 +79,8 @@ describe("hydrate — restoration from files", () => {
     expect(ok).toBe(true);
     const ids = api.peek().templates.map((t) => t.id);
     expect(ids).toContain("my-flow"); // ← this line used to fail
-    expect(ids).toContain(BUILTIN_TEMPLATE.template_id);
+    // and nothing else: there is no built-in template to inject any more (structure 1.4)
+    expect(ids).toEqual(["my-flow"]);
     const mine = api.peek().templates.find((t) => t.id === "my-flow")!;
     expect(mine.name).toBe("My flow");
     expect(mine.builtin).toBe(false);
@@ -96,7 +97,7 @@ describe("hydrate — restoration from files", () => {
     });
     const api = makeApi();
     await hydrate(api);
-    expect(api.peek().templates.map((t) => t.id).sort()).toEqual([BUILTIN_TEMPLATE.template_id, "a", "b"].sort());
+    expect(api.peek().templates.map((t) => t.id).sort()).toEqual(["a", "b"]);
   });
 
   it("files-only mode: without graph.json/state.json the canvas is built from Markdown", async () => {
@@ -132,8 +133,12 @@ describe("hydrate — restoration from files", () => {
     expect(api.peek().execution.status).toBe("idle");
   });
 
-  it("with graph.json the data comes from it and title/content are overlaid from the file", async () => {
-    const md = nodeToMarkdown("node-001", { ...makeNodeData("note", "title edited in Obsidian", "mahla"), content: "fresh text" });
+  it("a legacy graph.json in the folder is inert: positions come from the node file (§4.11)", async () => {
+    const md = nodeToMarkdown(
+      "node-001",
+      { ...makeNodeData("note", "title edited in Obsidian", "mahla"), content: "fresh text" },
+      { x: 12, y: 34 }
+    );
     await freshStore({
       [`${ROOT}/manifest.json`]: "{}",
       [`${ROOT}/nodes/node-001.md`]: md,
@@ -149,7 +154,8 @@ describe("hydrate — restoration from files", () => {
     const n = api.peek().nodes[0];
     expect(n.data.title).toBe("title edited in Obsidian");
     expect(n.data.content).toBe("fresh text");
-    expect(n.position).toEqual({ x: 55, y: 66 }); // position comes from graph.json
+    // the node file wins on everything, including geometry — one source, so one behaviour
+    expect(n.position).toEqual({ x: 12, y: 34 });
   });
 
   it("broken/partial state.json → hydrate does not fail; the files are enough", async () => {
@@ -164,11 +170,68 @@ describe("hydrate — restoration from files", () => {
     expect(api.peek().nodes.map((n) => n.id)).toEqual(["only"]);
   });
 
+  it("a folder with a manifest and no nodes is treated as empty, so boot seeds instead of showing a blank board", async () => {
+    // the user deleted every node: there is nothing to restore, and hydrate must not pretend otherwise —
+    // `initWorkspace` reads this false as "seed the skeleton", which is also why the seed is one note now (§5.3)
+    await freshStore({
+      [`${ROOT}/manifest.json`]: "{}",
+      [`${ROOT}/canvas.yaml`]: toYaml({ id: CANVAS_ID, title: "Emptied", owner: "mahla", canvas_type: "agent-pipeline" }),
+      [`${ROOT}/edges/dangling.yaml`]: "source: gone\ntarget: also-gone\n",
+    });
+    const api = makeApi();
+    expect(await hydrate(api)).toBe(false);
+    expect(api.peek().nodes).toEqual([]);
+  });
+
   it("hydrate reads the active storage (no stale cache between tests)", async () => {
     const mem = await freshStore({ [`${ROOT}/manifest.json`]: "{}", [`${ROOT}/nodes/x.md`]: nodeFile("x", "X") });
     expect(storage).toBe(mem);
     const api = makeApi();
     await hydrate(api);
     expect(api.peek().nodes).toHaveLength(1);
+  });
+});
+
+/* ---------------- structure 1.4: one source of truth, and nothing pre-fabricated ---------------- */
+
+describe("what a fresh canvas and an old bundle look like (§4.1, decisions Q1 + Q3)", () => {
+  it("seeding writes schema files, no demo pipeline, and no graph.json", async () => {
+    const store = await freshStore({});
+    const api = makeApi();
+    await seedWorkspace(api);
+    const paths = await store.allPaths();
+
+    // graph.json is gone from the tree entirely — a cache that can disagree with the files is a bug, not a backup
+    expect(paths.filter((p) => p.endsWith("/graph.json"))).toEqual([]);
+    expect(paths).toContain(`${ROOT}/state.json`); // still written, still only a cache
+
+    // the contracts the built-in roles declare exist as real files, or "hard validation" is a promise with nothing behind it
+    for (const role of ["understander", "risk-analyst", "solution-designer", "decision-maker"]) {
+      expect(paths).toContain(`${ROOT}/library/schemas/${role}.schema.json`);
+      expect(paths).toContain(`${ROOT}/library/roles/${role}.json`);
+    }
+
+    // a fresh canvas is a blank board, not a screenshot of a test: one note, no edges, no fake pipeline
+    expect(api.peek().edges).toEqual([]);
+    expect(api.peek().nodes.map((n) => n.data.nodeType)).toEqual(["note"]);
+  }, 15000);
+
+  it("a legacy graph.json inside an imported bundle is dropped, and the reason is said out loud", async () => {
+    const store = await freshStore({});
+    const api = makeApi();
+    await applyImport(
+      api,
+      {
+        [`${ROOT}/manifest.json`]: JSON.stringify({ canvas_id: CANVAS_ID, structure_version: "1.3" }),
+        [`${ROOT}/graph.json`]: JSON.stringify({ nodes: [{ id: "ghost", position: { x: 999, y: 999 } }], edges: [] }),
+        [`${ROOT}/nodes/a.md`]: nodeFile("a", "Real node"),
+      },
+      { replace: true }
+    );
+    expect(await store.exists(`${ROOT}/graph.json`)).toBe(false);
+    expect(api.peek().nodes.map((n) => n.id)).toEqual(["a"]);
+    // geometry came from the node file, exactly as `nodeFile` wrote it
+    expect(api.peek().nodes[0].position).toEqual({ x: 100, y: 200 });
+    expect(api.peek().events.some((e) => e.type === "system" && e.message.includes("graph.json in the bundle was dropped"))).toBe(true);
   });
 });

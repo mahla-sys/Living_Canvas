@@ -12,7 +12,7 @@ import {
 import type { CanvasFiles } from "./lib/portable";
 import {
   ROOT, CANVAS_ID, defaultSettings, emptyExecution, makeNodeData, makeEdgeData, roleById, MODELS,
-  builtinTemplateInfo,
+
   type AppState, type RFNode, type RFEdge, type FileViewerState,
 } from "./state";
 import {
@@ -119,8 +119,9 @@ function initialState(): AppState {
     outputs: {} as AppState["outputs"],
     chats: {} as AppState["chats"],
     logs: {} as AppState["logs"],
+    runs: [] as string[],
     snapshots: [] as AppState["snapshots"],
-    templates: [builtinTemplateInfo()],
+    templates: [],
     strokes: [] as AppState["strokes"],
     execution: emptyExecution(),
     events: [] as AppState["events"],
@@ -327,11 +328,11 @@ export function buildFileContent(path: string): FileViewerState | null {
       { canvas_id: s.canvasId, title: s.canvas.title, last_updated: nowIso(), summary: `Canvas "${s.canvas.title}" — run status: ${s.execution.status}`, current_step: last?.data.title ?? "—", node_count: s.nodes.length, edge_count: s.edges.length },
       `# Canvas summary\n\nAgents read this file before reading the whole canvas.\n\n- run: **${s.execution.status}**\n- nodes: ${s.nodes.length} — edges: ${s.edges.length}`
     );
-  } else if (path === "graph.json")
+  } else if (path === "state.json")
+    // the cache is inspectable but not canonical: clicking it shows what would be written, nothing more
     content = JSON.stringify({
-      canvas_id: s.canvasId, version: "1.0", structure_version: "1.3",
-      nodes: s.nodes.map((n) => ({ id: n.id, type: n.type, label: n.data.title, position: n.position, config_ref: `nodes/${n.id}.md` })),
-      edges: s.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, type: e.data?.edgeType, label: e.data?.label, config_ref: `edges/${e.id}.yaml` })),
+      canvas: s.canvas, memory: s.memory, outputs: s.outputs, chats: s.chats, logs: s.logs,
+      snapshots: s.snapshots, execution: s.execution, saved_at: "(preview of the debounced cache)",
     }, null, 2);
   else if (path === "history/index.yaml")
     content = toYaml({ canvas_id: s.canvasId, snapshot_count: s.snapshots.length, snapshots: s.snapshots.map((m) => ({ id: m.id, at: m.at, label: m.label })) });

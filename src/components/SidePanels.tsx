@@ -242,6 +242,7 @@ function FileTree() {
   const chats = useStore((s) => s.chats);
   const logs = useStore((s) => s.logs);
   const snapshots = useStore((s) => s.snapshots);
+  const runs = useStore((s) => s.runs);
   const memory = useStore((s) => s.memory);
   const strokes = useStore((s) => s.strokes);
 
@@ -264,7 +265,7 @@ function FileTree() {
       <FileRow path="manifest.json" />
       <FileRow path="canvas.yaml" />
       <FileRow path="canvas-overview.md" />
-      <FileRow path="graph.json" />
+      <FileRow path="state.json" name="state.json (cache)" />
 
       <Folder name="nodes" badge={nodes.length} defaultOpen>
         {nodes.map((n) => <FileRow key={n.id} path={`nodes/${n.id}.md`} name={`${n.id}.md`} />)}
@@ -312,6 +313,10 @@ function FileTree() {
         {logIds.length === 0 && <p className="text-[10.5px] text-ink-500 px-2 py-1">No log recorded.</p>}
         {logIds.map((id) => <FileRow key={id} path={`logs/${id}/${new Date().toISOString().slice(0, 10)}.log`} name={`${id}/…log`} />)}
       </Folder>
+      <Folder name="runs" badge={runs.length}>
+        {runs.length === 0 && <p className="text-[10.5px] text-ink-500 px-2 py-1">No run yet — the ledger appears after the first one.</p>}
+        {runs.slice(0, 10).map((r) => <FileRow key={r} path={`runs/${r}.md`} name={`${r}.md`} />)}
+      </Folder>
       <Folder name="library">
         <Folder name="roles" badge={ROLES.length}>
           {ROLES.map((r) => <FileRow key={r.id} path={`library/roles/${r.id}.json`} />)}
@@ -319,6 +324,9 @@ function FileTree() {
         <Folder name="shapes" badge={2}>
           <FileRow path="library/shapes/agent-card.json" />
           <FileRow path="library/shapes/hex-process.json" />
+        </Folder>
+        <Folder name="schemas" badge={ROLES.length}>
+          {ROLES.map((r) => <FileRow key={r.id} path={`library/schemas/${r.id}.schema.json`} />)}
         </Folder>
         <TemplatesSection />
       </Folder>

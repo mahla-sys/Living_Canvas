@@ -741,7 +741,8 @@ export function PortModal() {
 
         <div className="px-4 py-2.5 border-t border-ink-700 bg-ink-850 flex items-center gap-2 text-[9.5px] text-ink-500">
           <ISpark size={11} className="text-amber-lc/70" />
-          Import works both ways: with machine files (graph.json/state.json) it restores exactly; without them the canvas is built from nodes/*.md and edges/*.yaml.
+          Import is file-first: the canvas is rebuilt from nodes/*.md, edges/*.yaml and memory/*.md. A bundle
+          that still carries the old graph.json has it dropped on the way in — positions live in the node files now.
         </div>
       </div>
     </div>

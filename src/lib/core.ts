@@ -18,6 +18,13 @@ export interface ContextContract {
     format: string;
     required_fields: string[];
     save_to: string;
+    /**
+     * Canvas-root-relative path of the schema this output must satisfy, normally
+     * `library/schemas/<role>.schema.json`. Declaring one makes validation **hard**: a missing file, an
+     * unparsable file, or a field that drifts stops the run (§4.9). `null` means "presence of
+     * required_fields only", the escape hatch for hand-made roles.
+     */
+    validator: string | null;
   };
 }
 
@@ -153,6 +160,12 @@ export interface ExecutionState {
   context: Record<string, unknown>;
   status: "idle" | "running" | "paused" | "waiting_approval" | "completed" | "failed" | "stopped";
   started_at: string | null;
+  /**
+   * nodeId → why that node just failed, for the band on the card. Run-scoped and never written into the
+   * node file: an error is a moment of execution, not data (Law 3), and the durable record already
+   * exists in `logs/<node>/` and `runs/<run-id>.md`.
+   */
+  errors: Record<string, string>;
 }
 
 /* ---------------- utils ---------------- */
@@ -373,7 +386,8 @@ export function nodeToMarkdown(id: string, d: LCNodeData, position?: { x: number
     type: d.nodeType,
     title: d.title,
     // position is written into the node file too, so files stay restorable without graph.json (§3.4)
-    position: position ? { x: Math.round(position.x), y: Math.round(position.y), z: (position as { z?: number }).z ?? 0 } : "in graph.json",
+    // position lives here and nowhere else: graph.json was removed as a second source of truth (§4.11)
+    position: position ? { x: Math.round(position.x), y: Math.round(position.y), z: (position as { z?: number }).z ?? 0 } : { x: 0, y: 0, z: 0 },
     shape: d.shape,
     color: d.color,
     animation: { type: d.animation.type, speed: d.animation.speed },
@@ -442,6 +456,125 @@ export const chatToMd = (nodeId: string, title: string, msgs: ChatMsg[]) => {
 };
 
 export const logText = (lines: string[]) => lines.join("\n") + "\n";
+
+/* ---------------- output schemas (§4.9) ---------------- */
+
+export interface SchemaField {
+  type?: "string" | "number" | "integer" | "boolean";
+  description?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  pattern?: string;
+  enum?: unknown[];
+}
+
+export interface OutputSchema {
+  $schema?: string;
+  title?: string;
+  description?: string;
+  type?: "object";
+  required?: string[];
+  additionalProperties?: boolean;
+  properties?: Record<string, SchemaField>;
+}
+
+/**
+ * The keywords this app understands. Anything else in a schema is reported, not skipped: a validator that
+ * quietly ignored `oneOf` would pass output the schema forbids, which is worse than having no validator at
+ * all, because it is trusted. Listing the subset here is what lets a test pin the promise.
+ */
+export const SUPPORTED_SCHEMA_KEYWORDS = [
+  "$schema", "title", "description", "type", "required", "additionalProperties", "properties",
+];
+export const SUPPORTED_FIELD_KEYWORDS = ["type", "description", "minLength", "maxLength", "minimum", "maximum", "pattern", "enum"];
+
+/**
+ * Validates a node's output fields against a schema and returns human-readable failures (empty ⇒ valid).
+ *
+ * Field values arrive as strings, because output files are Markdown. A schema that declares a numeric type
+ * is therefore read as "this field must be nothing but a number" — which is exactly what makes a conditional
+ * edge like `{{ risk_score < 7 }}` meaningful instead of decorative.
+ */
+export function validateAgainstSchema(fields: Record<string, string>, schema: OutputSchema): string[] {
+  const errors: string[] = [];
+  if (schema.type !== undefined && schema.type !== "object")
+    return [`the schema root must be an object (found ${JSON.stringify(schema.type)})`];
+
+  for (const key of Object.keys(schema))
+    if (!SUPPORTED_SCHEMA_KEYWORDS.includes(key)) errors.push(`unsupported keyword “${key}” in the schema — refusing to ignore it`);
+  for (const [name, rule] of Object.entries(schema.properties ?? {}))
+    for (const k of Object.keys(rule))
+      if (!SUPPORTED_FIELD_KEYWORDS.includes(k))
+        errors.push(`unsupported keyword “${name}.${k}” in the schema — refusing to ignore it`);
+
+  for (const f of schema.required ?? []) {
+    const v = fields[f];
+    if (v === undefined || String(v).trim() === "") errors.push(`“${f}” is required by the contract and came back empty`);
+  }
+  const declared = new Set(Object.keys(schema.properties ?? {}));
+  if (schema.additionalProperties === false)
+    for (const f of Object.keys(fields))
+      if (!declared.has(f)) errors.push(`“${f}” is not declared in the schema (additionalProperties: false)`);
+
+  for (const [name, rule] of Object.entries(schema.properties ?? {})) {
+    const raw = fields[name];
+    if (raw === undefined || String(raw).trim() === "") continue; // presence handled above
+    const value = String(raw);
+    const type = rule.type ?? "string";
+
+    if (type === "integer" || type === "number") {
+      const trimmed = value.trim();
+      if (!/^-?\d+(\.\d+)?$/.test(trimmed)) {
+        errors.push(`“${name}” must be ${type === "integer" ? "an integer" : "a number"}, got ${JSON.stringify(trimmed.slice(0, 40))}`);
+        continue;
+      }
+      const n = Number(trimmed);
+      if (type === "integer" && !Number.isInteger(n)) {
+        errors.push(`“${name}” must be an integer, got ${n}`);
+        continue;
+      }
+      if (rule.minimum !== undefined && n < rule.minimum) errors.push(`“${name}” = ${n} is below the minimum ${rule.minimum}`);
+      if (rule.maximum !== undefined && n > rule.maximum) errors.push(`“${name}” = ${n} is above the maximum ${rule.maximum}`);
+      continue;
+    }
+    if (type === "boolean" && !["true", "false", "yes", "no"].includes(value.trim().toLowerCase())) {
+      errors.push(`“${name}” must be a boolean, got ${JSON.stringify(value.trim().slice(0, 40))}`);
+      continue;
+    }
+    const text = value.trim();
+    if (rule.minLength !== undefined && text.length < rule.minLength)
+      errors.push(`“${name}” is ${text.length} characters, the schema needs at least ${rule.minLength}`);
+    if (rule.maxLength !== undefined && text.length > rule.maxLength)
+      errors.push(`“${name}” is ${text.length} characters, the schema allows at most ${rule.maxLength}`);
+    if (rule.enum && !rule.enum.map(String).includes(text))
+      errors.push(`“${name}” = ${JSON.stringify(text)} is not one of ${rule.enum.map((e) => JSON.stringify(String(e))).join(", ")}`);
+    if (rule.pattern) {
+      let re: RegExp;
+      try {
+        re = new RegExp(rule.pattern);
+      } catch {
+        errors.push(`“${name}” declares an invalid pattern in the schema: ${rule.pattern}`);
+        continue;
+      }
+      if (!re.test(text)) errors.push(`“${name}” does not match the required pattern /${rule.pattern}/`);
+    }
+  }
+  return errors;
+}
+
+/** A schema file is only trusted if it is one JSON object; anything else is a loud failure. */
+export function parseOutputSchema(text: string): { ok: true; schema: OutputSchema } | { ok: false; error: string } {
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch (err) {
+    return { ok: false, error: `not valid JSON: ${String(err).slice(0, 120)}` };
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false, error: "the schema file must contain one JSON object" };
+  return { ok: true, schema: data as OutputSchema };
+}
 
 /* ---------------- StorageAdapter (§5) ---------------- */
 

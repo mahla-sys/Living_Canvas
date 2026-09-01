@@ -9,6 +9,13 @@ import type {
 } from "./lib/core";
 
 export const APP_VERSION = "0.1.0"; // release v0.1 — closes phase 1 of architecture doc 1.3
+
+/**
+ * Version of the on-disk tree (§4.1). `1.4` is the pass that removed `graph.json`, added `runs/` and made
+ * `library/schemas/` real. A folder written by `1.3` still hydrates: the extra `graph.json` is ignored on
+ * import, and everything else is unchanged.
+ */
+export const STRUCTURE_VERSION = "1.4";
 export const CANVAS_ID = "nexus-edu-001";
 export const ROOT = `canvases/${CANVAS_ID}`;
 
@@ -72,39 +79,12 @@ export interface TemplateInfo {
   saved_at: string;
 }
 
-export const BUILTIN_TEMPLATE: TemplateSpec = {
-  template_id: "quick-pipeline",
-  name: "Fast pipeline",
-  description: "Four steps: understand the problem → risk analysis → solution design → wrap-up",
-  version: "1.0",
-  nodes: [
-    { id: "tpl-001", nodeType: "agent", title: "Understand the problem", position: { x: 80, y: 220 }, role: "understander", content: "Pull the problem out of ambiguity." },
-    { id: "tpl-002", nodeType: "agent", title: "Risk analysis", position: { x: 440, y: 60 }, role: "risk-analyst", content: "Score the risks." },
-    { id: "tpl-003", nodeType: "agent", title: "Design the solution", position: { x: 800, y: 220 }, role: "solution-designer", content: "An executable solution in three steps." },
-    { id: "tpl-004", nodeType: "agent", title: "Wrap-up", position: { x: 1160, y: 60 }, role: "decision-maker", content: "Final decision, with human approval." },
-    { id: "tpl-005", nodeType: "output-box", title: "Final output", position: { x: 1500, y: 220 }, content: "The deliverable is assembled here." },
-  ],
-  edges: [
-    { id: "tpl-e1", source: "tpl-001", target: "tpl-002", label: "problem statement" },
-    { id: "tpl-e2", source: "tpl-002", target: "tpl-003", label: "risk report" },
-    { id: "tpl-e3", source: "tpl-003", target: "tpl-004", label: "proposed solution" },
-    { id: "tpl-e4", source: "tpl-004", target: "tpl-005", label: "final decision" },
-  ],
-};
-
-export const builtinTemplateInfo = (): TemplateInfo => ({
-  id: BUILTIN_TEMPLATE.template_id,
-  name: BUILTIN_TEMPLATE.name,
-  description: BUILTIN_TEMPLATE.description,
-  nodes: BUILTIN_TEMPLATE.nodes.length,
-  edges: BUILTIN_TEMPLATE.edges.length,
-  builtin: true,
-  saved_at: nowIsoLocal(),
-});
-
-function nowIsoLocal() {
-  return new Date().toISOString();
-}
+/*
+ * There is no built-in demo template on purpose. The canvas used to ship a four-agent "Fast pipeline"
+ * both as seed data and as `BUILTIN_TEMPLATE`; every graph in a fresh workspace was that test fixture, so a
+ * first-time user could not tell shipped behaviour from sample content. Templates are now only what the
+ * user saves into `library/templates/` (§4.9), and `loadTemplates()` starts empty.
+ */
 
 export interface AppState {
   booted: boolean;
@@ -122,6 +102,11 @@ export interface AppState {
   };
   outputs: Record<string, OutputEntry[]>;
   chats: Record<string, ChatMsg[]>;
+  /**
+   * run ids present in `runs/`, newest first. A projection of the folder listing, kept in state only so the
+   * file tree can render the ledgers without an async read per row (§5 Law 1: the files decide, state mirrors).
+   */
+  runs: string[];
   logs: Record<string, string[]>;
   snapshots: SnapshotMeta[];
   templates: TemplateInfo[];
@@ -225,6 +210,89 @@ export const ROLES: RoleDef[] = [
 
 export const roleById = (id: string) => ROLES.find((r) => r.id === id) ?? ROLES[0];
 
+/* ---------------- output schemas (§4.9 → library/schemas/) ---------------- */
+
+/**
+ * One JSON-Schema-subset file per built-in role, written to `library/schemas/<role>.schema.json` on first
+ * boot and read by the executor on every `write_output` (§9.1). These are the same files the user can edit
+ * in a text editor or Obsidian — nothing here is privileged, and a role with no schema file fails loudly
+ * rather than passing quietly.
+ *
+ * Values arrive as strings, so a `type: "integer"` field means "nothing but a number" — that is what turns
+ * `{{ risk_score < 7 }}` from decoration into data.
+ */
+export const ROLE_SCHEMAS: Record<string, unknown> = {
+  understander: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "understander output",
+    description: "the problem, made explicit, plus what is still ambiguous",
+    type: "object",
+    required: ["summary", "problem_statement", "questions_asked"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 40, description: "one paragraph: what was understood" },
+      problem_statement: { type: "string", minLength: 80, description: "the core problem in one precise sentence-per-line paragraph" },
+      questions_asked: { type: "string", minLength: 20, pattern: "^\\s*1[\\.).]", description: "numbered list of open questions" },
+    },
+  },
+  "risk-analyst": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "risk-analyst output",
+    description: "risks with severities, a decision, and one number later edges can read",
+    type: "object",
+    required: ["summary", "risks", "decision", "risk_score"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 40, description: "one paragraph: how the risks were weighed" },
+      risks: { type: "string", minLength: 40, pattern: "^-", description: "dash list, one risk per line with its severity" },
+      decision: { type: "string", minLength: 10, description: "the recommendation, with the condition attached" },
+      risk_score: { type: "integer", minimum: 1, maximum: 10, description: "overall score for the whole proposal" },
+    },
+  },
+  "solution-designer": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "solution-designer output",
+    description: "an executable design in steps, each with an output and a criterion",
+    type: "object",
+    required: ["summary", "solution", "next_actions"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 40, description: "one paragraph: what was designed and why" },
+      solution: { type: "string", minLength: 60, pattern: "step 1", description: "step 1 / step 2 / step 3, each with output + criterion" },
+      next_actions: { type: "string", minLength: 20, pattern: "^-", description: "dash list of actions with an owner" },
+    },
+  },
+  "decision-maker": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "decision-maker output",
+    description: "the wrap-up, the decision, and what the human is being asked to approve",
+    type: "object",
+    required: ["summary", "decision", "approval_request"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 40, description: "one paragraph: what the whole run produced" },
+      decision: { type: "string", minLength: 20, description: "the decision and its reasons" },
+      approval_request: { type: "string", minLength: 20, description: "the exact question put to the human approver" },
+    },
+  },
+};
+
+/** The canvas-relative path a role's schema lives at (§4.9). */
+export const schemaPathFor = (roleId: string) => `library/schemas/${roleId}.schema.json`;
+
+/** A schema for a role the user saved: presence and non-emptiness only, which is what its contract says. */
+export function makeRoleSchema(roleId: string, name: string, requiredFields: string[]): unknown {
+  return {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: `${roleId} output`,
+    description: `output contract of the “${name}” role, generated from its required fields`,
+    type: "object",
+    required: [...requiredFields],
+    additionalProperties: false,
+    properties: Object.fromEntries(requiredFields.map((f) => [f, { type: "string", minLength: 20, description: f }])),
+  };
+}
+
 /* ---------------- factories ---------------- */
 
 const iso = () => new Date().toISOString();
@@ -233,8 +301,15 @@ const iso = () => new Date().toISOString();
  * Overrides for a node's agent config. `context_contract` is partial on purpose: the UI and the tests
  * edit one list at a time, and `makeAgentConfig` merges it onto the role defaults (see below).
  */
+/**
+ * What a caller may override on an agent node. The contract objects are one level deeper than `Partial`
+ * reaches: `makeAgentConfig` merges `output_contract` field by field (a node that only retargets its
+ * `validator` must not have to restate `format` and `save_to`), so the type says the same thing.
+ */
 export type AgentConfigOverrides = Partial<Omit<AgentConfig, "context_contract">> & {
-  context_contract?: Partial<NonNullable<AgentConfig["context_contract"]>>;
+  context_contract?: Partial<Omit<NonNullable<AgentConfig["context_contract"]>, "output_contract">> & {
+    output_contract?: Partial<NonNullable<AgentConfig["context_contract"]>["output_contract"]>;
+  };
 };
 
 export function makeAgentConfig(nodeId: string, roleId: string, opts?: AgentConfigOverrides): AgentConfig {
@@ -264,6 +339,7 @@ export function makeAgentConfig(nodeId: string, roleId: string, opts?: AgentConf
         format: "markdown",
         required_fields: [...role.required_fields],
         save_to: `outputs/${nodeId}/`,
+        validator: ROLE_SCHEMAS[role.id] ? schemaPathFor(role.id) : null,
       },
     },
   };
@@ -331,6 +407,7 @@ export const emptyExecution = (): ExecutionState => ({
   context: {},
   status: "idle",
   started_at: null,
+  errors: {},
 });
 
 export const defaultSettings = (): Settings => {
@@ -354,121 +431,64 @@ export const PALETTE: { nodeType: NodeType; label: string; desc: string; shape: 
 
 /* ---------------- seed content ---------------- */
 
+/**
+ * The seed canvas, deliberately almost nothing.
+ *
+ * It used to ship a full demo — a smart-online-school pipeline with four agents, five edges, four
+ * hand-written memory documents and a fake risk score. That made every fresh workspace look like a
+ * screenshot of a test, and mixed sample content with behaviour. What a first boot actually needs is the
+ * **structure** (the file tree, the four shared memory documents) plus one note that explains what to do
+ * — so `hydrate()` has a node to find and does not consider the folder empty.
+ *
+ * Roles (`ROLES`) and their schemas (`ROLE_SCHEMAS`) still ship: they are library material a user picks from
+ * the palette, not a graph.
+ */
 export function buildSeed(owner: string) {
   const t = iso();
-
   const mkNode = (id: string, type: string, x: number, y: number, data: RFNode["data"]): RFNode =>
     ({ id, type, position: { x, y }, data } as RFNode);
 
-  const note = makeNodeData("note", "Canvas goal", owner, {
+  const start = makeNodeData("note", "Start here", owner, {
     color: "#6fb3c7",
     shape: "rectangle",
-    content:
-      "## Goal\n\nDesign a **smart online school** for students aged 12 to 15.\n\n### Frame\n- the problem is defined from the student's point of view\n- educational and technical risks are weighed before designing\n- the final decision runs only after human approval",
+    content: [
+      "## This canvas is empty on purpose",
+      "",
+      "Drag from the **library** on the left:",
+      "",
+      "1. a `note` for the goal you are trying to reach;",
+      "2. an `agent` node per step — each one carries its own contract (read paths, write paths, required output fields);",
+      "3. a `flow` edge from one to the next; put `{{ field <op> value }}` on an edge to gate the hop.",
+      "",
+      "Then press **Run**. Every step writes plain files under `canvases/<id>/` — `nodes/`, `outputs/`,",
+      "`memory/`, `logs/`, and one `runs/<run-id>.md` ledger — and the app reads them back, so Git and",
+      "Obsidian see the same thing this canvas does. State is the cache; the folder is the record.",
+    ].join("\n"),
   });
-
-  const a1 = makeNodeData("agent", "Understand the problem", owner, {
-    agent: makeAgentConfig("node-001", "understander"),
-    content: "First agent of the pipeline; pulls the problem out of ambiguity.",
-  });
-  const a2 = makeNodeData("agent", "Risk analysis", owner, {
-    color: "#e06a4e",
-    agent: makeAgentConfig("node-002", "risk-analyst", {
-      context_contract: {
-        allowed_read_paths: [
-          "canvas-overview.md", "nodes/node-002.md", "memory/agents/node-002.md",
-          "outputs/node-001/", "memory/decisions.md",
-        ],
-        allowed_write_paths: ["outputs/node-002/", "memory/agents/node-002.md", "logs/node-002/"],
-        output_contract: { format: "markdown", required_fields: ["summary", "risks", "decision", "risk_score"], save_to: "outputs/node-002/" },
-      },
-    }),
-  });
-  const a3 = makeNodeData("agent", "Design the solution", owner, {
-    color: "#8fbf7f",
-    agent: makeAgentConfig("node-003", "solution-designer", {
-      context_contract: {
-        allowed_read_paths: [
-          "canvas-overview.md", "nodes/node-003.md", "memory/agents/node-003.md",
-          "outputs/node-001/", "outputs/node-002/",
-        ],
-        allowed_write_paths: ["outputs/node-003/", "memory/agents/node-003.md", "logs/node-003/"],
-        output_contract: { format: "markdown", required_fields: ["summary", "solution", "next_actions"], save_to: "outputs/node-003/" },
-      },
-    }),
-  });
-  const a4 = makeNodeData("agent", "Wrap-up & decision", owner, {
-    color: "#b98bc2",
-    agent: makeAgentConfig("node-004", "decision-maker", {
-      require_approval: true,
-      context_contract: {
-        allowed_read_paths: [
-          "canvas-overview.md", "nodes/node-004.md", "memory/agents/node-004.md",
-          "outputs/node-001/", "outputs/node-002/", "outputs/node-003/", "memory/decisions.md",
-        ],
-        allowed_write_paths: ["outputs/node-004/", "memory/agents/node-004.md", "logs/node-004/"],
-        output_contract: { format: "markdown", required_fields: ["summary", "decision", "approval_request"], save_to: "outputs/node-004/" },
-      },
-    }),
-  });
-  const box = makeNodeData("output-box", "Final output", owner, {
-    content: "The final decision and the deliverable are assembled in this box.",
-  });
-
-  const nodes: RFNode[] = [
-    mkNode("note-001", "lc", 40, 300, note),
-    mkNode("node-001", "lc", 340, 250, a1),
-    mkNode("node-002", "lc", 700, 90, a2),
-    mkNode("node-003", "lc", 1060, 250, a3),
-    mkNode("node-004", "lc", 1420, 90, a4),
-    mkNode("box-001", "lc", 1760, 250, box),
-  ];
-
-  const mkEdge = (id: string, source: string, target: string, data: RFEdge["data"]): RFEdge =>
-    ({ id, source, target, type: "lc", data } as RFEdge);
-
-  const edges: RFEdge[] = [
-    mkEdge("edge-001", "note-001", "node-001", makeEdgeData({ edgeType: "relation", label: "goal reference", line_style: "dotted", animation: "none" })),
-    mkEdge("edge-002", "node-001", "node-002", makeEdgeData({ label: "problem statement" })),
-    mkEdge("edge-003", "node-002", "node-003", makeEdgeData({ label: "risk report", trigger: { type: "condition", condition: "{{ risk_score < 7 }}" } })),
-    mkEdge("edge-004", "node-003", "node-004", makeEdgeData({ label: "proposed solution" })),
-    mkEdge("edge-005", "node-004", "box-001", makeEdgeData({ label: "final decision", animation: "pulse" })),
-  ];
-
-  const agents: Record<string, MemDoc> = {};
-  for (const [nid, rid] of [["node-001", "understander"], ["node-002", "risk-analyst"], ["node-003", "solution-designer"], ["node-004", "decision-maker"]] as const) {
-    agents[nid] = makeMemDoc(
-      `memory/agents/${nid}.md`,
-      `Memory of the \"${roleById(rid).name}\" agent`,
-      `- latest inputs: not run yet\n- decisions taken: —\n- notes for the next run: read the context contract before reading any file.`,
-      0.7,
-      "agent"
-    );
-  }
 
   const memory = {
     global: makeMemDoc("memory/global.md", "Overall project status",
-      "- goal: design a smart online school for teenagers aged 12 to 15\n- progress: canvas structure is ready, the 4-step pipeline is defined\n- important: the final decision never runs without human approval", 0.9, "system"),
+      "- goal: not written yet\n- progress: nothing has run\n- important: the files in this folder are the record of this canvas", 0.5, "system"),
     decisions: makeMemDoc("memory/decisions.md", "Key decisions",
-      `- [${t.slice(0, 10)}] architecture: file-first, with StorageAdapter over IndexedDB\n- [${t.slice(0, 10)}] executor: lightweight state machine in phase 1, LangGraph in phase 2\n- [${t.slice(0, 10)}] memory: two levels (global + per-agent)`, 0.8, "system"),
+      "- (empty: decisions recorded by a run or by you land here)", 0.5, "system"),
     progress: makeMemDoc("memory/progress.md", "Work in progress",
-      "# Done\n- canvas built, agents defined\n\n# In progress\n- preparing the first run\n\n# Next\n- run the pipeline and wrap up", 0.8, "system"),
+      "# Done\n- (nothing yet)\n\n# In progress\n- (nothing yet)\n\n# Next\n- add the first node", 0.5, "system"),
     user: makeMemDoc("memory/user.md", "User profile",
-      `- name: ${owner}\n- working style: visual, cares about architecture details\n- preference: short, structured outputs`, 0.85, "user"),
-    agents,
+      `- name: ${owner}\n- working style: (tell the agents once, and they will remember it here)`, 0.6, "user"),
+    agents: {},
   };
 
   const canvas: CanvasMeta = {
-    title: "Nexus Smart School",
+    title: "Untitled canvas",
     owner,
     canvas_type: "agent-pipeline",
-    tags: ["nexus", "school"],
+    tags: [],
     default_model: "deepseek-chat",
-    template_id: "nexus-4-agents",
-    template_version: "1.0",
+    template_id: "—",
+    template_version: "—",
     created_at: t,
     updated_at: t,
   };
 
-  return { nodes, edges, memory, canvas };
+  return { nodes: [mkNode("note-001", "lc", 80, 80, start)], edges: [] as RFEdge[], memory, canvas };
 }

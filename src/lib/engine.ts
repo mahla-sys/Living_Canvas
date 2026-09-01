@@ -5,6 +5,7 @@
 import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
+  validateAgainstSchema, parseOutputSchema,
   type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
 } from "./core";
 import {
@@ -16,9 +17,9 @@ import {
   downloadJson, readFileAsText, bundleBytes, MAX_BUNDLE_BYTES, type CanvasFiles,
 } from "./portable";
 import {
-  ROOT, CANVAS_ID, APP_VERSION, buildSeed, emptyExecution, roleById,
+  ROOT, CANVAS_ID, APP_VERSION, STRUCTURE_VERSION, buildSeed, emptyExecution, roleById,
   makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc,
-  BUILTIN_TEMPLATE, builtinTemplateInfo,
+  ROLE_SCHEMAS, schemaPathFor, makeRoleSchema,
   type AppState, type RFNode, type RFEdge, type TemplateSpec, type TemplateInfo,
 } from "../state";
 
@@ -123,21 +124,8 @@ function overviewMd(s: AppState): string {
 }
 
 async function writeCore(s: AppState) {
-  const graph = {
-    canvas_id: s.canvasId,
-    version: "1.0",
-    structure_version: "1.3",
-    updated_at: nowIso(),
-    nodes: s.nodes.map((n) => ({
-      id: n.id, type: n.type, label: n.data.title,
-      position: n.position, data: n.data, config_ref: `nodes/${n.id}.md`,
-    })),
-    edges: s.edges.map((e) => ({
-      id: e.id, source: e.source, target: e.target,
-      type: e.data?.edgeType ?? "flow", label: e.data?.label ?? "",
-      data: e.data, config_ref: `edges/${e.id}.yaml`,
-    })),
-  };
+  // no graph.json: the node/edge files are the graph, and a cache that can disagree with them is a bug
+  // factory (Q3). state.json stays for what the files do not carry (outputs, chats, logs, snapshots).
   const state = {
     canvas: s.canvas,
     memory: s.memory,
@@ -149,7 +137,6 @@ async function writeCore(s: AppState) {
     saved_at: nowIso(),
   };
   await Promise.all([
-    storage.writeJson(`${ROOT}/graph.json`, graph),
     storage.writeJson(`${ROOT}/state.json`, state),
     storage.writeFile(`${ROOT}/canvas-overview.md`, overviewMd(s)),
     storage.writeFile(`${ROOT}/canvas.yaml`, toYaml({
@@ -167,7 +154,7 @@ async function saveNow(api: EngineApi) {
   await writeCore(api.get());
   api.set({ saveState: "saved" });
   const s = api.get();
-  emit(api, "graph.saved", `graph.json saved — ${s.nodes.length} nodes, ${s.edges.length} edges`);
+  emit(api, "graph.saved", `saved — ${s.nodes.length} nodes, ${s.edges.length} edges (files + state.json cache)`);
 }
 
 /**
@@ -353,12 +340,29 @@ export async function contractSelfTest(api: EngineApi, preferNodeId?: string) {
     ? await MemoryManager.write(api, id, 'attempt to write in another agent\'s memory', 0.95, `memory/agents/${other.id}.md`)
     : false;
 
-  const pass = legit && !denyGlobal && !denyForeign;
+  // the third check is the one Q1 added: a contract that names a schema nobody can read is not sound
+  const declared = subject.data.agent.context_contract.output_contract.validator;
+  let schemaOk = true;
+  let schemaNote = "no validator declared — presence-only validation (§4.9)";
+  if (declared) {
+    try {
+      const parsed = parseOutputSchema(await storage.readFile(`${ROOT}/${declared.replace(/^\/+/, "")}`));
+      schemaOk = parsed.ok;
+      schemaNote = parsed.ok ? `${declared} is present and understood` : `${declared}: ${(parsed as { error: string }).error}`;
+    } catch {
+      schemaOk = false;
+      schemaNote = `${declared} is declared but not in the canvas`;
+    }
+  }
+  await appendLog(api, id, `self-test: ${schemaNote}`);
+  const pass = legit && !denyGlobal && !denyForeign && schemaOk;
   if (pass) {
     emit(api, "system", `self-test passed: the allowed write was accepted; 2 out-of-contract attempts (global.md${other ? ` and the memory of ${other.id}` : ""}) were rejected ✓`);
     toast(api, "success", "Context contract is sound — writes outside the allowed path were rejected.");
   } else {
-    emit(api, "validation.failed", "contract self-test FAILED — §9 and allowed_write_paths need review");
+    emit(api, "validation.failed", `contract self-test FAILED — writes: ${legit ? "ok" : "wrong"}, intrusions: ${
+      !denyGlobal && !denyForeign ? "refused" : "accepted"
+    }, schema: ${schemaNote}`);
     toast(api, "error", "Self-test failed! Contract behaviour does not match §9.");
   }
 }
@@ -377,9 +381,55 @@ export const FIELD_DESC: Record<string, string> = {
   risk_score: "overall risk score from 1 to 10 — a number, so a conditional edge can read it",
 };
 
-function validateOutput(entries: OutputEntry[], required: string[]): string[] {
-  const have = new Set(entries.map((e) => e.file.replace(/\.md$/, "")));
-  return required.filter((f) => !have.has(f));
+/**
+ * Run-scoped error text for the node card (§6). Set when a step refuses the node, cleared when the node starts
+ * — and never written into `nodes/<id>.md`, because an error is a moment, not data (Law 3). The durable record
+ * of the same failure lives in `logs/<node>/` and `runs/<run-id>.md`.
+ */
+export function setNodeError(api: EngineApi, nodeId: string, msg: string | null) {
+  api.set((st) => {
+    const errors = { ...st.execution.errors };
+    if (msg) errors[nodeId] = msg.slice(0, 300);
+    else delete errors[nodeId];
+    return { execution: { ...st.execution, errors } };
+  });
+}
+
+/**
+ * Hard output validation (§4.9 — decision Q1: the canvas is an orchestrator). This replaced
+ * `validateOutput(entries, required)`, which could only ever check that `buildEntries` had produced a file
+ * for each field — i.e. nothing at all.
+ *
+ * `required_fields` must be present and non-empty, and when the node's own contract names a `validator`, that
+ * file must exist in the canvas, parse, and accept the same fields. A named-but-unreadable schema is an error,
+ * not a pass: a promise the executor quietly skips is how the contract stayed decorative for a whole phase.
+ * `validator: null` is the single opt-out, and it is a decision recorded in the node file.
+ */
+export async function validateAgainstContract(
+  api: EngineApi,
+  agent: AgentConfig | null,
+  required: string[],
+  fields: Record<string, string>
+): Promise<string[]> {
+  const problems: string[] = [];
+  for (const f of required) if (!String(fields[f] ?? "").trim()) problems.push(`“${f}” is required and came back empty`);
+
+  const validator = agent?.context_contract.output_contract.validator;
+  if (!validator) return problems;
+
+  const rel = validator.replace(/^\/+/, "");
+  if (!isPathAllowed(["library/schemas/"], rel))
+    return [...problems, `validator “${validator}” must live under library/schemas/ (§4.1)`];
+
+  let text: string;
+  try {
+    text = await storage.readFile(`${ROOT}/${rel}`);
+  } catch {
+    return [...problems, `${rel}: the contract names this schema, but the file is not in the canvas`];
+  }
+  const parsed = parseOutputSchema(text);
+  if (!parsed.ok) return [...problems, `${rel}: ${parsed.error}`];
+  return [...problems, ...validateAgainstSchema(fields, parsed.schema).map((m) => `${rel}: ${m}`)];
 }
 
 export async function writeOutputs(api: EngineApi, nodeId: string, entries: OutputEntry[], shared = false) {
@@ -509,6 +559,7 @@ export async function startLedger(api: EngineApi, note: string) {
     { run_id: ex.run_id, canvas_id: CANVAS_ID, started_at: ex.started_at ?? nowIso(), queued: ex.queue.length, app: APP_VERSION },
     `# Run ${ex.run_id}\n\n${note}\n\n${LEDGER_HEADER}\n`
   ));
+  api.set((st) => ({ runs: st.runs.includes(ex.run_id!) ? st.runs : [ex.run_id!, ...st.runs] }));
   emit(api, "file.written", `run ledger opened: ${path.slice(ROOT.length + 1)}`);
 }
 
@@ -685,9 +736,13 @@ async function executeNode(api: EngineApi, nodeId: string) {
   patchNode(api, nodeId, { lock: { status: "locked", locked_by: runId, locked_at: nowIso() }, agent: agent ? { ...agent, status: "running" } : agent }, true);
   emit(api, "lock.acquired", `node ${nodeId} locked by ${runId}`);
   emit(api, "node.started", `run of “${node.data.title}” started`);
+  setNodeError(api, nodeId, null);
   api.set((st) => ({ execution: { ...st.execution, current_node_id: nodeId } }));
   await appendLog(api, nodeId, `== run started (${runId}) ==`);
 
+  // set when a step refuses this node with a message worth showing on the card; the catch uses it to avoid
+  // overwriting a precise validation failure with a generic error string
+  let refused: string | null = null;
   try {
     let steps = 0;
     const maxSteps = agent?.max_steps ?? 6;
@@ -776,13 +831,16 @@ async function executeNode(api: EngineApi, nodeId: string) {
       await ledgerRow(api, { node: nodeId, tool: "write_output", status: "denied", detail: "not in agent.tools" });
       throw new Error(`write_output is not permitted for ${nodeId}`);
     }
-    const entries = buildEntries(nodeId, required, fields);
-    const missing = validateOutput(entries, required);
-    if (missing.length) {
-      emit(api, "validation.failed", `output of ${nodeId} is missing ${missing.join(", ")} — rejected`);
-      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "rejected", detail: `missing ${missing.join(", ")}` });
-      throw new Error(`invalid output: ${missing.join(", ")}`);
+    const contractProblems = await validateAgainstContract(api, agent, required, fields);
+    if (contractProblems.length) {
+      refused = contractProblems.slice(0, 4).join("; ");
+      emit(api, "validation.failed", `output of ${nodeId} was rejected by its own contract: ${refused}`);
+      await appendLog(api, nodeId, `validation rejected the output: ${refused}`);
+      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "rejected", detail: refused });
+      setNodeError(api, nodeId, `output rejected — ${refused}`);
+      throw new Error(`invalid output: ${contractProblems[0]}`);
     }
+    const entries = buildEntries(nodeId, required, fields);
     await writeOutputs(api, nodeId, entries);
     await appendLog(api, nodeId, `tool write_output → validation passed (${required.length}/${required.length} fields)`);
     await ledgerRow(api, { node: nodeId, tool: "write_output", status: "ok", detail: `${required.length}/${required.length} fields → ${agent?.context_contract.output_contract.save_to ?? "outputs/"}` });
@@ -843,6 +901,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
     }
     const agentNow = getNode(api.get(), nodeId)?.data.agent;
     patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow }, true);
+    if (!refused) setNodeError(api, nodeId, String(err).replace(/^Error: /, ""));
     emit(api, "node.failed", `run of “${node.data.title}” failed: ${String(err)}`);
     await appendLog(api, nodeId, `error: ${String(err)}`);
     await ledgerRow(api, { node: nodeId, tool: "execute_node", status: "failed", detail: String(err) });
@@ -1359,13 +1418,13 @@ async function loadStrokes(): Promise<Stroke[]> {
  * folders are visible here (before it returned empty and user templates vanished after a refresh).
  */
 async function loadTemplates(): Promise<TemplateInfo[]> {
-  const out = [builtinTemplateInfo()];
+  const out: TemplateInfo[] = [];
   try {
     for (const d of await storage.listDirectory(`${ROOT}/library/templates`)) {
       const dir = d.replace(/\/$/, "");
       if (!dir) continue;
       const spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${dir}/template.json`).catch(() => null);
-      if (spec?.template_id && spec.template_id !== BUILTIN_TEMPLATE.template_id) {
+      if (spec?.template_id) {
         out.push({
           id: spec.template_id, name: spec.name, description: spec.description,
           nodes: spec.nodes?.length ?? 0, edges: spec.edges?.length ?? 0,
@@ -1375,6 +1434,16 @@ async function loadTemplates(): Promise<TemplateInfo[]> {
     }
   } catch { /* no custom template yet */ }
   return out;
+}
+
+/** ids of the run ledgers in runs/, newest first — the file tree shows them (§4.13). */
+async function loadRunIds(): Promise<string[]> {
+  try {
+    const names = await storage.listDirectory(`${ROOT}/runs`);
+    return names.filter((n) => n.endsWith(".md")).map((n) => n.slice(0, -3)).reverse();
+  } catch {
+    return [];
+  }
 }
 
 /** global / per-agent memory read from files (§3.7) — for the "no state.json" path. */
@@ -1389,26 +1458,27 @@ function pickMemory(derived: ReturnType<typeof deriveCanvasFromFiles>, fallback:
 }
 
 /**
- * Loads the canvas from the StorageAdapter (§2/§4).
- * Two valid paths:
- *   1) graph.json + state.json  → fast load (the usual IndexedDB path)
- *   2) the Markdown/YAML files themselves → when there is no machine cache (Obsidian/Git folder, file import)
- * On path 1 the title/content/system_prompt of each node are still overlaid from its file, so a manual
- * edit in an external editor survives a refresh (§1.3-1: files are the storage substrate).
- * Locks are always released: a lock is a moment of execution, not data (§12.5).
+ * Loads the canvas from the files (§2/§4). There is exactly one path now: `deriveCanvasFromFiles` reads
+ * `nodes/*.md`, `edges/*.yaml` and `memory/**`, and that **is** the graph — `graph.json` was deleted as a
+ * second source of truth, so the IndexedDB boot and the Obsidian/Git folder go through the same code and
+ * cannot disagree. Positions come from the node files (they always did; the cache just used to win).
+ *
+ * `state.json` remains a cache for what the graph files do not carry (outputs, chats, logs, snapshots, the
+ * memory fallback). Nothing in it may override a file. Locks are always released: a lock is a moment of
+ * execution, not data (§12.5).
  */
 export async function hydrate(api: EngineApi): Promise<boolean> {
   if (!(await storage.exists(`${ROOT}/manifest.json`))) return false;
   try {
-    const graph = await storage.readJson<{ nodes: RFNode[]; edges: RFEdge[] }>(`${ROOT}/graph.json`).catch(() => null);
-
-    /* read only what is needed: with graph.json present, only node files are required for the overlay
-       (one cheap allPaths + a few readFile); otherwise the whole §2 tree is read.
-       without this split, boot on a big canvas meant reading every log/output file. */
-    const files = graph?.nodes?.length
-      ? await collectCanvasFiles({ filter: (p) => new RegExp(`^${ROOT}/nodes/[^/]+\\.md$`).test(p) || p === `${ROOT}/canvas.yaml` })
-      : await collectCanvasFiles();
+    const nodesRe = new RegExp(`^${ROOT}/nodes/[^/]+\\.md$`);
+    const edgesRe = new RegExp(`^${ROOT}/edges/[^/]+\\.ya?ml$`);
+    const memRe = new RegExp(`^${ROOT}/memory/.*\\.md$`);
+    const files = await collectCanvasFiles({
+      filter: (p) => nodesRe.test(p) || edgesRe.test(p) || memRe.test(p) || p === `${ROOT}/canvas.yaml`,
+    });
     const derived = deriveCanvasFromFiles(files);
+    if (!derived.nodes.length) return false;
+
     const state = await storage
       .readJson<{
         canvas?: AppState["canvas"]; memory?: AppState["memory"]; outputs?: AppState["outputs"];
@@ -1416,25 +1486,12 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
       }>(`${ROOT}/state.json`)
       .catch(() => null);
 
-    if (!graph?.nodes?.length && !derived.nodes.length) return false;
-
-    const mdById = new Map(derived.nodes.map((n) => [n.id, n]));
-    const nodes: RFNode[] = (graph?.nodes?.length
-      ? graph.nodes.map((n) => {
-          const md = mdById.get(n.id);
-          const data = { ...n.data } as RFNode["data"];
-          if (md) {
-            if (md.data.title) data.title = md.data.title;
-            if (typeof md.data.content === "string" && md.data.content.trim()) data.content = md.data.content;
-            const sp = md.data.agent?.system_prompt;
-            if (data.agent && sp && sp.length > 1) data.agent = { ...data.agent, system_prompt: sp };
-          }
-          return { ...n, data: { ...data, lock: { status: "free" as const, locked_by: null, locked_at: null } } };
-        })
-      : derived.nodes.map((n) => ({ ...n, data: { ...n.data, lock: { status: "free" as const, locked_by: null, locked_at: null } } }))) as RFNode[];
-
+    const nodes = derived.nodes.map((n) => ({
+      ...n,
+      data: { ...n.data, lock: { status: "free" as const, locked_by: null, locked_at: null } },
+    })) as RFNode[];
     const ids = new Set(nodes.map((n) => n.id));
-    const edges = (graph?.edges?.length ? graph.edges : derived.edges).filter((e) => ids.has(e.source) && ids.has(e.target)) as RFEdge[];
+    const edges = derived.edges.filter((e) => ids.has(e.source) && ids.has(e.target)) as RFEdge[];
     const memory = pickMemory(derived, state?.memory ?? api.get().memory);
     const mode = storageMode();
 
@@ -1447,6 +1504,7 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
       snapshots: state?.snapshots ?? [],
       strokes: await loadStrokes(),
       templates: await loadTemplates(),
+      runs: await loadRunIds(),
       nodes,
       edges,
       execution: emptyExecution(),
@@ -1454,9 +1512,7 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
     emit(
       api,
       "system",
-      graph?.nodes?.length
-        ? `canvas loaded — ${nodes.length} nodes, ${edges.length} edges (source: graph.json${mode === "fs" ? " + folder files" : ""})`
-        : `canvas rebuilt from Markdown/YAML files — ${nodes.length} nodes, ${edges.length} edges`
+      `canvas rebuilt from Markdown/YAML files — ${nodes.length} nodes, ${edges.length} edges${mode === "fs" ? " (attached folder)" : ""}`
     );
     if (derived.unreadable.length) {
       emit(api, "validation.failed", `${derived.unreadable.length} unreadable files were ignored: ${derived.unreadable.slice(0, 4).join(", ")}`);
@@ -1472,7 +1528,7 @@ export async function seedWorkspace(api: EngineApi) {
   const seed = buildSeed(s.settings.owner);
   api.set({
     canvas: seed.canvas, nodes: seed.nodes, edges: seed.edges, memory: seed.memory,
-    outputs: {}, chats: {}, logs: {}, snapshots: [], strokes: [], execution: emptyExecution(),
+    outputs: {}, chats: {}, logs: {}, snapshots: [], strokes: [], runs: [], execution: emptyExecution(),
   });
   const st = api.get();
   const boot = async (path: string, content: string) => {
@@ -1481,7 +1537,7 @@ export async function seedWorkspace(api: EngineApi) {
     await sleep(46);
   };
 
-  await boot("manifest.json", JSON.stringify({ version: "1.0", app_version: APP_VERSION, canvas_id: st.canvasId, structure_version: "1.3", last_validated: nowIso().slice(0, 10) }, null, 2));
+  await boot("manifest.json", JSON.stringify({ version: "1.0", app_version: APP_VERSION, canvas_id: st.canvasId, structure_version: STRUCTURE_VERSION, last_validated: nowIso().slice(0, 10) }, null, 2));
   await boot("canvas.yaml", toYaml({ ...st.canvas, id: st.canvasId }));
   await boot("canvas-overview.md", overviewMd(st));
   for (const n of st.nodes) await boot(`nodes/${n.id}.md`, nodeToMarkdown(n.id, n.data));
@@ -1497,23 +1553,21 @@ export async function seedWorkspace(api: EngineApi) {
     await boot(`library/roles/${role}.json`, JSON.stringify({
       id: r.id, name: r.name, description: r.description, system_prompt: `prompts/${r.id}.md`,
       model: r.model, tools: r.tools, version: "1.0",
-      default_output_contract: { format: "markdown", required_fields: r.required_fields, validator: `schemas/${r.id}.schema.json`, save_to: "outputs/{node_id}/" },
+      default_output_contract: { format: "markdown", required_fields: r.required_fields, validator: schemaPathFor(r.id), save_to: "outputs/{node_id}/" },
       default_context_contract: { allowed_read_paths: ["canvas-overview.md", "memory/agents/{node_id}.md"], allowed_write_paths: ["outputs/{node_id}/", "memory/agents/{node_id}.md"] },
     }, null, 2));
   }
   await boot("library/shapes/agent-card.json", JSON.stringify({ id: "agent-card", name: "Agent card", type: "shape", default_size: { width: 280, height: 160 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
   await boot("library/shapes/hex-process.json", JSON.stringify({ id: "hex-process", name: "Process hexagon", type: "shape", default_size: { width: 240, height: 140 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
-  await boot("library/templates/quick-pipeline/template.yaml", toYaml({ template_id: "quick-pipeline", version: "1.0", description: "4-step pipeline: understand, risk, solution, decision", nodes: 5, edges: 4 }));
-  await storage.writeJson(`${ROOT}/graph.json`, {
-    canvas_id: st.canvasId, version: "1.0", structure_version: "1.3",
-    nodes: st.nodes.map((n) => ({ id: n.id, type: n.type, label: n.data.title, position: n.position, data: n.data, config_ref: `nodes/${n.id}.md` })),
-    edges: st.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, type: e.data?.edgeType, label: e.data?.label, data: e.data, config_ref: `edges/${e.id}.yaml` })),
-  });
+  // the output contracts the roles declare have to exist as files, or "hard validation" is a promise
+  // with nothing behind it: seed the four schemas the built-in roles point at (§4.9, Q1).
+  for (const [roleId, schema] of Object.entries(ROLE_SCHEMAS))
+    await boot(`${schemaPathFor(roleId)}`, JSON.stringify(schema, null, 2));
   await storage.writeJson(`${ROOT}/state.json`, {
     canvas: st.canvas, memory: st.memory, outputs: {}, chats: {}, logs: {}, snapshots: [],
     execution: emptyExecution(), saved_at: nowIso(),
   });
-  api.set((prev) => ({ bootLines: [...prev.bootLines, { text: "graph.json + state.json", ok: true }] }));
+  api.set((prev) => ({ bootLines: [...prev.bootLines, { text: "state.json (cache only — graph.json is gone)", ok: true }] }));
   emit(api, "system", "a fresh canvas was initialised — the §2 structure is complete");
 }
 
@@ -1648,9 +1702,10 @@ export async function loadTemplate(api: EngineApi, id: string) {
     toast(api, "warn", "Templates cannot be loaded mid-run.");
     return;
   }
-  let spec: TemplateSpec | null = null;
-  if (id === BUILTIN_TEMPLATE.template_id) spec = BUILTIN_TEMPLATE;
-  else spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${id}/template.json`).catch(() => null);
+  // no built-in template to short-circuit to: a template is a file in the canvas or it does not exist
+  const spec: TemplateSpec | null = await storage
+    .readJson<TemplateSpec>(`${ROOT}/library/templates/${id}/template.json`)
+    .catch(() => null);
   if (!spec) {
     toast(api, "error", "Template file not found.");
     return;
@@ -1718,7 +1773,7 @@ export async function saveRoleFromNode(api: EngineApi, nodeId: string) {
     default_output_contract: {
       format: agent.context_contract.output_contract.format,
       required_fields: agent.context_contract.output_contract.required_fields,
-      validator: `schemas/${rid}.schema.json`,
+      validator: schemaPathFor(rid),
       save_to: "outputs/{node_id}/",
     },
     default_context_contract: {
@@ -1727,7 +1782,9 @@ export async function saveRoleFromNode(api: EngineApi, nodeId: string) {
     },
   };
   await storage.writeJson(`${ROOT}/library/roles/${rid}.json`, role);
-  emit(api, "system", `role “${n.data.title}” saved in library/roles/${rid}.json`);
+  // a role that declares a validator must ship the file it names, or the contract is a lie (§4.9)
+  await storage.writeJson(`${ROOT}/${schemaPathFor(rid)}`, makeRoleSchema(rid, n.data.title, role.default_output_contract.required_fields));
+  emit(api, "system", `role “${n.data.title}” saved in library/roles/${rid}.json (+ ${schemaPathFor(rid)})`);
   toast(api, "success", "Agent role saved to the library.");
 }
 
@@ -1851,8 +1908,9 @@ export async function pickCanvasFolder(api: EngineApi): Promise<void> {
  */
 export async function exportBundleText(api: EngineApi): Promise<{ text: string; files: number; bytes: number; canvasId: string }> {
   await flushPending();
-  // collectCanvasFiles takes the whole §2 tree; graph.json and state.json are part of the
-  // canvas files too (state.json is now documented in the spec) — so importing this bundle restores it byte for byte.
+  // collectCanvasFiles takes the whole §2 tree. state.json travels with it as the cache it is; there is no
+  // graph.json any more (structure 1.4), so importing an older bundle loses nothing — node and edge files
+  // already carry the same data.
   const files = await collectCanvasFiles();
   const bundle = buildBundle(files, api.get().canvasId);
   return {
@@ -1945,7 +2003,13 @@ export async function applyImport(api: EngineApi, files: CanvasFiles, opts?: { r
   if (replace) {
     await storage.clear();
   }
+  // structure 1.4 deleted graph.json as a second source of truth. An older bundle still carries one; writing
+  // it back would put a cache that nothing reads (and hydrate must not trust) into the user's folder.
+  const legacyGraph = Boolean(files[`${ROOT}/graph.json`]);
+  if (legacyGraph) delete files[`${ROOT}/graph.json`];
   await installFiles(files, { replace: false });
+  if (legacyGraph)
+    emit(api, "system", "graph.json in the bundle was dropped — positions now come from nodes/*.md only (§4.11)");
   // some exports (or a hand-made Obsidian folder) have no manifest.json; hydrate refuses without it
   if (!(await storage.exists(`${ROOT}/manifest.json`))) {
     await storage.writeJson(`${ROOT}/manifest.json`, {
