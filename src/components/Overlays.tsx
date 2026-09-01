@@ -4,8 +4,10 @@ import { roleById, APP_VERSION, type RFNode } from "../state";
 import { faNum, fmtClock, fmtDate, EMPTY_ARR, type BusEvent, type ChatMsg } from "../lib/core";
 import {
   IPlay, IStop, ICamera, IHistory, IGear, IChat, IX, ISend, ICheck, IWarn,
-  ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD,
+  ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD, IFolder, IFile,
 } from "./icons";
+import { storageMode } from "../lib/core";
+import { isFsAccessSupported } from "../lib/fs-access";
 
 /* ================= top bar ================= */
 
@@ -69,6 +71,14 @@ export function TopBar() {
       )}
 
       <div className="ms-auto flex items-center gap-1.5">
+        <button
+          onClick={() => actions.setPortOpen(true)}
+          title="Export / Import و اتصال به پوشه"
+          className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-bold text-ink-300 hover:text-amber-lc hover:bg-ink-800 border border-ink-600 transition-all cursor-pointer"
+        >
+          <IFolder size={14} />
+          فایل‌ها
+        </button>
         <button onClick={actions.snapshot} title="چک‌پوینت دستی (§10)" className="p-2 rounded-lg text-ink-300 hover:text-amber-lc hover:bg-ink-800 border border-transparent hover:border-ink-600 transition-all cursor-pointer">
           <ICamera size={16} />
         </button>
@@ -480,4 +490,265 @@ export function BootOverlay() {
       </div>
     </div>
   );
+}
+
+/* ================= export / import (portability) ================= */
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "۰";
+  if (n < 1024) return faNum(n) + " B";
+  if (n < 1024 * 1024) return faNum(Math.round(n / 1024)) + " KB";
+  return faNum(Math.round((n / (1024 * 1024)) * 10) / 10) + " MB";
+}
+
+const MODE_LABEL: Record<string, string> = {
+  idb: "IndexedDB (مرورگر)",
+  fs: "پوشه‌ی واقعی روی دیسک",
+  http: "سرور (Backend)",
+  memory: "فقط در حافظه (موقت)",
+};
+
+function ModeRow({ k, v, tone }: { k: string; v: string; tone?: "ok" | "warn" }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-1.5 text-[11px]">
+      <span className="text-ink-400">{k}</span>
+      <span className={`font-bold ${tone === "warn" ? "text-amber-lc" : tone === "ok" ? "text-sage" : "text-ink-100"}`}>{v}</span>
+    </div>
+  );
+}
+
+function ActBtn({ onClick, disabled, icon, title, desc, primary, danger }: {
+  onClick: () => void; disabled?: boolean; icon: React.ReactNode; title: string; desc: string; primary?: boolean; danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`w-full flex items-start gap-2.5 p-3 rounded-xl border text-start transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+        primary
+          ? "bg-amber-lc/12 border-amber-lc/45 hover:bg-amber-lc/20"
+          : danger
+            ? "bg-ink-850 border-ember/35 hover:border-ember/70"
+            : "bg-ink-850 border-ink-600 hover:border-amber-lc/50"
+      }`}
+    >
+      <span className={`mt-0.5 shrink-0 ${primary ? "text-amber-lc" : danger ? "text-ember" : "text-ink-300"}`}>{icon}</span>
+      <span className="min-w-0">
+        <span className={`block text-[12px] font-extrabold ${primary ? "text-amber-lc" : "text-ink-100"}`}>{title}</span>
+        <span className="block text-[10px] text-ink-400 leading-5 mt-0.5">{desc}</span>
+      </span>
+    </button>
+  );
+}
+
+export function PortModal() {
+  const open = useStore((s) => s.ui.portOpen);
+  const actions = useStore((s) => s.actions);
+  const canvas = useStore((s) => s.canvas);
+  const canvasId = useStore((s) => s.canvasId);
+  const nodes = useStore((s) => s.nodes);
+  const edges = useStore((s) => s.edges);
+  const strokes = useStore((s) => s.strokes);
+  const snapshots = useStore((s) => s.snapshots);
+  const workspaceRoot = useStore((s) => s.settings.workspaceRoot);
+  const mode = storageMode();
+  const [replace, setReplace] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [preview, setPreview] = useState<(Awaited<ReturnType<typeof actions.previewImport>> & { name: string }) | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const fsOk = isFsAccessSupported();
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  if (!open) return null;
+  const close = () => actions.setPortOpen(false);
+
+  const run = async (label: string, fn: () => Promise<void> | void) => {
+    setBusy(label);
+    setError(null);
+    try {
+      await fn();
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const pickFile = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy("خواندن فایل");
+    setError(null);
+    try {
+      const text = await f.text();
+      const p = await actions.previewImport(text);
+      setPreview({ ...p, name: f.name });
+    } catch (err) {
+      setPreview(null);
+      setError(String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-950/78 backdrop-blur-[3px] anim-fade" onClick={close}>
+      <div
+        className="w-full max-w-[620px] max-h-[86vh] flex flex-col rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_30px_90px_-24px_rgba(0,0,0,0.9)] anim-pop overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-ink-700 bg-ink-850">
+          <IFolder size={16} className="text-amber-lc" />
+          <div className="min-w-0">
+            <p className="text-[13px] font-extrabold text-ink-50">فایل‌های بوم — Export / Import</p>
+            <p className="text-[9.5px] text-ink-400 mt-0.5">
+              هر دو مسیر فایل‌محورند: باندل JSON تمام فایل‌های §2 را حمل می‌کند، نه فقط state داخلی.
+            </p>
+          </div>
+          <button onClick={close} className="ms-auto p-1.5 rounded-md text-ink-400 hover:text-ember transition-colors cursor-pointer"><IX size={15} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* source of truth */}
+          <div className="rounded-xl border border-ink-700 bg-ink-950/60 px-3.5 py-2">
+            <ModeRow k="منبع ذخیره‌سازی" v={MODE_LABEL[mode] ?? mode} tone={mode === "memory" ? "warn" : "ok"} />
+            {workspaceRoot && <ModeRow k="پوشه‌ی متصل" v={workspaceRoot + "/"} />}
+            <ModeRow k="محتوای بوم" v={`${faNum(nodes.length)} نود · ${faNum(edges.length)} یال · ${faNum(strokes.length)} طرح · ${faNum(snapshots.length)} چک‌پوینت`} />
+            <ModeRow k="شناسهٔ بوم" v={canvasId} />
+          </div>
+
+          {/* live folder */}
+          <section className="space-y-2">
+            <p className="text-[11px] font-black text-ink-100 flex items-center gap-1.5">
+              <IDatabase size={12} className="text-sage" /> حالت پوشه‌ی زنده
+              <span className="text-[9px] font-normal text-ink-500">— فایل‌ها عیناً روی دیسک، سازگار با Git و Obsidian</span>
+            </p>
+            {fsOk ? (
+              <div className="grid sm:grid-cols-2 gap-2">
+                {mode === "fs" ? (
+                  <>
+                    <ActBtn onClick={() => run("بازخوانی", actions.reloadFromDisk)} icon={<IRestore size={15} />} title="بازخوانی از دیسک" desc="اگر بیرون از برنامه (Git pull یا ادیتور) فایل‌ها را عوض کردی، بوم را از همان فایل‌ها بساز." />
+                    <ActBtn onClick={() => run("قطع", actions.detachFolder)} icon={<ITrash size={15} />} title="قطع اتصال به پوشه" desc="برگشت به IndexedDB محلی. فایل‌ها روی دیسک دست‌نخورده می‌مانند." danger />
+                  </>
+                ) : (
+                  <ActBtn
+                    onClick={() => run("اتصال", actions.attachFolder)}
+                    icon={<IFolder size={15} />}
+                    title="اتصال به یک پوشه روی دیسک"
+                    desc="پوشه‌ای انتخاب کن؛ اگر بوم داشت بارگذاری می‌شود، اگر خالی بود ساختار §2 داخلش ساخته می‌شود."
+                    primary
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="lc-import-warn">
+                مرورگر تو (Firefox/Safari) File System Access API ندارد. نگران نباش — «دانلود فایل بوم» و «بارگذاری فایل» همان کار را با یک فایل JSON انجام می‌دهند.
+              </div>
+            )}
+          </section>
+
+          {/* export */}
+          <section className="space-y-2">
+            <p className="text-[11px] font-black text-ink-100">صادرکردن (Export)</p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <ActBtn
+                onClick={() => run("دانلود", actions.exportJson)}
+                icon={<IFile size={15} />}
+                title="دانلود فایل .livingcanvas.json"
+                desc="همه‌ی فایل‌های بوم درون یک فایل. هر مرورگری کار می‌کند؛ برای فرستادن به کس دیگر بهترینه."
+                primary
+              />
+              <ActBtn
+                onClick={() => run("پوشه", actions.exportFolder)}
+                icon={<IFolder size={15} />}
+                title="کپی در یک پوشه"
+                disabled={!fsOk}
+                desc={fsOk ? "درخت §2 را روی دیسک می‌نویسد؛ بعدش با Git commit کن." : "این مرورگر پشتیبانی نمی‌کند"}
+              />
+            </div>
+            <p className="text-[9.5px] text-ink-500 leading-5">
+              قبل از Export، ذخیره‌ی معوق (debounce) قطعی می‌شود — یعنی فایل‌های خروجی همان آخرین ویرایش‌اند.
+              عنوان بوم: <span className="text-ink-300">{canvas.title}</span>
+            </p>
+          </section>
+
+          {/* import */}
+          <section className="space-y-2">
+            <p className="text-[11px] font-black text-ink-100">واردکردن (Import)</p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <ActBtn onClick={() => fileRef.current?.click()} icon={<IRestore size={15} />} title="بارگذاری فایل بوم" desc="فایل .livingcanvas.json (یا هر JSON شامل فایل‌های بوم)." primary />
+              <ActBtn onClick={() => run("ایمپورت پوشه", () => actions.importFolder(replace))} icon={<IFolder size={15} />} title="بارگذاری از پوشه" disabled={!fsOk} desc={fs1Desc(fsOk)} />
+            </div>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                void pickFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            <label className="flex items-center gap-2 text-[10.5px] text-ink-300 cursor-pointer select-none">
+              <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} className="accent-[#e8b04b] w-3.5 h-3.5" />
+              جایگزینی کامل بوم فعلی (اگر تیک نزنی، فایل‌ها اضافه/به‌روزرسانی می‌شوند و بوم فعلی می‌ماند)
+            </label>
+
+            {busy === "خواندن فایل" && <p className="text-[10.5px] text-ink-400">در حال خواندن و اعتبارسنجی…</p>}
+
+            {preview && (
+              <div className="rounded-xl border border-sage/35 bg-ink-950/60 p-3 space-y-2 anim-fade">
+                <p className="text-[11.5px] font-extrabold text-sage">پیش‌نمایش: {preview.title ?? "بی‌عنوان"}</p>
+                <ModeRow k="فایل" v={preview.name} />
+                <ModeRow k="بوم" v={preview.canvasId ?? "—"} tone={preview.canvasId && preview.canvasId !== canvasId ? "warn" : undefined} />
+                <ModeRow k="نود / یال (قابل‌ساختن)" v={`${faNum(preview.nodes)} / ${faNum(preview.edges)}`} />
+                <ModeRow k="تعداد فایل‌ها" v={faNum(preview.fileCount)} />
+                <ModeRow k="حجم" v={formatBytes(preview.bytes)} />
+                {preview.warning && <div className="lc-import-warn">{preview.warning}</div>}
+                {preview.skipped.length > 0 && (
+                  <div className="lc-import-danger">
+                    {faNum(preview.skipped.length)} فایل رد شد:
+                    <div className="lc-import-list mt-1.5">
+                      {preview.skipped.slice(0, 8).map((sk) => (
+                        <div key={sk.path}><span className="text-ink-300">{sk.path}</span> — {sk.reason}</div>
+                      ))}
+                      {preview.skipped.length > 8 && <div className="text-ink-500">… و {faNum(preview.skipped.length - 8)} مورد دیگر</div>}
+                    </div>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={() =>
+                      run("اینپورت", async () => {
+                        await actions.commitImport(preview.files, replace);
+                        setPreview(null);
+                        close();
+                      })
+                    }
+                    className="flex-1 px-3 py-2 rounded-xl bg-amber-lc text-ink-950 text-[11.5px] font-black hover:brightness-110 transition-all cursor-pointer"
+                  >
+                    تأیید و {replace ? "جایگزینی بوم" : "ادغام فایل‌ها"}
+                  </button>
+                  <button onClick={() => setPreview(null)} className="px-3 py-2 rounded-xl bg-ink-800 border border-ink-600 text-[11px] font-bold text-ink-300 hover:text-ink-100 transition-all cursor-pointer">
+                    انصراف
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {error && <div className="lc-import-danger">{error}</div>}
+            {busy && busy !== "خواندن فایل" && <p className="text-[10.5px] text-amber-lc">در حال {busy}…</p>}
+          </section>
+        </div>
+
+        <div className="px-4 py-2.5 border-t border-ink-700 bg-ink-850 flex items-center gap-2 text-[9.5px] text-ink-500">
+          <ISpark size={11} className="text-amber-lc/70" />
+          Import از هر دو حالت کار می‌کند: با فایل‌های ماشینی (graph.json/state.json) دقیق بازمی‌گردد، و بدون آن‌ها بوم از nodes/*.md و edges/*.yaml ساخته می‌شود.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function fs1Desc(fsOk: boolean) {
+  return fsOk ? "یک پوشه شامل درخت §2 را انتخاب کن؛ اگر پوشه را دستی با Obsidian/Git ساخته باشی هم کار می‌کند." : "این مرورگر پشتیبانی نمی‌کند";
 }

@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore, buildFileContent } from "../store";
-import { PALETTE, ROLES, roleById, NODE_TYPE_LABEL, CANVAS_ID } from "../state";
+import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT } from "../state";
 import type { RFNode } from "../state";
-import { faNum, type NodeType, type ShapeKind, type ViewMode, type EdgeType } from "../lib/core";
+import { faNum, storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType } from "../lib/core";
 import {
   IBrain, IBox, IFile, IFolder, IChevD, IChevR, ITrash, IPlay, IChat, ILock,
   ISpark, IDatabase, IHistory, IX, IEye, INode, IPulse, ICheck,
@@ -118,7 +118,6 @@ function nodeColor(t: NodeType) {
   return map[t] ?? "#8ba39d";
 }
 
-interface TreeFile { name: string; path: string }
 function Folder({ name, children, badge, defaultOpen = false }: { name: string; children: React.ReactNode; badge?: number; defaultOpen?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -153,6 +152,89 @@ function FileRow({ path, name }: { path: string; name?: string }) {
   );
 }
 
+/* ---------------- درخت واقعی فایل‌سیستم (حالت پوشه‌ی زنده) ----------------
+ * وقتی storage یک پوشه‌ی واقعی است، همین‌جا باید *همان درخت* دیده شود، نه
+ * projection از state؛ وگرنه کاربر نمی‌تواند بفهمد چه چیزی واقعاً روی دیسک مانده.
+ */
+function RealFileRow({ path, name }: { path: string; name: string }) {
+  const actions = useStore((s) => s.actions);
+  return (
+    <button
+      onClick={() => void actions.openStorageFile(path)}
+      className="w-full flex items-center gap-1.5 px-2 py-[4.5px] rounded-md text-ink-300 hover:text-amber-lc hover:bg-ink-800 transition-colors cursor-pointer group"
+      title={path}
+    >
+      <IFile size={12} className="text-ink-500 group-hover:text-amber-lc/70 shrink-0" />
+      <span className="text-[11px] font-mono truncate" dir="ltr">{name}</span>
+    </button>
+  );
+}
+
+function RealFolder({ path, name, depth }: { path: string; name: string; depth: number }) {
+  const [open, setOpen] = useState(depth < 1);
+  const [items, setItems] = useState<string[]>([]);
+  // saveState هر بار که flush تمام می‌شود «saved» می‌شود → لیست دوباره خوانده می‌شود
+  const tick = useStore((s) => s.saveState);
+  const rootName = useStore((s) => s.settings.workspaceRoot);
+  useEffect(() => {
+    let alive = true;
+    void storage
+      .listDirectory(path)
+      .then((list) => alive && setItems(list))
+      .catch(() => alive && setItems([]));
+    return () => {
+      alive = false;
+    };
+  }, [path, tick, rootName]);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-ink-200 hover:bg-ink-800 transition-colors cursor-pointer"
+      >
+        {open ? <IChevD size={11} className="text-ink-500" /> : <IChevR size={11} className="text-ink-500" />}
+        <IFolder size={13} className={open ? "text-amber-lc" : "text-ink-400"} />
+        <span className="text-[11.5px] font-mono" dir="ltr">{name}/</span>
+        {items.length > 0 && (
+          <span className="ms-auto text-[9px] font-bold text-ink-400 bg-ink-800 border border-ink-700 rounded px-1">{faNum(items.length)}</span>
+        )}
+      </button>
+      {open && (
+        <div className="ms-[13px] border-s border-ink-700 ps-1.5 mt-0.5 space-y-px anim-fade">
+          {items.length === 0 && <p className="text-[10px] text-ink-500 px-2 py-1">خالی</p>}
+          {items.map((e) =>
+            e.endsWith("/") ? (
+              <RealFolder key={e} path={`${path}/${e.replace(/\/$/, "")}`} name={e.replace(/\/$/, "")} depth={depth + 1} />
+            ) : (
+              <RealFileRow key={e} path={`${path}/${e}`} name={e} />
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiveFolderTree() {
+  const actions = useStore((s) => s.actions);
+  const rootName = useStore((s) => s.settings.workspaceRoot);
+  return (
+    <div className="p-2 space-y-0.5">
+      <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-sage/10 border border-sage/35">
+        <IDatabase size={12} className="text-sage shrink-0" />
+        <p className="text-[10.5px] leading-5 text-sage font-bold min-w-0">
+          حالت پوشه‌ی زنده — درخت واقعی <span className="font-mono" dir="ltr">{rootName}/</span>
+          <span className="block font-normal text-ink-300">فایل‌ها همین حالا روی دیسک‌اند؛ Git و Obsidian روی همین پوشه کار می‌کنند.</span>
+        </p>
+        <button onClick={() => actions.detachFolder()} className="ms-auto shrink-0 text-[9.5px] font-bold px-2 py-1 rounded-md bg-ink-850 border border-ink-600 text-ink-300 hover:text-ember hover:border-ember/50 transition-colors cursor-pointer">
+          قطع اتصال
+        </button>
+      </div>
+      <RealFolder path={ROOT} name={CANVAS_ID} depth={0} />
+    </div>
+  );
+}
+
 function FileTree() {
   const nodes = useStore((s) => s.nodes);
   const edges = useStore((s) => s.edges);
@@ -164,10 +246,14 @@ function FileTree() {
   const strokes = useStore((s) => s.strokes);
 
   const agentIds = useMemo(() => nodes.filter((n) => n.data.agent).map((n) => n.id), [nodes]);
+  const liveRoot = useStore((s) => s.settings.workspaceRoot);
   const outputIds = Object.keys(outputs).filter((k) => outputs[k].length > 0);
   const chatIds = Object.keys(chats).filter((k) => chats[k].length > 0);
   const logIds = Object.keys(logs).filter((k) => logs[k].length > 0);
   const boxIds = nodes.filter((n) => n.data.nodeType === "output-box").map((n) => n.id);
+
+  // در حالت پوشه‌ی زنده، درختِ واقعی منبع نمایش است (همه‌ی هوک‌ها بالا صدا زده شدند)
+  if (liveRoot) return <LiveFolderTree />;
 
   return (
     <div className="p-2 space-y-0.5">

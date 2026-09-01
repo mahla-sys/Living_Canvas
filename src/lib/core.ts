@@ -140,6 +140,8 @@ export interface Settings {
   owner: string;
   simDelay: number;
   backendUrl: string;
+  /** نام پوشه‌ای که در «حالت پوشه‌ی زنده» باز شده؛ null یعنی IndexedDB محلی. */
+  workspaceRoot?: string | null;
 }
 
 export interface ExecutionState {
@@ -184,15 +186,93 @@ export const faNum = (n: number) => n.toLocaleString("fa-IR");
 
 export const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number) {
+export interface Debounced<A extends unknown[]> {
+  (...args: A): void;
+  /** اجرای فوری هر فراخوان معوق — قبل از Export لازم است تا فایل‌ها روی دیسک قطعی باشند. */
+  flush(): void;
+  pending(): boolean;
+}
+
+export function debounce<A extends unknown[]>(fn: (...args: A) => void, ms: number): Debounced<A> {
   let t: ReturnType<typeof setTimeout> | null = null;
-  return (...args: A) => {
+  let lastArgs: A | null = null;
+  const run = () => {
     if (t) clearTimeout(t);
-    t = setTimeout(() => fn(...args), ms);
+    t = null;
+    const args = lastArgs;
+    lastArgs = null;
+    if (args) fn(...args);
   };
+  const wrapped = ((...args: A) => {
+    lastArgs = args;
+    if (t) clearTimeout(t);
+    t = setTimeout(run, ms);
+  }) as Debounced<A>;
+  wrapped.flush = run;
+  wrapped.pending = () => t !== null;
+  return wrapped;
 }
 
 export const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
+
+/* ---------------- path helpers (used by all StorageAdapters) ---------------- */
+
+/**
+ * بچه‌های مستقیم یک پوشه از روی فهرست کامل مسیرها.
+ * فایل‌ها نامشان برمی‌گردد، پوشه‌ها با «/» انتهایی — همان قراردادی که `hydrate` انتظار دارد.
+ * (فیکس باگ §2: نسخهٔ قبلی با فیلتر `!p.includes("/")` آیتم‌های داخل زیرپوشه —
+ *  مثل library/templates/<id>/template.json — را دور می‌ریخت و قالب‌های کاربر بعد از رفرش ناپدید می‌شدند.)
+ */
+export function listChildren(allPaths: Iterable<string>, dir: string): string[] {
+  const prefix = dir === "" || dir === "." ? "" : dir.replace(/\/+$/, "") + "/";
+  const out = new Set<string>();
+  for (const p of allPaths) {
+    if (!p.startsWith(prefix)) continue;
+    const rest = p.slice(prefix.length);
+    if (!rest) continue;
+    const slash = rest.indexOf("/");
+    out.add(slash === -1 ? rest : rest.slice(0, slash + 1));
+  }
+  return [...out].sort();
+}
+
+/** یک مسیر نسبی امن برای فایل‌سیستم/باندل؛ `..`، مسیر مطلق و بک‌اسلش را رد می‌کند. */
+export function safeRelPath(p: string): string | null {
+  const raw = p.trim();
+  // مسیر مطلق (posix یا windows) هیچ‌وقت مسیر نسبیِ بوم نیست
+  if (raw.startsWith("/") || /^[a-zA-Z]:[\/]/.test(raw)) return null;
+  const s = raw.replace(/\\/g, "/").replace(/^\.\/+/, "");
+  if (!s) return null;
+  const parts = s.split("/");
+  for (const seg of parts) {
+    if (seg === "" || seg === "." || seg === ".." || /[<>:"|?*\u0000-\u001f]/.test(seg)) return null;
+  }
+  return parts.join("/");
+}
+
+/* ---------------- text escaping (XSS guard for markdown rendering) ---------------- */
+
+const HTML_ESCAPES: Record<string, string> = {
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;",
+};
+
+/** تمام کاراکترهای معنادار HTML را خنثی می‌کند. هیچ تگی زنده نمی‌ماند. */
+export function escapeHtml(s: string): string {
+  return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
+/**
+ * رندر inline مارک‌داون — اول escape، بعد قالب‌بندی.
+ * چون escape مقدم است، ورودی مخرب (مثل `<img onerror=…>` که AI می‌تواند تولید کند)
+ * هرگز به HTML تبدیل نمی‌شود؛ فقط **bold**، _em_ و `code` پشتیبانی می‌شوند.
+ */
+export function mdInline(raw: string): string {
+  const esc = escapeHtml(raw);
+  return esc
+    .replace(/`([^`\n]+)`/g, "<code class='lc-md-code'>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong class='lc-md-strong'>$1</strong>")
+    .replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s.,؛:!؟)])/g, "$1<em>$2</em>");
+}
 
 /* ---------------- event bus (§11) ---------------- */
 
@@ -217,7 +297,18 @@ const yv = (v: unknown): string => {
   if (v === null || v === undefined) return "null";
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   const s = String(v);
-  return /[:#\n"']/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+  // هر رشته‌ای که ممکن است ساختار YAML را بشکند، دابل‌کوت می‌شود و
+  // کاراکترهای کنترل به escape تبدیل می‌شوند تا چندخطی‌ماندنی parseYaml نشکند.
+  if (/[:#\n"']/.test(s) || s !== s.trim()) {
+    const esc = s
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t");
+    return `"${esc}"`;
+  }
+  return s;
 };
 
 export function toYaml(obj: Record<string, unknown>, indent = 0): string {
@@ -250,12 +341,25 @@ export function toYaml(obj: Record<string, unknown>, indent = 0): string {
 export const frontmatter = (obj: Record<string, unknown>, body: string) =>
   `---\n${toYaml(obj).trimEnd()}\n---\n\n${body.trim()}\n`;
 
-export function nodeToMarkdown(id: string, d: LCNodeData): string {
+/**
+ * جدا کردن YAML frontmatter از بدنهٔ Markdown.
+ * خروجی null یعنی فایل frontmatter ندارد (فایل ناقص/دست‌نویس).
+ */
+export function extractFrontmatter(md: string): { yaml: string; body: string } | null {
+  const text = String(md);
+  const m = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*/.exec(text);
+  if (!m) return null;
+  // بدنه = باقی‌مانده‌ی فایل (نه گروهِ آخرین newline) — and tolerate the blank line after the fence
+  return { yaml: m[1], body: text.slice(m.index + m[0].length).replace(/^\r?\n/, "") };
+}
+
+export function nodeToMarkdown(id: string, d: LCNodeData, position?: { x: number; y: number } | null): string {
   const fm: Record<string, unknown> = {
     id,
     type: d.nodeType,
     title: d.title,
-    position_note: "position in graph.json",
+    // موقعیت هم در فایل نود نوشته می‌شود تا فایل‌ها مستقل از graph.json قابل بازگردانی باشند (§3.4)
+    position: position ? { x: Math.round(position.x), y: Math.round(position.y), z: (position as { z?: number }).z ?? 0 } : "in graph.json",
     shape: d.shape,
     color: d.color,
     animation: { type: d.animation.type, speed: d.animation.speed },
@@ -267,7 +371,9 @@ export function nodeToMarkdown(id: string, d: LCNodeData): string {
   if (d.agent) {
     fm.agent = {
       role_id: d.agent.role_id,
-      system_prompt: d.agent.system_prompt.slice(0, 120) + (d.agent.system_prompt.length > 120 ? "…" : ""),
+      // پرامپت کامل نوشته می‌شود: فایل نود باید مستقل از graph.json قابل‌بازگردانی باشد (§1.3-۱).
+      // نسخهٔ قبلی به ۱۲۰ کاراکتر برش می‌داد و هویت ایجنت در مسیر «فقط فایل‌ها» گم می‌شد.
+      system_prompt: d.agent.system_prompt,
       model: d.agent.model,
       tools: d.agent.tools,
       status: d.agent.status,
@@ -364,6 +470,11 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
   private dbp: Promise<IDBDatabase>;
   private cache = new LruCache(80);
   private mem = new Map<string, string>();
+  /**
+   * تمام مسیرهایی که این سشن ساخته‌اند. تضمین می‌کند اگر IndexedDB در میانه‌ی
+   * کار از دست برود و به حالت حافظه‌ای بیفتیم، فهرست پوشه‌ها هنوز کامل باشد.
+   */
+  private seen = new Set<string>();
   private useMem = false;
 
   constructor(dbName = "living-canvas") {
@@ -412,6 +523,7 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
 
   async writeFile(path: string, content: string): Promise<void> {
     this.cache.set(path, content);
+    this.seen.add(path);
     if (this.useMem) { this.mem.set(path, content); return; }
     try {
       const st = await this.store();
@@ -427,18 +539,13 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
   }
 
   async listDirectory(dir: string): Promise<string[]> {
-    const all = await this.allPaths();
-    const prefix = dir === "" || dir === "." ? "" : dir.replace(/\/$/, "") + "/";
-    return all
-      .filter((p) => p.startsWith(prefix))
-      .map((p) => p.slice(prefix.length))
-      .filter((p) => !p.includes("/") || p.indexOf("/") === p.length - 1)
-      .filter((p) => p.length > 0);
+    return listChildren(await this.allPaths(), dir);
   }
 
   async deleteFile(path: string): Promise<void> {
     this.cache.del(path);
     this.mem.delete(path);
+    this.seen.delete(path);
     if (this.useMem) return;
     const st = await this.store();
     await new Promise<void>((resolve) => {
@@ -467,22 +574,25 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
   }
 
   async allPaths(): Promise<string[]> {
-    if (this.useMem) return [...this.mem.keys()];
+    if (this.useMem) return [...new Set([...this.mem.keys(), ...this.seen])].sort();
     try {
       const st = await this.store();
-      return await new Promise((resolve, reject) => {
+      const keys = await new Promise<string[]>((resolve, reject) => {
         const r = st.getAllKeys();
         r.onsuccess = () => resolve(r.result.map(String));
         r.onerror = () => reject(r.error);
       });
+      // seen را هم add کن تا فایل‌های نوشته‌شده بعد از آخرین flush جا نیفتند
+      return [...new Set([...keys, ...this.seen])].sort();
     } catch {
-      return [...this.mem.keys()];
+      return [...new Set([...this.mem.keys(), ...this.seen])].sort();
     }
   }
 
   async clear(): Promise<void> {
     this.cache.clear();
     this.mem.clear();
+    this.seen.clear();
     if (this.useMem) return;
     const st = await this.store();
     await new Promise<void>((resolve) => {
@@ -520,14 +630,22 @@ export class HttpStorageAdapter implements StorageAdapter {
     const res = await fetch(this.fileUrl(path), { method: "PUT", body: content });
     if (!res.ok) throw new Error(`write failed: ${path} (${res.status})`);
   }
-  async listDirectory(path: string): Promise<string[]> {
+  /** فهرست خام سرور (مسیرهای کامل) — برای allPaths */
+  private async rawList(prefix: string): Promise<string[]> {
     try {
-      const res = await fetch(`${this.base.replace(/\/$/, "")}/api/canvases/${this.canvasId}/files?prefix=${encodeURIComponent(path.replace(/\/$/, "") + "/")}`);
+      const res = await fetch(`${this.base.replace(/\/$/, "")}/api/canvases/${this.canvasId}/files?prefix=${encodeURIComponent(prefix)}`);
       if (!res.ok) return [];
-      return (await res.json()) as string[];
+      const arr: unknown = await res.json();
+      return Array.isArray(arr) ? arr.map(String) : [];
     } catch {
       return [];
     }
+  }
+  /** بچه‌های مستقیم یک پوشه؛ سرور ممکن است مسیرهای بازگشتی بدهد پس نرمال می‌کنیم. */
+  async listDirectory(dir: string): Promise<string[]> {
+    const prefix = dir === "" || dir === "." ? "" : dir.replace(/\/+$/, "") + "/";
+    const rel = (await this.rawList(prefix)).map((p) => (p.startsWith(prefix) ? p.slice(prefix.length) : p));
+    return listChildren(rel, "");
   }
   async deleteFile(path: string): Promise<void> {
     this.cache.del(path);
@@ -549,7 +667,7 @@ export class HttpStorageAdapter implements StorageAdapter {
     await this.writeFile(path, JSON.stringify(data, null, 2));
   }
   async allPaths(): Promise<string[]> {
-    return this.listDirectory("");
+    return (await this.rawList("")).sort();
   }
   async clear(): Promise<void> {
     this.cache.clear();
@@ -557,12 +675,176 @@ export class HttpStorageAdapter implements StorageAdapter {
   }
 }
 
+/**
+ * آداپتر در حافظه — برای (۱) مرورگرهایی که IndexedDB ندارند یا آن را بلاک کرده،
+ * (۲) پیش‌نمایش فایل‌های Import قبل از اعمال، و (۳) تست‌های node.
+ * ساختار فایل‌محور را دقیقاً حفظ می‌کند تا listDirectory/hydrate قابل اتکا باشند.
+ */
+export class MemoryStorageAdapter implements StorageAdapter {
+  private files = new Map<string, string>();
+  constructor(seed?: Record<string, string>) {
+    if (seed) for (const [p, c] of Object.entries(seed)) this.files.set(p, c);
+  }
+  async readFile(path: string): Promise<string> {
+    const v = this.files.get(path);
+    if (v === undefined) throw new Error(`ENOENT: ${path}`);
+    return v;
+  }
+  async writeFile(path: string, content: string): Promise<void> {
+    this.files.set(path, content);
+  }
+  async listDirectory(dir: string): Promise<string[]> {
+    return listChildren(this.files.keys(), dir);
+  }
+  async deleteFile(path: string): Promise<void> {
+    this.files.delete(path);
+  }
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path);
+  }
+  async readJson<T>(path: string): Promise<T> {
+    return JSON.parse(await this.readFile(path)) as T;
+  }
+  async writeJson<T>(path: string, data: T): Promise<void> {
+    await this.writeFile(path, JSON.stringify(data, null, 2));
+  }
+  async allPaths(): Promise<string[]> {
+    return [...this.files.keys()].sort();
+  }
+  async clear(): Promise<void> {
+    this.files.clear();
+  }
+}
+
+/* ---------------- YAML reader ----------------
+ * خواننده‌ی block-YAML در همان اندازه‌ای که `toYaml` ما تولید می‌کند:
+ * مپ‌های تودرتو، مقادیر اسکالر، و لیست (از جمله لیست آبجکت‌ها).
+ * flow-style / anchor / multiline scalar پشتیبانی نمی‌شوند — چون هرگز تولیدشان نمی‌کنیم.
+ */
+type YamlLine = { indent: number; text: string };
+
+function yamlLines(src: string): YamlLine[] {
+  const out: YamlLine[] = [];
+  for (const raw of String(src).replace(/\r\n/g, "\n").split("\n")) {
+    if (!raw.trim() || /^\s*#/.test(raw)) continue;
+    out.push({ indent: raw.match(/^\s*/)![0].length, text: raw.trim() });
+  }
+  return out;
+}
+
+function yamlScalar(v: string): unknown {
+  const t = v.trim();
+  if (t === "" || t === "null" || t === "~") return null;
+  if (t === "true") return true;
+  if (t === "false") return false;
+  if (/^-?\d+(\.\d+)?$/.test(t)) return Number(t);
+  const q = t.match(/^(['"])(.*)\1$/);
+  if (q) {
+    return q[2]
+      .replace(/\\"/g, '"')
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "")
+      .replace(/\\t/g, "\t")
+      .replace(/\\\\/g, "\\");
+  }
+  return t;
+}
+
+/** @returns آبجکت پارس‌شده، یا null اگر ورودی قابل‌خواندن نباشد (فایل دستی/خراب). */
+export function parseYaml(src: string): Record<string, unknown> | null {
+  try {
+    const lines = yamlLines(src);
+    if (!lines.length) return {};
+    let i = 0;
+
+    const parseMap = (indent: number): Record<string, unknown> => {
+      const obj: Record<string, unknown> = {};
+      while (i < lines.length && lines[i].indent >= indent) {
+        const cur = lines[i];
+        if (cur.indent > indent || cur.text.startsWith("- ")) { i++; continue; }
+        const m = /^([^:]+):(.*)$/.exec(cur.text);
+        if (!m) { i++; continue; }
+        const key = m[1].trim().replace(/^['"]|['"]$/g, "");
+        const rest = m[2];
+        i++;
+        if (rest.trim() !== "") { obj[key] = yamlScalar(rest); continue; }
+        const nxt = lines[i];
+        if (!nxt || nxt.indent <= cur.indent) { obj[key] = null; continue; }
+        obj[key] = nxt.text.startsWith("- ") ? parseSeq(nxt.indent) : parseMap(nxt.indent);
+      }
+      return obj;
+    };
+
+    const parseSeq = (indent: number): unknown[] => {
+      const arr: unknown[] = [];
+      while (i < lines.length && lines[i].indent === indent && lines[i].text.startsWith("- ")) {
+        const first = lines[i].text.slice(2).trim();
+        if (/^[^:]+:(\s|$)/.test(first)) {
+          // آیتم آبجکتی: «- key: value» و ادامه‌ی کلیدها با same indent+2
+          const obj: Record<string, unknown> = {};
+          const colon = first.indexOf(":");
+          obj[first.slice(0, colon).trim()] = yamlScalar(first.slice(colon + 1));
+          i++;
+          const inner = indent + 2;
+          while (i < lines.length && lines[i].indent >= inner && !lines[i].text.startsWith("- ")) {
+            const m2 = /^([^:]+):(.*)$/.exec(lines[i].text);
+            if (m2) obj[m2[1].trim()] = m2[2].trim() === "" ? null : yamlScalar(m2[2]);
+            i++;
+          }
+          arr.push(obj);
+        } else {
+          arr.push(yamlScalar(first));
+          i++;
+        }
+      }
+      return arr;
+    };
+
+    return parseMap(lines[0].indent);
+  } catch {
+    return null;
+  }
+}
+
+/** استخراج frontmatter یک فایل Markdown (§3.4) و پارس آن. */
+export function readFrontmatterYaml(md: string): { yaml: Record<string, unknown> | null; body: string } {
+  const fm = extractFrontmatter(md);
+  if (!fm) return { yaml: null, body: String(md).trim() };
+  return { yaml: parseYaml(fm.yaml), body: fm.body.trim() };
+}
+
 /** مرجع پایدار برای سلکتورهای خالی — جلوگیری از حلقه‌ی رندر بی‌نهایت (useSyncExternalStore) */
 export const EMPTY_ARR: never[] = [];
 
-export let storage: StorageAdapter = new IndexedDBStorageAdapter();
+/**
+ * اگر IndexedDB وجود نداشته باشد (حالت خصوصی Safari / محیط SSR / jsdom بدون polyfill)
+ * به آداپتر حافظه‌ای می‌افتیم — وگرنه خطای ساخت در module-load کل بوم را می‌اندازد.
+ */
+export function createDefaultStorage(dbName = "living-canvas"): StorageAdapter {
+  const hasIdb = typeof indexedDB !== "undefined" && indexedDB !== null;
+  const hasWin = typeof window !== "undefined" && (window as unknown as { localStorage?: unknown }).localStorage !== undefined;
+  try {
+    if (hasIdb && hasWin) return new IndexedDBStorageAdapter(dbName);
+  } catch { /* fall through */ }
+  return new MemoryStorageAdapter();
+}
+
+export let storage: StorageAdapter = createDefaultStorage();
 
 /** تعویض زنده‌ی آداپتر — importکننده‌ها به‌لطف live binding نسخه‌ی جدید را می‌بینند */
 export function setStorage(s: StorageAdapter) {
   storage = s;
+}
+
+/**
+ * نام مخزن فعال. در حالت پوشه (`fs`) فایل‌ها روی دیسک‌اند و File Tree
+ * باید از خودِ درخت خوانده شود، نه از state.
+ */
+export function storageMode(): "idb" | "fs" | "http" | "memory" {
+  const a = storage;
+  if (a instanceof HttpStorageAdapter) return "http";
+  const tag = (a as unknown as { adapterKind?: string }).adapterKind;
+  if (tag === "fs") return "fs";
+  if (a instanceof MemoryStorageAdapter) return "memory";
+  return "idb";
 }

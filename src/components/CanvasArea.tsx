@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, MiniMap, Controls,
-  Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow, useViewport,
+  Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow,
   type NodeProps, type EdgeProps, type NodeTypes, type EdgeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useStore } from "../store";
 import { roleById, NODE_TYPE_LABEL, CANVAS_ID } from "../state";
 import type { RFNode, RFEdge } from "../state";
-import { faNum, uid, nowIso, EMPTY_ARR, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
-import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash, INode, IChevD } from "./icons";
+import { faNum, uid, nowIso, mdInline, EMPTY_ARR, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
+import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash } from "./icons";
 
 /* ---------------- mini markdown ---------------- */
 
@@ -28,17 +28,17 @@ function Md({ text, compact = false }: { text: string; compact?: boolean }) {
           return (
             <p key={i} className="text-[11.5px] leading-5 text-ink-200 flex gap-1.5">
               <span className="text-amber-lc mt-[7px] w-1 h-1 rounded-full bg-amber-lc shrink-0" />
-              <span dangerouslySetInnerHTML={{ __html: bold(t.slice(2)) }} />
+              {/* mdInline اول HTML را escape می‌کند، بعد قالب‌بندی — پس محتوای AI هرگز تگ نمی‌شود */}
+              <span dangerouslySetInnerHTML={{ __html: mdInline(t.slice(2)) }} />
             </p>
           );
-        return <p key={i} className="text-[11.5px] leading-5 text-ink-200" dangerouslySetInnerHTML={{ __html: bold(t) }} />;
+        return <p key={i} className="text-[11.5px] leading-5 text-ink-200" dangerouslySetInnerHTML={{ __html: mdInline(t) }} />;
       })}
     </div>
   );
 }
 
-const bold = (s: string) =>
-  s.replace(/\*\*(.+?)\*\*/g, "<strong class='text-ink-50 font-bold'>$1</strong>").replace(/_(.+?)_/g, "<em>$1</em>");
+
 
 /* ---------------- status ---------------- */
 
@@ -229,7 +229,7 @@ const EDGE_COLOR: Record<string, string> = {
 };
 
 function LcEdge(props: EdgeProps<RFEdge>) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd } = props;
+  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd } = props;
   const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.28 });
   const color = EDGE_COLOR[data?.edgeType ?? "flow"] ?? "#5f7b76";
   const anim = data?.animation === "flow" ? "lc-edge-flow" : data?.animation === "pulse" ? "lc-edge-pulse" : "";

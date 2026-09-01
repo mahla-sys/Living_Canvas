@@ -6,9 +6,10 @@ import type { NodeChange, EdgeChange, Connection } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import {
   storage, nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, toYaml, logText, frontmatter,
-  nowIso,
+  nowIso, storageMode,
+  type Settings, type LCNodeData, type LCEdgeData, type Stroke, type NodeType,
 } from "./lib/core";
-import type { Settings, LCNodeData, LCEdgeData, Stroke, NodeType } from "./lib/core";
+import type { CanvasFiles } from "./lib/portable";
 import {
   ROOT, CANVAS_ID, defaultSettings, emptyExecution, makeNodeData, makeEdgeData, roleById, MODELS,
   builtinTemplateInfo,
@@ -23,7 +24,9 @@ import {
   saveTemplate, loadTemplate, saveRoleFromNode, contractSelfTest, testFallback,
   addStroke as engAddStroke, removeStroke as engRemoveStroke, undoStroke as engUndoStroke,
   clearStrokes as engClearStrokes, convertStrokesToGraph as engConvertStrokes,
-  appendLog, type EngineApi,
+  pickCanvasFolder, detachWorkspaceFolder, exportToJsonFile, exportToFolder,
+  importFromFolder, importFromFile, previewImportText, applyImport, flushPending, reloadFromStorage,
+  type ImportPreview, type EngineApi,
 } from "./lib/engine";
 
 let api: EngineApi;
@@ -70,6 +73,21 @@ interface Actions {
   saveTemplate: (name: string) => void;
   loadTemplate: (id: string) => void;
   saveRole: (nodeId: string) => void;
+  /** حالت ذخیره‌سازی فعال: idb | fs | http | memory */
+  storageMode: () => "idb" | "fs" | "http" | "memory";
+  flushSave: () => Promise<void>;
+  reloadFromDisk: () => Promise<void>;
+  attachFolder: () => Promise<void>;
+  detachFolder: () => Promise<void>;
+  exportJson: () => Promise<void>;
+  exportFolder: () => Promise<void>;
+  importFolder: (replace?: boolean) => Promise<void>;
+  importJsonFile: (file: File, replace?: boolean) => Promise<void>;
+  previewImport: (text: string) => Promise<ImportPreview & { files: CanvasFiles }>;
+  commitImport: (files: CanvasFiles, replace?: boolean) => Promise<void>;
+  setPortOpen: (v: boolean) => void;
+  /** بازکردن محتوای واقعی یک فایل از StorageAdapter (حالت پوشه‌ی زنده). */
+  openStorageFile: (path: string) => Promise<void>;
   selfTest: (nodeId?: string) => void;
   testFallback: () => void;
   addStroke: (s: Stroke) => void;
@@ -117,6 +135,7 @@ function initialState(): AppState {
       settingsOpen: false,
       chatNodeId: null,
       consoleOpen: true,
+      portOpen: false,
     },
   };
   return seedless;
@@ -253,6 +272,29 @@ function buildActions(a: EngineApi): Actions {
     undoStroke: () => void engUndoStroke(a),
     clearStrokes: () => void engClearStrokes(a),
     convertStrokes: (opts) => void engConvertStrokes(a, opts),
+
+    storageMode: () => storageMode(),
+    flushSave: () => flushPending(),
+    reloadFromDisk: () => reloadFromStorage(a),
+    attachFolder: () => pickCanvasFolder(a),
+    detachFolder: () => detachWorkspaceFolder(a),
+    exportJson: () => exportToJsonFile(a),
+    exportFolder: () => exportToFolder(a),
+    importFolder: (replace) => importFromFolder(a, replace ?? true),
+    importJsonFile: (file, replace) => importFromFile(a, file, replace ?? true),
+    previewImport: (text) => previewImportText(a, text),
+    commitImport: (files, replace) => applyImport(a, files, { replace: replace ?? true }),
+    setPortOpen: (v) => useStore.setState((s) => ({ ui: { ...s.ui, portOpen: v } })),
+
+    openStorageFile: async (path) => {
+      try {
+        const content = await storage.readFile(path);
+        const lang = path.endsWith(".json") ? "json" : path.endsWith(".yaml") ? "yaml" : path.endsWith(".log") ? "log" : "md";
+        useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: { path, content, lang } } }));
+      } catch {
+        useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: { path, content: "— فایل خوانده نشد —", lang: "md" } } }));
+      }
+    },
   };
 }
 

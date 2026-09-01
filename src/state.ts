@@ -139,6 +139,8 @@ export interface AppState {
     settingsOpen: boolean;
     chatNodeId: string | null;
     consoleOpen: boolean;
+    /** پنجره‌ی Export/Import باز است؟ */
+    portOpen: boolean;
   };
 }
 
@@ -311,9 +313,9 @@ export const emptyExecution = (): ExecutionState => ({
 export const defaultSettings = (): Settings => {
   try {
     const raw = localStorage.getItem("lc-settings");
-    if (raw) return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "", ...JSON.parse(raw) };
+    if (raw) return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "", workspaceRoot: null, ...JSON.parse(raw) };
   } catch { /* ignore */ }
-  return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "" };
+  return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "", workspaceRoot: null };
 };
 
 /* ---------------- palette ---------------- */

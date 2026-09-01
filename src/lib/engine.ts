@@ -3,10 +3,18 @@
    checkpoints §10, persistence, DeepSeek provider
    ============================================================ */
 import {
-  storage, setStorage, HttpStorageAdapter, bus, uid, nowIso, nowStamp, sleep, debounce, faNum,
+  storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, sleep, debounce, faNum,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
   type BusEventType, type OutputEntry, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
 } from "./core";
+import {
+  FsAccessStorageAdapter, isFsAccessSupported, pickCanvasDirectory, ensurePermission,
+  writeFilesToDirectory, readCanvasFromDirectory, ensureStructure, type FsDirHandle,
+} from "./fs-access";
+import {
+  collectCanvasFiles, buildBundle, parseBundleText, deriveCanvasFromFiles, installFiles,
+  downloadJson, readFileAsText, bundleBytes, MAX_BUNDLE_BYTES, type CanvasFiles,
+} from "./portable";
 import {
   ROOT, CANVAS_ID, APP_VERSION, buildSeed, emptyExecution, roleById,
   makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc,
@@ -67,7 +75,7 @@ export function patchNode(api: EngineApi, id: string, data: Partial<RFNode["data
 export async function writeNodeArtifact(api: EngineApi, id: string, quiet = false) {
   const n = getNode(api.get(), id);
   if (!n) return;
-  await storage.writeFile(nodePath(id), nodeToMarkdown(id, n.data));
+  await storage.writeFile(nodePath(id), nodeToMarkdown(id, n.data, n.position));
   if (!quiet) emit(api, "file.written", `nodes/${id}.md نوشته شد`);
 }
 
@@ -153,16 +161,32 @@ async function writeCore(s: AppState) {
   ]);
 }
 
-const debouncedSave = debounce(async (api: EngineApi) => {
+let saveChain: Promise<void> = Promise.resolve();
+
+async function saveNow(api: EngineApi) {
   await writeCore(api.get());
   api.set({ saveState: "saved" });
   const s = api.get();
   emit(api, "graph.saved", `graph.json ذخیره شد — ${s.nodes.length} نود، ${s.edges.length} یال`);
+}
+
+/**
+ * ذخیرهٔ debounce‌شده (§5.2). هر نوشتن روی زنجیره نشسته تا flush بتواند
+ * واقعاً منتظر تمام نوشتن‌های معوق بمانده — قبل از Export و قبل از رفرش.
+ */
+const debouncedSave = debounce((api: EngineApi) => {
+  saveChain = saveChain.then(() => saveNow(api)).catch(() => undefined);
 }, 700);
 
 export function touch(api: EngineApi) {
   api.set({ saveState: "saving" });
-  void debouncedSave(api);
+  debouncedSave(api);
+}
+
+/** صبر کردن تا هر نوشتن معوق روی StorageAdapter بنشیند. Export همیشه اول این را صدا می‌زند. */
+export async function flushPending(): Promise<void> {
+  debouncedSave.flush();
+  await saveChain;
 }
 
 /* ---------------- MemoryManager (§6.2) ---------------- */
@@ -1051,58 +1075,129 @@ export async function deleteEdge(api: EngineApi, id: string) {
 
 /* ---------------- workspace init & seed (§2) ---------------- */
 
-export async function hydrate(api: EngineApi): Promise<boolean> {
-  const hasManifest = await storage.exists(`${ROOT}/manifest.json`);
-  if (!hasManifest) return false;
+/** لایه‌ی نقاشی آزاد از فایل‌های جداگانه (§2 / §3 strokes). */
+async function loadStrokes(): Promise<Stroke[]> {
+  const strokes: Stroke[] = [];
   try {
-    const state = await storage.readJson<{
-      canvas: AppState["canvas"]; memory: AppState["memory"]; outputs: AppState["outputs"];
-      chats: AppState["chats"]; logs: AppState["logs"]; snapshots: AppState["snapshots"];
-      execution: AppState["execution"];
-    }>(`${ROOT}/state.json`);
-    const graph = await storage.readJson<{ nodes: RFNode[]; edges: RFEdge[] }>(`${ROOT}/graph.json`);
+    for (const f of await storage.listDirectory(`${ROOT}/strokes`)) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const st = await storage.readJson<Stroke>(`${ROOT}/strokes/${f}`);
+        if (st?.points?.length) strokes.push(st);
+      } catch { /* فایل نقاشی خراب — رد */ }
+    }
+  } catch { /* پوشه خالی است */ }
+  return strokes.sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
 
-    // load the freehand drawing layer from individual stroke files (§2)
-    const strokes: Stroke[] = [];
-    try {
-      const files = await storage.listDirectory(`${ROOT}/strokes`);
-      for (const f of files) {
-        if (!f.endsWith(".json")) continue;
-        try {
-          const st = await storage.readJson<Stroke>(`${ROOT}/strokes/${f}`);
-          if (st?.points?.length) strokes.push(st);
-        } catch { /* skip corrupted stroke file */ }
+/**
+ * قالب‌های ذخیره‌شده از library/templates/ (§13).
+ * بسته‌ی قالب داخل زیرپوشه است؛ فیکس `listDirectory` لازم بود تا این‌جا
+ * پوشه‌ها دیده شوند (قبلاً خالی برمی‌گشت و قالب کاربر بعد از رفرش می‌پرید).
+ */
+async function loadTemplates(): Promise<TemplateInfo[]> {
+  const out = [builtinTemplateInfo()];
+  try {
+    for (const d of await storage.listDirectory(`${ROOT}/library/templates`)) {
+      const dir = d.replace(/\/$/, "");
+      if (!dir) continue;
+      const spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${dir}/template.json`).catch(() => null);
+      if (spec?.template_id && spec.template_id !== BUILTIN_TEMPLATE.template_id) {
+        out.push({
+          id: spec.template_id, name: spec.name, description: spec.description,
+          nodes: spec.nodes?.length ?? 0, edges: spec.edges?.length ?? 0,
+          builtin: false, saved_at: (spec as TemplateSpec & { saved_at?: string }).saved_at ?? nowIso(),
+        });
       }
-    } catch { /* strokes dir may be empty */ }
-    strokes.sort((a, b) => a.created_at.localeCompare(b.created_at));
+    }
+  } catch { /* هنوز قالب سفارشی‌ای نیست */ }
+  return out;
+}
 
-    // restore saved pipeline templates from library/templates/ (§13)
-    const templates = [builtinTemplateInfo()];
-    try {
-      const dirs = await storage.listDirectory(`${ROOT}/library/templates`);
-      for (const d of dirs) {
-        const dir = d.replace(/\/$/, "");
-        const spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${dir}/template.json`).catch(() => null);
-        if (spec?.template_id && spec.template_id !== BUILTIN_TEMPLATE.template_id) {
-          templates.push({
-            id: spec.template_id, name: spec.name, description: spec.description,
-            nodes: spec.nodes?.length ?? 0, edges: spec.edges?.length ?? 0,
-            builtin: false, saved_at: (spec as TemplateSpec & { saved_at?: string }).saved_at ?? nowIso(),
-          });
-        }
-      }
-    } catch { /* no custom templates yet */ }
+/** حافظه‌ی سراسری/ایجنتی از فایل‌ها (§3.7) — برای حالت «بدون state.json». */
+function pickMemory(derived: ReturnType<typeof deriveCanvasFromFiles>, fallback: AppState["memory"]): AppState["memory"] {
+  const memory = { ...fallback, agents: { ...fallback.agents } };
+  for (const key of ["global", "decisions", "progress", "user"] as const) {
+    const doc = derived.memory[key];
+    if (doc) memory[key] = doc;
+  }
+  for (const [id, doc] of Object.entries(derived.memory.agents)) memory.agents[id] = doc;
+  return memory;
+}
+
+/**
+ * بارگذاری بوم از StorageAdapter (§2/§4).
+ * دو مسیر دارد و هر دو معتبرند:
+ *  ۱) graph.json + state.json  → بارگذاری سریع (مسیر معمول IDB)
+ *  ۲) خودِ فایل‌های Markdown/YAML → وقتی کش ماشینی نیست (پوشه‌ی Obsidian/Git، Import از فایل)
+ * در مسیر ۱ هم title/content/system_prompt از فایل نود «اورلی» می‌شوند تا ویرایش دستی
+ * در ادیتور بیرونی بعد از رفرش گم نشود (§1.3-۱: فایل‌ها پایهٔ ذخیره‌سازی‌اند).
+ * قفل‌ها همیشه آزاد می‌شوند: قفل، وضعیتِ لحظه‌ی اجراست نه داده (§12.5).
+ */
+export async function hydrate(api: EngineApi): Promise<boolean> {
+  if (!(await storage.exists(`${ROOT}/manifest.json`))) return false;
+  try {
+    const graph = await storage.readJson<{ nodes: RFNode[]; edges: RFEdge[] }>(`${ROOT}/graph.json`).catch(() => null);
+
+    /* خواندنِ به‌اندازه: اگر graph.json بود، فقط فایل نودها برای اورلی لازم است
+       (یک allPath ارزان + چند readFile)؛ اگر نبود، کل درخت §2 خوانده می‌شود.
+       بدون این تفکیک، boot روی بوم بزرگ معادل خواندن همه‌ی logs/outputs بود. */
+    const files = graph?.nodes?.length
+      ? await collectCanvasFiles({ filter: (p) => new RegExp(`^${ROOT}/nodes/[^/]+\\.md$`).test(p) || p === `${ROOT}/canvas.yaml` })
+      : await collectCanvasFiles();
+    const derived = deriveCanvasFromFiles(files);
+    const state = await storage
+      .readJson<{
+        canvas?: AppState["canvas"]; memory?: AppState["memory"]; outputs?: AppState["outputs"];
+        chats?: AppState["chats"]; logs?: AppState["logs"]; snapshots?: AppState["snapshots"];
+      }>(`${ROOT}/state.json`)
+      .catch(() => null);
+
+    if (!graph?.nodes?.length && !derived.nodes.length) return false;
+
+    const mdById = new Map(derived.nodes.map((n) => [n.id, n]));
+    const nodes: RFNode[] = (graph?.nodes?.length
+      ? graph.nodes.map((n) => {
+          const md = mdById.get(n.id);
+          const data = { ...n.data } as RFNode["data"];
+          if (md) {
+            if (md.data.title) data.title = md.data.title;
+            if (typeof md.data.content === "string" && md.data.content.trim()) data.content = md.data.content;
+            const sp = md.data.agent?.system_prompt;
+            if (data.agent && sp && sp.length > 1) data.agent = { ...data.agent, system_prompt: sp };
+          }
+          return { ...n, data: { ...data, lock: { status: "free" as const, locked_by: null, locked_at: null } } };
+        })
+      : derived.nodes.map((n) => ({ ...n, data: { ...n.data, lock: { status: "free" as const, locked_by: null, locked_at: null } } }))) as RFNode[];
+
+    const ids = new Set(nodes.map((n) => n.id));
+    const edges = (graph?.edges?.length ? graph.edges : derived.edges).filter((e) => ids.has(e.source) && ids.has(e.target)) as RFEdge[];
+    const memory = pickMemory(derived, state?.memory ?? api.get().memory);
+    const mode = storageMode();
 
     api.set({
-      canvas: state.canvas, memory: state.memory, outputs: state.outputs ?? {}, chats: state.chats ?? {},
-      logs: state.logs ?? {}, snapshots: state.snapshots ?? [], strokes, templates,
-      nodes: graph.nodes.map((n) => ({
-        ...n,
-        data: { ...n.data, lock: { status: "free" as const, locked_by: null, locked_at: null } },
-      })),
-      edges: graph.edges,
+      canvas: { ...api.get().canvas, ...(state?.canvas ?? {}), title: derived.canvasTitle ?? state?.canvas?.title ?? api.get().canvas.title },
+      memory,
+      outputs: state?.outputs ?? {},
+      chats: state?.chats ?? {},
+      logs: state?.logs ?? {},
+      snapshots: state?.snapshots ?? [],
+      strokes: await loadStrokes(),
+      templates: await loadTemplates(),
+      nodes,
+      edges,
       execution: emptyExecution(),
     });
+    emit(
+      api,
+      "system",
+      graph?.nodes?.length
+        ? `بوم بارگذاری شد — ${nodes.length} نود، ${edges.length} یال (منبع: graph.json${mode === "fs" ? " + فایل‌های پوشه" : ""})`
+        : `بوم از فایل‌های Markdown/YAML بازسازی شد — ${nodes.length} نود، ${edges.length} یال`
+    );
+    if (derived.unreadable.length) {
+      emit(api, "validation.failed", `${derived.unreadable.length} فایل قابل‌خواندن نبود و نادیده گرفته شد: ${derived.unreadable.slice(0, 4).join("، ")}`);
+    }
     return true;
   } catch {
     return false;
@@ -1181,10 +1276,32 @@ async function maybeSwitchStorage(api: EngineApi) {
 
 export async function initWorkspace(api: EngineApi) {
   await maybeSwitchStorage(api);
-  const ok = await hydrate(api);
+  // «حالت پوشه‌ی زنده» بر IndexedDB اولویت دارد: اگر پوشه‌ای قبلاً وصل شده بود،
+  // منبع داده همان فایل‌های روی دیسک‌اند (§5.1).
+  const resumed = await maybeResumeWorkspace(api);
+  const ok = resumed || (await hydrate(api));
   if (!ok) await seedWorkspace(api);
   api.set({ booted: true });
   toast(api, "success", ok ? "بوم از حافظه‌ی ذخیره‌سازی بارگذاری شد." : "بوم جدید با ساختار فایل‌محور آماده شد.");
+}
+
+/**
+ * «خواندن دوباره از دیسک»: اگر فایل‌ها بیرون (Git pull / ویرایش Obsidian) عوض شده باشند،
+ * بوم را از همان فایل‌ها بازخوانی می‌کند. قبلش flush نمی‌کنیم تا تغییر ناموجو از بین نرود،
+ * ولی اگر تغییر معلق باشد هشدار می‌دهیم.
+ */
+export async function reloadFromStorage(api: EngineApi) {
+  if (api.get().saveState === "saving") {
+    toast(api, "warn", "یک ذخیره در جریان است — چند لحظه بعد دوباره تلاش کن تا تغییراتت گم نشود.");
+    return;
+  }
+  emit(api, "system", "بوم از فایل‌ها بازخوانی شد (درخواست کاربر)");
+  const ok = await hydrate(api);
+  if (!ok) {
+    toast(api, "error", "بازخوانی ناموفق — فایل‌های بوم در دسترس نیستند.");
+    return;
+  }
+  toast(api, "success", "از دیسک بازخوانی شد.");
 }
 
 export async function resetWorkspace(api: EngineApi) {
@@ -1350,3 +1467,303 @@ export async function saveRoleFromNode(api: EngineApi, nodeId: string) {
   emit(api, "system", `نقش «${n.data.title}» در library/roles/${rid}.json ذخیره شد`);
   toast(api, "success", "نقش ایجنت در کتابخانه ذخیره شد.");
 }
+
+/* ============================================================
+   Portability — Export/Import و «حالت پوشه‌ی زنده» (§5.1)
+   ============================================================ */
+
+/* ---------- root handle (File System Access) ---------- */
+
+/* هندل پوشه را در IndexedDB نگه می‌داریم؛ localStorage handle را ذخیره نمی‌کند
+   (و DB جدا از living-canvas است تا LRU/clearِ وضعیت، اتصال پوشه را نابود نکند). */
+const ROOT_DB = "living-canvas-root";
+const openRootDb = (): Promise<IDBDatabase> =>
+  new Promise((resolve, reject) => {
+    const req = indexedDB.open(ROOT_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains("kv")) req.result.createObjectStore("kv");
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+
+async function persistRootHandle(handle: FsDirHandle | null): Promise<void> {
+  if (typeof indexedDB === "undefined") return;
+  try {
+    const idb = await openRootDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = idb.transaction("kv", "readwrite");
+      if (handle) tx.objectStore("kv").put(handle, "dir");
+      else tx.objectStore("kv").delete("dir");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    idb.close();
+  } catch {
+    /* نگه‌داشتن handle اختیاری است؛ نشد که کاربر «اتصال» را دوباره می‌زند */
+  }
+}
+
+async function loadRootHandle(): Promise<FsDirHandle | null> {
+  if (typeof indexedDB === "undefined") return null;
+  try {
+    const idb = await openRootDb();
+    const handle = await new Promise<FsDirHandle | null>((resolve, reject) => {
+      const tx = idb.transaction("kv", "readonly");
+      const r = tx.objectStore("kv").get("dir");
+      r.onsuccess = () => resolve((r.result as FsDirHandle) ?? null);
+      r.onerror = () => reject(r.error);
+    });
+    idb.close();
+    return handle;
+  } catch {
+    return null;
+  }
+}
+
+/** هندل را روی storage فعال می‌کند؛ false یعنی اتصال ممکن نیست. */
+export async function applyRootHandle(api: EngineApi, handle: FsDirHandle): Promise<boolean> {
+  if (!(await ensurePermission(handle, "readwrite"))) return false;
+  try {
+    //probe نوشتن: اگر پوشه فقط‌خواندنی باشد همین‌جا می‌فهمیم، نه وسط کار
+    await ensureStructure(handle);
+  } catch {
+    return false;
+  }
+  setStorage(new FsAccessStorageAdapter(handle, ROOT));
+  api.set((st) => ({ settings: { ...st.settings, workspaceRoot: handle.name } }));
+  return true;
+}
+
+/** اتصال به یک پوشه‌ی واقعی روی دیسک: اگر بومی بود بارگذاری، اگر نبود از وضعیت فعلی seed می‌شود. */
+export async function attachWorkspaceFolder(api: EngineApi, handle: FsDirHandle): Promise<void> {
+  emit(api, "system", `پوشه‌ی کاری باز شد: ${handle.name}/ — در حال بررسی ساختار §2…`);
+  if (!(await applyRootHandle(api, handle))) {
+    toast(api, "error", "اجازه‌ی نوشتن روی پوشه داده نشد — اتصال برقرار نشد.");
+    return;
+  }
+  await persistRootHandle(handle);
+  const ok = await hydrate(api);
+  if (ok) {
+    emit(api, "system", "بوم از فایل‌های همین پوشه بارگذاری شد");
+    toast(api, "success", `به «${handle.name}» متصل شد — تغییرات عیناً روی دیسک نوشته می‌شوند.`);
+  } else {
+    await seedWorkspace(api);
+    toast(api, "success", `پوشه‌ی «${handle.name}» با ساختار §2 ساخته شد — حالا Git/Obsidian روی همین پوشه کار می‌کنند.`);
+  }
+}
+
+export async function detachWorkspaceFolder(api: EngineApi): Promise<void> {
+  setStorage(createDefaultStorage());
+  await persistRootHandle(null);
+  api.set((st) => ({ settings: { ...st.settings, workspaceRoot: null } }));
+  const ok = await hydrate(api);
+  if (!ok) await seedWorkspace(api);
+  emit(api, "system", "حالت پوشه بسته شد — ذخیره‌سازی به IndexedDB محلی برگشت");
+  toast(api, "info", "اتصال به پوشه قطع شد. فایل‌ها سرِ جای خود روی دیسک می‌مانند.");
+}
+
+/** انتخاب پوشه از طریق File System Access API (با fallback به پیام راهنما). */
+export async function pickCanvasFolder(api: EngineApi): Promise<void> {
+  if (!isFsAccessSupported()) {
+    toast(api, "warn", "این مرورگر File System Access API ندارد (Firefox/Safari). از Export/Import فایل استفاده کن.");
+    return;
+  }
+  try {
+    const handle = await pickCanvasDirectory();
+    await attachWorkspaceFolder(api, handle);
+  } catch (err) {
+    if (String(err).includes("AbortError") || (err as { name?: string })?.name === "AbortError") return;
+    emit(api, "validation.failed", `اتصال به پوشه ناموفق: ${String(err)}`);
+    toast(api, "error", "اتصال به پوشه ناموفق بود.");
+  }
+}
+
+/* ---------- Export ----------
+
+/**
+ * Export همیشه بعد از flush انجام می‌شود؛ وگرنه پنجره‌ی ۷۰۰ms debounce باعث می‌شد
+ * آخرین ویرایش‌ها در فایل‌های خروجی نباشند (دقیقاً همان چیزی که در حالت پوشه‌ی زنده
+ * حساس است، چون کاربر فایل‌ها را با Git مقایسه می‌کند).
+ */
+export async function exportBundleText(api: EngineApi): Promise<{ text: string; files: number; bytes: number; canvasId: string }> {
+  await flushPending();
+  // collectCanvasFiles تمام درخت §2 را می‌گیرد؛ graph.json و state.json هم جزء فایل‌های
+  // بوم‌اند (state.json در سند تازه مستند شد) — پس Importِ این باندل بایت‌به‌بایت بازمی‌گرداند.
+  const files = await collectCanvasFiles();
+  const bundle = buildBundle(files, api.get().canvasId);
+  return {
+    text: JSON.stringify(bundle, null, 2),
+    files: bundle.stats.files,
+    bytes: new Blob([bundle ? JSON.stringify(bundle) : ""]).size,
+    canvasId: api.get().canvasId,
+  };
+}
+
+export async function exportToJsonFile(api: EngineApi): Promise<void> {
+  try {
+    const { text, canvasId, files } = await exportBundleText(api);
+    if (new Blob([text]).size > MAX_BUNDLE_BYTES) {
+      toast(api, "error", "خروجی از سقف ۳۲MB بزرگ‌تر است — از حالت پوشه استفاده کن.");
+      return;
+    }
+    await downloadJson(`${canvasId}.livingcanvas.json`, text);
+    emit(api, "system", `Export: ${files} فایل در قالب یک باندل JSON دانلود شد`);
+    toast(api, "success", "بوم Export شد — همه‌ی فایل‌ها داخل یک فایل JSON است.");
+  } catch (err) {
+    toast(api, "error", `Export ناموفق: ${String(err)}`);
+  }
+}
+
+/** Export به پوشه (نسخه‌ی استاتیک، بدون اتصال زنده). ساختار §2 عیناً روی دیسک نوشته می‌شود. */
+export async function exportToFolder(api: EngineApi): Promise<void> {
+  if (!isFsAccessSupported()) {
+    toast(api, "warn", "برای Export به پوشه به Chrome/Edge نیاز است؛ فعلاً همان فایل JSON را دانلود کن.");
+    return;
+  }
+  try {
+    const dir = await pickCanvasDirectory("living-canvas-export");
+    await flushPending();
+    const files = await collectCanvasFiles();
+    const res = await writeFilesToDirectory(dir, files);
+    emit(api, "system", `Export به پوشه: ${res.written} فایل نوشته شد${res.failed.length ? `، ${res.failed.length} ناموفق` : ""}`);
+    toast(api, res.failed.length ? "warn" : "success",
+      `${res.written} فایل در «${dir.name}» نوشته شد${res.failed.length ? ` — ${res.failed.length} فایل ناموفق` : ""}.`);
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError") return;
+    toast(api, "error", `Export به پوشه ناموفق: ${String(err)}`);
+  }
+}
+
+/* ---------- Import ---------- */
+
+export interface ImportPreview {
+  canvasId: string | null;
+  title: string | null;
+  /** تعداد فایل‌های معتبر داخل ورودی */
+  fileCount: number;
+  nodes: number;
+  edges: number;
+  bytes: number;
+  skipped: { path: string; reason: string }[];
+  warning: string | null;
+}
+
+function summarize(api: EngineApi, r: ReturnType<typeof parseBundleText>): ImportPreview {
+  const derived = deriveCanvasFromFiles(r.files);
+  const bytes = bundleBytes(r.files);
+  const foreign = r.canvasId && r.canvasId !== api.get().canvasId;
+  return {
+    canvasId: r.canvasId,
+    title: r.title ?? derived.canvasTitle,
+    fileCount: Object.keys(r.files).length,
+    nodes: derived.nodes.length,
+    edges: derived.edges.length,
+    bytes,
+    skipped: r.skipped,
+    warning:
+      !r.files[`${ROOT}/manifest.json`]
+        ? "manifest.json ندارد — ممکن است خروجیِ نسخهٔ قدیمی یا فایل دستی باشد؛ با احتیاط وارد شود."
+        : foreign
+          ? `شناسهٔ بوم «${r.canvasId}» با بوم فعلی فرق دارد؛ فایل‌ها زیر مسیر بوم فعلی نوشته می‌شوند.`
+          : null,
+  };
+}
+
+export async function previewImportText(api: EngineApi, text: string): Promise<ImportPreview & { files: CanvasFiles }> {
+  const r = parseBundleText(text);
+  if (!r.ok) throw new Error(r.error ?? "فایل نامعتبر است");
+  return { ...summarize(api, r), files: r.files };
+}
+
+/** اعمال واقعی Import: نوشتن فایل‌ها + بازخوانی از همان فایل‌ها. */
+export async function applyImport(api: EngineApi, files: CanvasFiles, opts?: { replace?: boolean }): Promise<void> {
+  const replace = opts?.replace ?? true;
+  if (replace) {
+    await storage.clear();
+  }
+  await installFiles(files, { replace: false });
+  // بعضی Exportها (یا پوشه‌ی دستی Obsidian) manifest.json ندارند؛ بدون آن hydrate رد می‌کند
+  if (!(await storage.exists(`${ROOT}/manifest.json`))) {
+    await storage.writeJson(`${ROOT}/manifest.json`, {
+      version: "1.0", app_version: APP_VERSION, canvas_id: api.get().canvasId,
+      structure_version: "1.3", last_validated: nowIso().slice(0, 10), imported: nowIso(),
+    });
+  }
+  const ok = await hydrate(api);
+  if (!ok) {
+    emit(api, "validation.failed", "Import انجام شد ولی بوم قابل‌ساختن نبود — فایل‌ها در ذخیره‌سازی‌اند");
+    toast(api, "error", "فایل‌ها نوشته شدند ولی بوم ساخته نشد (هیچ نودی پیدا نشد).");
+    return;
+  }
+  if (replace) await writeCore(api.get());
+  emit(api, "system", `Import کامل شد — ${api.get().nodes.length} نود از فایل‌ها بازسازی شد`);
+  toast(api, "success", "بوم بازیابی شد — همه‌ی نودها، حافظه‌ها و فایل‌ها جایگزین شدند.");
+}
+
+export async function importFromText(api: EngineApi, text: string, opts?: { replace?: boolean }): Promise<ImportPreview> {
+  const preview = await previewImportText(api, text);
+  await applyImport(api, preview.files, opts);
+  const { files: _drop, ...rest } = preview;
+  void _drop;
+  return rest;
+}
+
+/** Import از یک پوشه (File System Access) — خواندن درخت §2 و بازسازی بوم. */
+export async function importFromFolder(api: EngineApi, replace = true): Promise<void> {
+  if (!isFsAccessSupported()) {
+    toast(api, "warn", "مرورگر تو File System Access API ندارد؛ فایل .livingcanvas.json را انتخاب کن.");
+    return;
+  }
+  try {
+    const dir = await pickCanvasDirectory("living-canvas-import");
+    const raw = await readCanvasFromDirectory(dir);
+    // مسیرها را منطقی می‌کنیم: اگر پوشه ریشهٔ canvases/<id> باشد، پیشوند را وصل می‌کنیم
+    const files: CanvasFiles = {};
+    for (const [rel, text] of Object.entries(raw)) files[`${ROOT}/${rel}`] = text;
+    const parsed = parseBundleText(JSON.stringify(files));
+    if (!parsed.ok) {
+      toast(api, "error", "هیچ فایل بومی در این پوشه پیدا نشد (nodes/ یا manifest.json خالی است).");
+      return;
+    }
+    const preview = { ...summarize(api, parsed), files: parsed.files };
+    if (!preview.files[`${ROOT}/manifest.json`] && !preview.nodes) {
+      toast(api, "error", "این پوشه ساختار Living Canvas را ندارد.");
+      return;
+    }
+    await applyImport(api, preview.files, { replace });
+    emit(api, "system", `Import از پوشه «${dir.name}» — ${preview.nodes} نود، ${preview.edges} یال`);
+  } catch (err) {
+    if ((err as { name?: string })?.name === "AbortError") return;
+    toast(api, "error", `Import از پوشه ناموفق: ${String(err)}`);
+  }
+}
+
+/** انتخاب فایل با <input type=file> — خروجی‌اش File است. */
+export async function importFromFile(api: EngineApi, file: File, replace = true): Promise<void> {
+  try {
+    const text = await readFileAsText(file);
+    const preview = await importFromText(api, text, { replace });
+    toast(api, "success", `بازیابی شد — ${preview.nodes} نود، ${preview.fileCount} فایل.`);
+  } catch (err) {
+    toast(api, "error", `Import ناموفق: ${String(err)}`);
+  }
+}
+
+/** تلاش برای اتصال خودکار به پوشه‌ای که قبلاً انتخاب شده. */
+export async function maybeResumeWorkspace(api: EngineApi): Promise<boolean> {
+  const handle = await loadRootHandle();
+  if (!handle) return false;
+  if (!(await ensurePermission(handle, "readwrite"))) {
+    emit(api, "system", "برای پوشه‌ی کاری اجازه لازم است — از دکمه‌ی «اتصال به پوشه» دوباره اجازه بده");
+    return false;
+  }
+  if (!(await applyRootHandle(api, handle))) return false;
+  const ok = await hydrate(api);
+  if (ok) {
+    emit(api, "system", `حالت پوشه‌ی زنده ادامه یافت: ${handle.name}/`);
+    toast(api, "success", `به پوشه‌ی «${handle.name}» متصل است — تغییرات روی دیسک نوشته می‌شود.`);
+  }
+  return ok;
+}
+

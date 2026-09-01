@@ -3,3 +3,11 @@ node_modules/
 dist/
 build/
 *.log
+
+# ---- اضافه‌شده برای جلوگیری از تکرارِ ریپو (نقد §۷) ----
+*.zip
+Living_Canvas-main/
+coverage/
+.vite/
+*.tsbuildinfo
+.DS_Store

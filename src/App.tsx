@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "./store";
 import CanvasArea from "./components/CanvasArea";
 import { LeftPanel, RightPanel, FileViewer } from "./components/SidePanels";
-import { TopBar, ActivityConsole, ChatPanel, HistoryModal, SettingsModal, Toasts, BootOverlay } from "./components/Overlays";
+import { TopBar, ActivityConsole, ChatPanel, HistoryModal, SettingsModal, PortModal, Toasts, BootOverlay } from "./components/Overlays";
 
 export default function App() {
   const init = useStore((s) => s.actions.init);
@@ -30,6 +30,7 @@ export default function App() {
       <FileViewer />
       <HistoryModal />
       <SettingsModal />
+      <PortModal />
       <Toasts />
       <BootOverlay />
     </div>

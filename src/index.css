@@ -223,3 +223,123 @@ body,
 .react-flow__edge.selected path.react-flow__edge-path {
   stroke: #e8b04b !important;
 }
+
+/* ---------- markdown داخل نود (خروجی mdInline) ---------- */
+/* چون mdInline اول escape می‌کند، این‌ها تنها تگ‌های مجاز داخل Markdown نودند. */
+.lc-md-strong {
+  color: var(--color-ink-50);
+  font-weight: 700;
+}
+.lc-md-code {
+  direction: ltr;
+  unicode-bidi: embed;
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0 4px;
+  border-radius: 5px;
+  background: rgba(111, 179, 199, 0.12);
+  border: 1px solid rgba(111, 179, 199, 0.24);
+  color: var(--color-sky-lc);
+}
+
+/* ---------- منوی نوار بالا (Export/Import) ---------- */
+.lc-menu {
+  position: absolute;
+  inset-block-start: calc(100% + 6px);
+  inset-inline-end: 0;
+  z-index: 50;
+  min-width: 268px;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--color-ink-900);
+  border: 1px solid var(--color-ink-600);
+  box-shadow: 0 22px 60px -18px rgba(0, 0, 0, 0.85);
+}
+.lc-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-ink-200);
+  font-size: 11.5px;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+.lc-menu-item:hover:not(:disabled) {
+  background: var(--color-ink-850);
+  border-color: var(--color-ink-600);
+  color: var(--color-amber-lc);
+}
+.lc-menu-item:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.lc-menu-sep {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--color-ink-700);
+}
+.lc-menu-label {
+  padding: 7px 10px 3px;
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--color-ink-500);
+}
+
+/* ---------- تراشه‌ی حالت ذخیره‌سازی ---------- */
+.lc-storage-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 5px;
+  border: 1px solid currentColor;
+  opacity: 0.85;
+}
+
+/* ---------- پیش‌نمایش Import ---------- */
+.lc-import-list {
+  max-height: 168px;
+  overflow: auto;
+  border: 1px solid var(--color-ink-700);
+  border-radius: 10px;
+  background: var(--color-ink-950);
+  padding: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.9;
+  direction: ltr;
+  text-align: left;
+}
+.lc-import-warn {
+  border: 1px solid rgba(232, 176, 75, 0.42);
+  background: rgba(232, 176, 75, 0.08);
+  color: var(--color-amber-lc);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 10.5px;
+  line-height: 1.9;
+}
+.lc-import-danger {
+  border: 1px solid rgba(224, 106, 78, 0.45);
+  background: rgba(224, 106, 78, 0.08);
+  color: var(--color-ember);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 10.5px;
+  line-height: 1.9;
+}
+.lc-import-ok {
+  color: var(--color-sage);
+}
