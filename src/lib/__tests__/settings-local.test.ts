@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readSettingsLocal, writeSettingsLocal, clearSettingsLocal, SETTINGS_KEY } from "../core";
+import { readSettingsLocal, writeSettingsLocal, clearSettingsLocal, SETTINGS_KEY, DEFAULT_THEME } from "../core";
 import { defaultSettings } from "../../state";
 
 /* ============================================================
@@ -134,13 +134,15 @@ describe("defaultSettings reads through the seam, not around it", () => {
 
   it("an unregistered theme id falls back to the default rather than reaching data-theme", () => {
     writeSettingsLocal({ theme: "hot-pink" });
-    expect(defaultSettings().theme).toBe("botanical");
+    // asserted against DEFAULT_THEME, not a literal: the default is a decision, and hardcoding the old value
+    // here is how a test starts lying the day the decision changes
+    expect(defaultSettings().theme).toBe(DEFAULT_THEME);
   });
 
   it("a corrupt blob yields the defaults, not an exception", () => {
     installStorage(new Map([[SETTINGS_KEY, "{{{"]]));
     expect(() => defaultSettings()).not.toThrow();
-    expect(defaultSettings().theme).toBe("botanical");
+    expect(defaultSettings().theme).toBe(DEFAULT_THEME);
   });
 
   it("a truthy-but-not-true snapToGrid is normalised to false", () => {

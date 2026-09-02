@@ -24,6 +24,7 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 007 | `adr-007-settings-live-behind-two-functions.md` | accepted | `lc-settings` is a seam in the strong sense: three functions in `core.ts`, no other reader or writer |
 | 008 | `adr-008-agent-model-selects-the-model.md` | accepted | `agent.model` is an input to execution; the provider is derived from the model name |
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
+| 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data, `plum` is the default theme |
 
 ## House rules
 

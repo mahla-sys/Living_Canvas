@@ -8,7 +8,7 @@ sources: [docs/ARCHITECTURE.md#0.2, docs/decisions/README.md]
 # Phase 1 — closed
 
 Everything below is shipped and guarded; the citation in parentheses is what fails if it regresses. Verification
-is `npx vitest run` (178 tests in 13 files) plus the five repository gates (`scripts/check-english.mjs`,
+is `npx vitest run` (193 tests in 15 files) plus the five repository gates (`scripts/check-english.mjs`,
 `scripts/check-docs.mjs`, `scripts/check-palette.mjs`, `scripts/doc-anchors.mjs`, `scripts/check-facts.mjs`),
 which is exactly what `.github/workflows/ci.yml` runs.
 
@@ -37,6 +37,10 @@ which is exactly what `.github/workflows/ci.yml` runs.
 - [x] `agent.model` and `agent.max_tokens` reach the provider request (`model-route.test.ts`, `adr-008-agent-model-selects-the-model.md`)
 - [x] layout system: resizable panels in `canvas.yaml`, 22px status strip, focus mode in memory only (`layout.test.ts`, `layout-render.test.ts`, `docs/patterns/layout-system.md`)
 - [x] colour literals confined to the token blocks, including inline styles in components (`scripts/check-palette.mjs`)
+- [x] accent is a role token a theme can re-map, amber survives only as canvas data, `plum` is the default (`adr-010-accent-is-a-role-and-plum-is-default.md`)
+- [x] both side panels scroll, asserted on rendered HTML, without losing the resize handle (`layout-render.test.ts`)
+- [x] a four-agent pipeline with a conditional edge runs end to end through `engine` + the store: `outputs/`, `runs/<run-id>.md`, locks released, `agent.model` at the provider (`pipeline.test.ts`)
+- [x] boot measured rather than assumed: ~4 ms and 12 storage ops warm, under a 40-op budget; vendor chunks split so a returning reader re-downloads the app alone (`boot.test.ts`, `vite.config.js`)
 
 ## Explicitly not in phase 1
 

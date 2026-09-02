@@ -21,13 +21,13 @@ function Md({ text, compact = false }: { text: string; compact?: boolean }) {
         const t = ln.trim();
         if (!t) return null;
         if (t.startsWith("###")) return <p key={i} className="text-[12px] font-bold text-sky-lc">{t.replace(/^###\s*/, "")}</p>;
-        if (t.startsWith("##")) return <p key={i} className="text-[13px] font-extrabold text-amber-lc pt-1">{t.replace(/^##\s*/, "")}</p>;
+        if (t.startsWith("##")) return <p key={i} className="text-[13px] font-extrabold text-lc-accent pt-1">{t.replace(/^##\s*/, "")}</p>;
         if (t.startsWith("#")) return <p key={i} className="text-[14px] font-black text-ink-50">{t.replace(/^#\s*/, "")}</p>;
         if (t.startsWith("---")) return <div key={i} className="h-px bg-ink-700 my-1" />;
         if (t.startsWith("- "))
           return (
             <p key={i} className="text-[11.5px] leading-5 text-ink-200 flex gap-1.5">
-              <span className="text-amber-lc mt-[7px] w-1 h-1 rounded-full bg-amber-lc shrink-0" />
+              <span className="text-lc-accent mt-[7px] w-1 h-1 rounded-full bg-lc-accent shrink-0" />
               {/* mdInline escapes the HTML first, then formats — so AI content never becomes a tag */}
               <span dangerouslySetInnerHTML={{ __html: mdInline(t.slice(2)) }} />
             </p>
@@ -47,7 +47,7 @@ const STATUS_LABEL: Record<AgentStatus, string> = {
 };
 /* Roles, not colours: a status is chrome, so it follows the theme like every other accent (§6). */
 const STATUS_COLOR: Record<AgentStatus, string> = {
-  idle: "var(--color-ink-300)", running: "var(--color-amber-lc)", done: "var(--color-sage)",
+  idle: "var(--color-ink-300)", running: "var(--color-lc-accent)", done: "var(--color-sage)",
   failed: "var(--color-ember)", waiting: "var(--color-ember)",
 };
 
@@ -111,7 +111,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         {inner}
       </div>
       {locked && (
-        <span className="absolute -top-2 -left-2 z-10 w-5 h-5 rounded-full bg-ink-800 border border-amber-lc/60 text-amber-lc flex items-center justify-center">
+        <span className="absolute -top-2 -left-2 z-10 w-5 h-5 rounded-full bg-ink-800 border border-lc-accent/60 text-lc-accent flex items-center justify-center">
           <ILock size={10} />
         </span>
       )}
@@ -161,7 +161,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
       <div className="flex items-center gap-2 px-3.5 py-2 min-w-[110px]">
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: data.color, boxShadow: `0 0 8px ${data.color}80` }} />
         <span className="text-[12.5px] font-bold text-ink-100 whitespace-nowrap">{data.title}</span>
-        {running && <ISpark size={12} className="text-amber-lc anim-blink shrink-0" />}
+        {running && <ISpark size={12} className="text-lc-accent anim-blink shrink-0" />}
       </div>
     );
   }
@@ -204,7 +204,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
               if (e.key === "Escape") { e.preventDefault(); cancelled.current = true; setDraft(null); }
               else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
             }}
-            className="nodrag nowheel w-full min-h-[110px] resize-y rounded-lg bg-ink-950/70 border border-amber-lc/50 px-2 py-1.5 text-[11.5px] leading-5 text-ink-100 font-mono focus:outline-none focus:border-amber-lc"
+            className="nodrag nowheel w-full min-h-[110px] resize-y rounded-lg bg-ink-950/70 border border-lc-accent/50 px-2 py-1.5 text-[11.5px] leading-5 text-ink-100 font-mono focus:outline-none focus:border-lc-accent"
           />
         ) : data.content ? (
           <Md text={data.content} compact />
@@ -254,9 +254,9 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
       )}
 
       {running && lastLogs.length > 0 && (
-        <div className="mx-3.5 mb-2.5 px-2 py-1.5 rounded-md bg-ink-950/80 border border-amber-lc/20">
+        <div className="mx-3.5 mb-2.5 px-2 py-1.5 rounded-md bg-ink-950/80 border border-lc-accent/20">
           {lastLogs.map((l, i) => (
-            <p key={i} className="text-[9.5px] font-mono text-amber-lc/90 truncate leading-4">{l.replace(/^\[[^\]]+\]\s*/, "")}</p>
+            <p key={i} className="text-[9.5px] font-mono text-lc-accent/90 truncate leading-4">{l.replace(/^\[[^\]]+\]\s*/, "")}</p>
           ))}
         </div>
       )}
@@ -274,7 +274,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         </span>
         <button
           onClick={() => actions.setChatNode(chatOpen ? null : id)}
-          className="nodrag text-ink-400 hover:text-amber-lc transition-colors cursor-pointer"
+          className="nodrag text-ink-400 hover:text-lc-accent transition-colors cursor-pointer"
           title={agent ? "Chat with the agent" : "Note"}
         >
           <IChat size={14} />
@@ -288,7 +288,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
 
 /* The edge *type* picks a role; the edge file carries no colour, so this is chrome and it themes. */
 const EDGE_COLOR: Record<string, string> = {
-  flow: "var(--color-amber-lc)", relation: "var(--color-ink-400)", "event-flow": "var(--color-sky-lc)",
+  flow: "var(--color-lc-accent)", relation: "var(--color-ink-400)", "event-flow": "var(--color-sky-lc)",
   blackboard: "var(--color-sage)", "direct-message": "var(--color-plum)",
 };
 const EDGE_FALLBACK = "var(--color-ink-400)";
@@ -446,11 +446,11 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
     return (
       <button
         onClick={() => setDrawMode(true)}
-        className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full bg-ink-900/90 border border-ink-600 text-ink-200 text-[12px] font-bold shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] hover:border-amber-lc/60 hover:text-amber-lc transition-all cursor-pointer backdrop-blur-sm group"
+        className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full bg-ink-900/90 border border-ink-600 text-ink-200 text-[12px] font-bold shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] hover:border-lc-accent/60 hover:text-lc-accent transition-all cursor-pointer backdrop-blur-sm group"
       >
-        <IPen size={15} className="text-amber-lc group-hover:scale-110 transition-transform" />
+        <IPen size={15} className="text-lc-accent group-hover:scale-110 transition-transform" />
         Draw on the canvas
-        {strokes.length > 0 && <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded-full bg-amber-lc/15 border border-amber-lc/40 text-amber-lc">{strokes.length}</span>}
+        {strokes.length > 0 && <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded-full bg-lc-accent/15 border border-lc-accent/40 text-lc-accent">{strokes.length}</span>}
       </button>
     );
   }
@@ -459,7 +459,7 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
     <button
       onClick={onClick}
       title={title}
-      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${active ? "bg-amber-lc/20 text-amber-lc border border-amber-lc/50" : "text-ink-300 border border-transparent hover:text-ink-100 hover:bg-ink-700"}`}
+      className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${active ? "bg-lc-accent/20 text-lc-accent border border-lc-accent/50" : "text-ink-300 border border-transparent hover:text-ink-100 hover:bg-ink-700"}`}
     >
       {children}
     </button>
@@ -737,9 +737,9 @@ function CanvasInner() {
 
       {drawMode && (
         <>
-          <div className="absolute inset-2 rounded-2xl border-2 border-dashed border-amber-lc/25 pointer-events-none z-10" />
+          <div className="absolute inset-2 rounded-2xl border-2 border-dashed border-lc-accent/25 pointer-events-none z-10" />
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none anim-fade">
-            <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-lc/10 border border-amber-lc/40 text-amber-lc text-[10.5px] font-bold backdrop-blur-sm">
+            <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-lc-accent/10 border border-lc-accent/40 text-lc-accent text-[10.5px] font-bold backdrop-blur-sm">
               <IPen size={12} />
               Drawing mode — {drawToolNow === "eraser" ? "trace over strokes to erase them" : "drag with the left button · scroll: zoom · right click: pan"}
             </span>
@@ -753,14 +753,14 @@ function CanvasInner() {
       {/* stats chip */}
       <div data-drawui className="absolute top-3 left-3 z-10 flex items-center gap-2 anim-fade">
         <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-ink-900/85 border border-ink-700 backdrop-blur-sm text-[11px] text-ink-300">
-          <span className="flex items-center gap-1.5"><IBrain size={13} className="text-amber-lc" /> {agentCount} agents</span>
+          <span className="flex items-center gap-1.5"><IBrain size={13} className="text-lc-accent" /> {agentCount} agents</span>
           <span className="w-px h-3.5 bg-ink-700" />
           <span>{nodes.length} nodes</span>
           <span className="w-px h-3.5 bg-ink-700" />
           <span>{edges.length} edges</span>
           <span className="w-px h-3.5 bg-ink-700" />
-          <span className={`flex items-center gap-1.5 font-bold ${running ? "text-amber-lc" : execution.status === "completed" ? "text-sage" : ""}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${running ? "anim-blink" : ""}`} style={{ background: running ? "var(--color-amber-lc)" : execution.status === "completed" ? "var(--color-sage)" : "var(--color-ink-400)" }} />
+          <span className={`flex items-center gap-1.5 font-bold ${running ? "text-lc-accent" : execution.status === "completed" ? "text-sage" : ""}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${running ? "anim-blink" : ""}`} style={{ background: running ? "var(--color-lc-accent)" : execution.status === "completed" ? "var(--color-sage)" : "var(--color-ink-400)" }} />
             {running ? "Running" : execution.status === "waiting_approval" ? "Awaiting approval" : execution.status === "completed" ? "Completed" : execution.status === "failed" ? "Failed" : "Ready"}
           </span>
         </div>

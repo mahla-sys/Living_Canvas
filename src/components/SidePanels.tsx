@@ -66,7 +66,7 @@ function Palette() {
             e.dataTransfer.effectAllowed = "move";
           }}
           onClick={() => void actions.addNode(p.nodeType, { x: 420 + Math.random() * 420, y: 120 + Math.random() * 280 })}
-          className="group flex items-center gap-3 p-2.5 rounded-xl bg-ink-850 border border-ink-700 hover:border-amber-lc/40 hover:bg-ink-800 cursor-grab active:cursor-grabbing transition-all duration-150 hover:translate-x-[-2px]"
+          className="group flex items-center gap-3 p-2.5 rounded-xl bg-ink-850 border border-ink-700 hover:border-lc-accent/40 hover:bg-ink-800 cursor-grab active:cursor-grabbing transition-all duration-150 hover:translate-x-[-2px]"
         >
           <span
             className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
@@ -131,7 +131,7 @@ function Folder({ name, children, badge, defaultOpen = false }: { name: string; 
         className="w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-ink-200 hover:bg-ink-800 transition-colors cursor-pointer"
       >
         {open ? <IChevD size={11} className="text-ink-500" /> : <IChevR size={11} className="text-ink-500" />}
-        <IFolder size={13} className={open ? "text-amber-lc" : "text-ink-400"} />
+        <IFolder size={13} className={open ? "text-lc-accent" : "text-ink-400"} />
         <span className="text-[11.5px] font-mono">{name}/</span>
         {badge !== undefined && badge > 0 && (
           <span className="ms-auto text-[9px] font-bold text-ink-400 bg-ink-800 border border-ink-700 rounded px-1">{badge}</span>
@@ -147,10 +147,10 @@ function FileRow({ path, name }: { path: string; name?: string }) {
   return (
     <button
       onClick={() => actions.openFile(buildFileContent(path))}
-      className="w-full flex items-center gap-1.5 px-2 py-[4.5px] rounded-md text-ink-300 hover:text-amber-lc hover:bg-ink-800 transition-colors cursor-pointer group"
+      className="w-full flex items-center gap-1.5 px-2 py-[4.5px] rounded-md text-ink-300 hover:text-lc-accent hover:bg-ink-800 transition-colors cursor-pointer group"
       title={path}
     >
-      <IFile size={12} className="text-ink-500 group-hover:text-amber-lc/70 shrink-0" />
+      <IFile size={12} className="text-ink-500 group-hover:text-lc-accent/70 shrink-0" />
       <span className="text-[11px] font-mono truncate">{name ?? path}</span>
     </button>
   );
@@ -165,10 +165,10 @@ function RealFileRow({ path, name }: { path: string; name: string }) {
   return (
     <button
       onClick={() => void actions.openStorageFile(path)}
-      className="w-full flex items-center gap-1.5 px-2 py-[4.5px] rounded-md text-ink-300 hover:text-amber-lc hover:bg-ink-800 transition-colors cursor-pointer group"
+      className="w-full flex items-center gap-1.5 px-2 py-[4.5px] rounded-md text-ink-300 hover:text-lc-accent hover:bg-ink-800 transition-colors cursor-pointer group"
       title={path}
     >
-      <IFile size={12} className="text-ink-500 group-hover:text-amber-lc/70 shrink-0" />
+      <IFile size={12} className="text-ink-500 group-hover:text-lc-accent/70 shrink-0" />
       <span className="text-[11px] font-mono truncate">{name}</span>
     </button>
   );
@@ -197,7 +197,7 @@ function RealFolder({ path, name, depth }: { path: string; name: string; depth: 
         className="w-full flex items-center gap-1.5 px-2 py-[5px] rounded-md text-ink-200 hover:bg-ink-800 transition-colors cursor-pointer"
       >
         {open ? <IChevD size={11} className="text-ink-500" /> : <IChevR size={11} className="text-ink-500" />}
-        <IFolder size={13} className={open ? "text-amber-lc" : "text-ink-400"} />
+        <IFolder size={13} className={open ? "text-lc-accent" : "text-ink-400"} />
         <span className="text-[11.5px] font-mono">{name}/</span>
         {items.length > 0 && (
           <span className="ms-auto text-[9px] font-bold text-ink-400 bg-ink-800 border border-ink-700 rounded px-1">{items.length}</span>
@@ -382,7 +382,7 @@ function TemplatesSection() {
             }
           }}
           placeholder="New template name…"
-          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-ink-900 border border-ink-600 text-[10.5px] text-ink-100 focus:border-amber-lc/60 focus:outline-none transition-colors"
+          className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-ink-900 border border-ink-600 text-[10.5px] text-ink-100 focus:border-lc-accent/60 focus:outline-none transition-colors"
         />
         <button
           onClick={() => {
@@ -392,7 +392,7 @@ function TemplatesSection() {
             }
           }}
           disabled={!name.trim()}
-          className="shrink-0 text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-amber-lc text-ink-950 hover:brightness-110 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+          className="shrink-0 text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-lc-accent text-ink-950 hover:brightness-110 transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
         >
           Save
         </button>
@@ -422,7 +422,7 @@ function ResizeHandle({ side }: { side: "left" | "right" }) {
       aria-label={`Resize the ${side} panel`}
       title="Drag to resize"
       data-lc-resize={side}
-      className={`w-[5px] shrink-0 cursor-col-resize bg-transparent hover:bg-amber-lc/40 active:bg-amber-lc/70 transition-colors ${
+      className={`w-[5px] shrink-0 cursor-col-resize bg-transparent hover:bg-lc-accent/40 active:bg-lc-accent/70 transition-colors ${
         side === "left" ? "border-e" : "border-s"
       } border-ink-700`}
       onPointerDown={(e) => {
@@ -456,21 +456,25 @@ export function LeftPanel() {
   if (focus || !open) return null;
   return (
     <>
-    <aside style={{ width }} className="shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full">
-      <div className="flex border-b border-ink-700">
+    /* min-h-0 on both the aside and the scroller: without it a flex item's `min-height: auto` keeps it at
+       its content height, `overflow-y: auto` never engages, and a long file tree is simply cut off by the
+       root's overflow-hidden. The resize handle is a sibling of the aside, so the width still comes from
+       `style` alone and dragging is unaffected. */
+    <aside style={{ width }} className="shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full min-h-0 overflow-hidden">
+      <div className="flex shrink-0 border-b border-ink-700">
         {([["palette", "Library", ISpark], ["files", "Files", IFolder]] as const).map(([key, label, Icon]) => (
           <button
             key={key}
             onClick={() => actions.setLeftTab(key)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11.5px] font-bold transition-colors cursor-pointer border-b-2 ${
-              tab === key ? "text-amber-lc border-amber-lc bg-ink-850" : "text-ink-400 border-transparent hover:text-ink-200"
+              tab === key ? "text-lc-accent border-lc-accent bg-ink-850" : "text-ink-400 border-transparent hover:text-ink-200"
             }`}
           >
             <Icon size={13} /> {label}
           </button>
         ))}
       </div>
-      <div className="flex-1 overflow-y-auto">{tab === "palette" ? <Palette /> : <FileTree />}</div>
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">{tab === "palette" ? <Palette /> : <FileTree />}</div>
     </aside>
     <ResizeHandle side="left" />
     </>
@@ -499,7 +503,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-const inputCls = "w-full px-2.5 py-1.5 rounded-lg bg-ink-850 border border-ink-600 text-[12px] text-ink-100 focus:border-amber-lc/60 focus:outline-none transition-colors";
+const inputCls = "w-full px-2.5 py-1.5 rounded-lg bg-ink-850 border border-ink-600 text-[12px] text-ink-100 focus:border-lc-accent/60 focus:outline-none transition-colors";
 const selectCls = inputCls + " cursor-pointer";
 
 function NodeInspector({ node }: { node: RFNode }) {
@@ -521,17 +525,17 @@ function NodeInspector({ node }: { node: RFNode }) {
             value={d.title}
             disabled={runLocked}
             onChange={(e) => actions.updateNodeData(node.id, { title: e.target.value })}
-            className={`w-full bg-transparent text-[14px] font-extrabold text-ink-50 focus:outline-none border-b border-transparent focus:border-amber-lc/50 transition-colors ${runLocked ? "opacity-50 cursor-not-allowed" : ""}`}
+            className={`w-full bg-transparent text-[14px] font-extrabold text-ink-50 focus:outline-none border-b border-transparent focus:border-lc-accent/50 transition-colors ${runLocked ? "opacity-50 cursor-not-allowed" : ""}`}
           />
           <p className="text-[10px] font-mono text-ink-500 mt-0.5">{node.id} · {d.nodeType}</p>
         </div>
-        {locked && <ILock size={15} className="text-amber-lc mt-1" />}
+        {locked && <ILock size={15} className="text-lc-accent mt-1" />}
       </div>
 
       {runLocked && (
-        <div className="mx-3.5 mt-3 mb-0.5 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-lc/10 border border-amber-lc/45 anim-rise">
-          <ILock size={13} className="text-amber-lc shrink-0" />
-          <p className="text-[10.5px] leading-4 text-amber-lc font-bold">Locked while running — editing is disabled until this step ends (§12.5)</p>
+        <div className="mx-3.5 mt-3 mb-0.5 flex items-center gap-2 px-3 py-2 rounded-lg bg-lc-accent/10 border border-lc-accent/45 anim-rise">
+          <ILock size={13} className="text-lc-accent shrink-0" />
+          <p className="text-[10.5px] leading-4 text-lc-accent font-bold">Locked while running — editing is disabled until this step ends (§12.5)</p>
         </div>
       )}
 
@@ -544,7 +548,7 @@ function NodeInspector({ node }: { node: RFNode }) {
                 key={m}
                 onClick={() => actions.updateNodeData(node.id, { viewMode: m })}
                 className={`py-1.5 rounded-lg text-[10.5px] font-bold border transition-all cursor-pointer ${
-                  d.viewMode === m ? "bg-amber-lc/15 border-amber-lc/50 text-amber-lc" : "bg-ink-850 border-ink-600 text-ink-400 hover:text-ink-200"
+                  d.viewMode === m ? "bg-lc-accent/15 border-lc-accent/50 text-lc-accent" : "bg-ink-850 border-ink-600 text-ink-400 hover:text-ink-200"
                 }`}
               >
                 {l}
@@ -585,7 +589,7 @@ function NodeInspector({ node }: { node: RFNode }) {
           <input
             type="range" min={20} max={100} value={d.style.opacity}
             onChange={(e) => actions.updateNodeData(node.id, { style: { ...d.style, opacity: Number(e.target.value) } })}
-            className="w-full accent-amber-lc"
+            className="w-full accent-lc-accent"
           />
         </Field>
       </Section>
@@ -629,7 +633,7 @@ function NodeInspector({ node }: { node: RFNode }) {
               <textarea value={agent.system_prompt} onChange={(e) => actions.updateAgentField(node.id, { system_prompt: e.target.value })} rows={4} className={inputCls + " resize-y leading-5"} />
             </Field>
             <Field label={`max steps (max_steps): ${agent.max_steps}`}>
-              <input type="range" min={2} max={12} value={agent.max_steps} onChange={(e) => actions.updateAgentField(node.id, { max_steps: Number(e.target.value) })} className="w-full accent-amber-lc" />
+              <input type="range" min={2} max={12} value={agent.max_steps} onChange={(e) => actions.updateAgentField(node.id, { max_steps: Number(e.target.value) })} className="w-full accent-lc-accent" />
             </Field>
             <Field label="Allowed tools">
               <div className="flex flex-wrap gap-1">
@@ -686,7 +690,7 @@ function NodeInspector({ node }: { node: RFNode }) {
             <p className="text-[10px] text-ink-500 mb-1 mt-3">Required output fields (missing them fails the output):</p>
             <div className="flex flex-wrap gap-1 mb-3">
               {agent.context_contract.output_contract.required_fields.map((f) => (
-                <span key={f} className="text-[9.5px] px-1.5 py-1 rounded-md bg-amber-lc/10 border border-amber-lc/30 text-amber-lc flex items-center gap-1.5" title={f}>
+                <span key={f} className="text-[9.5px] px-1.5 py-1 rounded-md bg-lc-accent/10 border border-lc-accent/30 text-lc-accent flex items-center gap-1.5" title={f}>
                   <span className="font-bold">{FIELD_DESC[f] ?? f}</span>
                   <span className="font-mono opacity-60">{f}</span>
                 </span>
@@ -713,7 +717,7 @@ function NodeInspector({ node }: { node: RFNode }) {
             <button
               onClick={() => actions.runOne(node.id)}
               disabled={runDisabled || locked}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-amber-lc/15 border border-amber-lc/50 text-amber-lc text-[11.5px] font-bold hover:bg-amber-lc/25 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-lc-accent/15 border border-lc-accent/50 text-lc-accent text-[11.5px] font-bold hover:bg-lc-accent/25 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <IPlay size={13} /> Run node
             </button>
@@ -745,7 +749,7 @@ function EdgeInspector({ edgeId }: { edgeId: string }) {
   return (
     <div className="anim-fade">
       <div className="px-3.5 py-3 border-b border-ink-700">
-        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><IPulse size={15} className="text-amber-lc" /> Edge</p>
+        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><IPulse size={15} className="text-lc-accent" /> Edge</p>
         <p className="text-[10px] font-mono text-ink-500 mt-1">{edge.source} → {edge.target}</p>
       </div>
       <Section title="Connection">
@@ -801,7 +805,7 @@ function CanvasInspector() {
   return (
     <div className="anim-fade">
       <div className="px-3.5 py-3 border-b border-ink-700">
-        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><INode size={15} className="text-amber-lc" /> Canvas settings</p>
+        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><INode size={15} className="text-lc-accent" /> Canvas settings</p>
         <p className="text-[10px] text-ink-400 mt-1 leading-5">Nothing selected — canvas-wide settings live here.</p>
       </div>
       <Section title="canvas.yaml">
@@ -835,7 +839,7 @@ function CanvasInspector() {
             [nodes.length, "nodes"], [edges.length, "edges"], [snapshots.length, "checkpoints"],
           ].map(([n, l]) => (
             <div key={l as string} className="py-2.5 rounded-lg bg-ink-850 border border-ink-700">
-              <p className="text-[18px] font-display text-amber-lc leading-6">{n as number}</p>
+              <p className="text-[18px] font-display text-lc-accent leading-6">{n as number}</p>
               <p className="text-[9.5px] text-ink-400">{l}</p>
             </div>
           ))}
@@ -863,8 +867,10 @@ export function RightPanel() {
   return (
     <>
     <ResizeHandle side="right" />
-    <aside style={{ width }} className="shrink-0 border-s border-ink-700 bg-ink-900/80 h-full overflow-y-auto">
-      {selectedNode ? <NodeInspector node={selectedNode} /> : selectedEdge ? <EdgeInspector edgeId={selectedEdge.id} /> : <CanvasInspector />}
+    <aside style={{ width }} className="shrink-0 border-s border-ink-700 bg-ink-900/80 flex flex-col h-full min-h-0 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+        {selectedNode ? <NodeInspector node={selectedNode} /> : selectedEdge ? <EdgeInspector edgeId={selectedEdge.id} /> : <CanvasInspector />}
+      </div>
     </aside>
     </>
   );
@@ -877,7 +883,7 @@ export function FileViewer() {
   const actions = useStore((s) => s.actions);
   const [copied, setCopied] = useState(false);
   if (!viewer) return null;
-  const langColor = viewer.lang === "json" ? "var(--color-sky-lc)" : viewer.lang === "yaml" ? "var(--color-sage)" : viewer.lang === "log" ? "var(--color-ember)" : "var(--color-amber-lc)";
+  const langColor = viewer.lang === "json" ? "var(--color-sky-lc)" : viewer.lang === "yaml" ? "var(--color-sage)" : viewer.lang === "log" ? "var(--color-ember)" : "var(--color-lc-accent)";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-950/75 backdrop-blur-[3px] anim-fade" onClick={() => actions.openFile(null)}>
       <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] anim-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -888,7 +894,7 @@ export function FileViewer() {
           <div className="ms-auto flex items-center gap-1.5">
             <button
               onClick={() => { void navigator.clipboard?.writeText(viewer.content); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-ink-300 hover:text-amber-lc border border-ink-600 hover:border-amber-lc/50 transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-bold text-ink-300 hover:text-lc-accent border border-ink-600 hover:border-lc-accent/50 transition-colors cursor-pointer"
             >
               {copied ? <ICheck size={11} /> : <IFile size={11} />} {copied ? "Copied" : "Copy"}
             </button>

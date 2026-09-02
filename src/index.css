@@ -1,4 +1,10 @@
-@import "tailwindcss";
+/* Auto-detection is switched off and the sources named explicitly. Tailwind v4 otherwise scans every tracked
+   file in the repo, so a class name written in `docs/ARCHITECTURE.md` — or in a comment in a build script —
+   generated a real utility in the shipped stylesheet, which is how amber rules survived the removal of
+   amber from every component: nothing rendered them, and the CSS still carried them. */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "../src";
 
 @theme {
   --font-display: "Space Grotesk", "Inter", ui-sans-serif, sans-serif;
@@ -18,8 +24,19 @@
   --color-ink-100: #dce5e1;
   --color-ink-50: #eef2ef;
 
+  /* ---- accent roles ---------------------------------------------------------
+     `lc-accent` and `lc-warn` are the two *roles* the interface paints with. They are separate tokens from the
+     palette steps precisely so a theme can re-map them: a `:root[data-theme="…"]` block that sets
+     `--color-lc-accent` changes every button, chip and focus ring at once. Before they existed, components
+     named the palette step directly in a utility class, and `--lc-accent` below was defined and read by
+     nobody, so "themable" was true of the background and false of every control on it.
+
+     `amber-lc` stays in the palette because it is still a *canvas data* colour: `NODE_COLORS.agent`, the
+     node-colour swatches and the stroke palette all write it into files (`nodes/<id>.md`, `strokes/<id>.json`).
+     No chrome uses it any more. */
+  --color-lc-accent: #b98bc2;
+  --color-lc-warn: #d9c9a3;
   --color-amber-lc: #e8b04b;
-  --color-amber-deep: #c98f2b;
   --color-ember: #e06a4e;
   --color-sage: #8fbf7f;
   --color-sky-lc: #6fb3c7;
@@ -42,14 +59,15 @@
   --lc-text-bright: var(--color-ink-50);
   --lc-text-muted: var(--color-ink-300);
   --lc-text-dim: var(--color-ink-400);
-  --lc-accent: var(--color-amber-lc);
+  --lc-accent: var(--color-lc-accent);
+  --lc-warn: var(--color-lc-warn);
   --lc-danger: var(--color-ember);
 
   /* surfaces that are deliberately between two palette steps, so they are not derivable */
   --lc-bg-top: #0d1716;
   --lc-bg-mid: #0b1312;
   --lc-bg-bottom: #0d1817;
-  --lc-glow-amber: rgba(232, 176, 75, 0.07);
+  --lc-glow-plum: rgba(185, 139, 194, 0.08);
   --lc-glow-sky: rgba(111, 179, 199, 0.08);
   --lc-glow-sage: rgba(143, 191, 127, 0.04);
   --lc-card-top: #182826;
@@ -67,6 +85,14 @@
   --lc-warn-bg: rgba(232, 176, 75, 0.08);
   --lc-danger-line: rgba(224, 106, 78, 0.45);
   --lc-danger-bg: rgba(224, 106, 78, 0.08);
+}
+
+/* Botanical is the base palette, so everything it needs is already in `@theme` above — except the accent,
+   which is stated here anyway. One line of duplication buys a real property: `--color-lc-accent` is spelled
+   out once per theme, so "what is the accent under this theme" is a grep and not a chain of fallbacks, and
+   `scripts/check-palette.mjs` can measure both themes instead of inferring one of them. */
+:root[data-theme="botanical"] {
+  --color-lc-accent: #b98bc2;
 }
 
 /* Dark plum: the ink ramp re-tinted toward violet, every accent left alone — node colours are canvas
@@ -88,7 +114,7 @@
   --lc-bg-top: #1a1128;
   --lc-bg-mid: #120b1c;
   --lc-bg-bottom: #170f24;
-  --lc-glow-amber: rgba(232, 176, 75, 0.08);
+  --lc-glow-plum: rgba(207, 166, 218, 0.09);
   --lc-glow-sky: rgba(111, 179, 199, 0.07);
   --lc-glow-sage: rgba(185, 139, 194, 0.07);
   --lc-card-top: #241a38;
@@ -97,6 +123,10 @@
   --lc-dot: rgba(61, 47, 88, 0.3);
   --lc-minimap-mask: rgba(18, 11, 28, 0.82);
   --lc-fail-band: rgba(30, 12, 14, 0.95);
+
+  /* the accent is lifted one step: `#b98bc2` on this background clears AA, but it sits close to the theme's
+     own `ink-300`/`ink-400`, and an accent you cannot separate from muted text is not an accent */
+  --color-lc-accent: #cfa6da;
 }
 
 html,
@@ -133,7 +163,7 @@ body,
 /* ---------- layered workspace background ---------- */
 .lc-bg {
   background:
-    radial-gradient(900px 520px at 85% -10%, var(--lc-glow-amber), transparent 60%),
+    radial-gradient(900px 520px at 85% -10%, var(--lc-glow-plum), transparent 60%),
     radial-gradient(800px 600px at 8% 108%, var(--lc-glow-sky), transparent 62%),
     radial-gradient(600px 400px at 50% 50%, var(--lc-glow-sage), transparent 70%),
     linear-gradient(160deg, var(--lc-bg-top) 0%, var(--lc-bg-mid) 55%, var(--lc-bg-bottom) 100%);
@@ -345,7 +375,7 @@ body,
 .lc-menu-item:hover:not(:disabled) {
   background: var(--color-ink-850);
   border-color: var(--color-ink-600);
-  color: var(--color-amber-lc);
+  color: var(--color-lc-accent);
 }
 .lc-menu-item:disabled {
   opacity: 0.42;
@@ -408,7 +438,7 @@ body,
 .lc-import-warn {
   border: 1px solid var(--lc-warn-line);
   background: var(--lc-warn-bg);
-  color: var(--color-amber-lc);
+  color: var(--color-lc-warn);
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 10.5px;

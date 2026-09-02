@@ -173,22 +173,22 @@ src/
 ├── App.tsx                      93  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
 ├── state.ts                    534  L   ★ constants, types re-exports, factories, role schemas, seed
 ├── store.ts                    459  L   ★ zustand store + Actions façade (the only UI-facing API)
-├── index.css                   439  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
+├── index.css                   469  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
-│   ├── core.ts                1212  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
+│   ├── core.ts                1217  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
 │   ├── engine.ts              2148  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             2326  L   178 tests in 13 files (§7)
+│   └── __tests__/             2784  L   193 tests in 15 files (§7)
 └── components/
     ├── CanvasArea.tsx          808  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
-    ├── SidePanels.tsx          908  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx            889  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    ├── SidePanels.tsx          914  L   ★ library/files tabs, file tree, live folder tree, inspector
+    ├── Overlays.tsx            920  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **10 903 lines** in 27 files (10 464 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **11 433 lines** in 29 files (10 964 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -207,7 +207,7 @@ decision that must not change behaviour (§10 Q3).
 
 # 3. Branches — one section per module
 
-## 3.1 `src/lib/core.ts` (1212 lines) — types, serialisers, storage, HTML safety, schemas
+## 3.1 `src/lib/core.ts` (1217 lines) — types, serialisers, storage, HTML safety, schemas
 
 No imports from inside the project. This is the only file allowed to know how a file looks on disk and how
 a folder is listed. Seven sections, in this order:
@@ -543,14 +543,14 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 2 726 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 2 763 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
 | `CanvasArea.tsx` 808 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
-| `SidePanels.tsx` 908 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
-| `Overlays.tsx` 889 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
+| `SidePanels.tsx` 914 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
+| `Overlays.tsx` 920 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
 
 ---
@@ -1034,7 +1034,7 @@ edits" button and refuses to run while a save is in flight (so a half-written ed
 <input type=file> → readFileAsText → previewImportText(api, text)
    parseBundleText → { ok, files, canvasId, title, skipped[] } → deriveCanvasFromFiles(files)
    ImportPreview { name, canvasId, title, bytes, fileCount, nodes, edges, skipped[], warning? }
-   UI shows: file, canvas id (amber if it differs from the current one), node/edge counts,
+   UI shows: file, canvas id (warn-toned if it differs from the current one), node/edge counts,
              skipped list with reasons, "Replace the whole current canvas" checkbox
 user confirms → commitImport → engine.applyImport(api, files, { replace })
    replace ? storage.clear() (canvas-scoped) : merge
@@ -1110,16 +1110,24 @@ appearance goes there, a mechanism that makes it renderable goes here.
 
 Direction: **LTR**, English only. Fonts: Inter (body), Space Grotesk (display), IBM Plex Mono (paths, ids,
 numbers). Palette is defined once as Tailwind v4 `@theme` tokens in `src/index.css` — 12 ink shades
-(`ink-50` lightest → `ink-950` background) plus 7 accents:
+(`ink-50` lightest → `ink-950` background) plus accents. **Two of them are roles, not palette steps** (ADR-010):
+a theme re-maps the roles and leaves the data colours alone, which is what makes a third theme one CSS block
+instead of a search-and-replace across three components.
 
-| token | hex | used for |
+| token | hex (botanical) | used for |
 |---|---|---|
-| `amber-lc` / `amber-deep` | `#e8b04b` / `#c98f2b` | primary action, agent nodes, the living-canvas dot |
+| **`lc-accent`** (role) | `#b98bc2` · plum: `#cfa6da` | primary action, focus rings, the living-canvas mark, flow edges, running status |
+| **`lc-warn`** (role) | `#d9c9a3` | warning text and toasts — deliberately *not* the accent, so a warning never reads as a call to action |
 | `ember` | `#e06a4e` | danger, errors, delete affordances |
 | `sage` | `#8fbf7f` | success, output boxes, live-folder chip |
 | `sky-lc` | `#6fb3c7` | info, notes, backend/http mode |
 | `plum` | `#b98bc2` | built-in badges, pipeline steps, "convert" |
 | `sand` | `#d9c9a3` | folders |
+| `amber-lc` | `#e8b04b` | **canvas data only** — `NODE_COLORS.agent`, the node-colour swatches, the stroke palette. No chrome paints it; re-tinting it would rewrite graphs people have drawn (ADR-010) |
+
+`check-palette.mjs` measures both themes against seven roles per theme and prints the ratios; it also scans
+`src/main.tsx`, where a hex is legal only as the fallback of a `var()` — the crash panel is the one place a
+bare `var()` is unsafe, because the stylesheet may be the thing that failed to load.
 
 Layout (`App.tsx`, LTR order):
 
@@ -1251,7 +1259,7 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **13 files, 178 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **15 files, 193 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
 Every test runs the **production** functions — no re-implementations. `src/lib/test-helpers.ts` exists so a
 test cannot accidentally grow its own serialiser (that is how a fixture hides a bug).
 
@@ -1266,9 +1274,15 @@ test cannot accidentally grow its own serialiser (that is how a fixture hides a 
 | `store-write.test.ts` | 5 | the two paths that used to stop at the store: `Delete` on a node must delete `nodes/<id>.md` (and cascade its edges, exactly as the inspector button does), a run-locked node must survive both the change and the files with a toast that says why, and a drag end must land in the node file — while a drag still in progress must not touch the disk |
 | `theme.test.ts` | 3 | the settings half of appearance: every registered theme has a label and a hint, and `defaultSettings()` refuses an unregistered id, a corrupt blob and a truthy-not-boolean `snapToGrid` (a theme that selects nothing, or a document change that was not asked for, are both worse than the default). The colour half is in `scripts/check-palette.mjs`, because a test that reads `node:fs` does not belong inside `src/` |
 | `layout.test.ts` | 18 | the layout system (§6.1, ADR-009): `normalizeLayout` clamps a hand-edited `canvas.yaml` (absurd widths, the string `"300"`, a missing key meaning *open*, garbage without throwing); `writeCanvasYaml` → `hydrate` round-trips the widths; a canvas with no `layout:` key hydrates to the defaults; **`hydrate` leaves focus mode off and nothing in the tree mentions focus**; and the two keyboard machines as pure functions — a chord that restarts on a wrong key, expires after 1500 ms and is case-insensitive, a double tap that forgets itself after it fires |
-| `layout-render.test.ts` | 6 | the layout chrome *renders*: `renderToStaticMarkup` on the real `StatusBar`, `LeftPanel` and `RightPanel`. It proves the strip mounts at `STATUS_BAR_HEIGHT`, both panels take their width from `canvas.layout` (the old `w-[268px]`/`w-[292px]` utilities are asserted gone), the handle sits on the inner edge as a `role="separator"`, and the focus-mode way out is not offered before focus mode is on. **Its limit is in the file**: zustand v5 gives `renderToStaticMarkup` the store's *initial* state, so state-driven behaviour cannot be asserted here without jsdom, which §7 refuses |
+| `layout-render.test.ts` | 9 | the layout chrome *renders*: `renderToStaticMarkup` on the real `StatusBar`, `LeftPanel` and `RightPanel`. It proves the strip mounts at `STATUS_BAR_HEIGHT`, both panels take their width from `canvas.layout` (the old `w-[268px]`/`w-[292px]` utilities are asserted gone), the handle sits on the inner edge as a `role="separator"`, and the focus-mode way out is not offered before focus mode is on. It also pins the scroll contract on the
+rendered HTML: both panels carry `min-h-0` *and* `overflow-y-auto`, because `overflow-y-auto` alone is exactly
+the shape of the bug — a flex item's `min-height: auto` keeps it at content height so the scroller never
+engages, nothing throws, and a long file tree is quietly cut off. Removing `min-h-0` fails two of these tests.
+**Its limit is in the file**: zustand v5 gives `renderToStaticMarkup` the store's *initial* state, so state-driven behaviour cannot be asserted here without jsdom, which §7 refuses |
 | `model-route.test.ts` | 13 | `resolveModelRoute` (ADR-008): the provider comes from the model name, `ollama:` is stripped before the request, an empty model falls back to the global setting, and the function is pure. Then the half that matters: **`sendChat` is run against a stubbed `fetch`** and the request body is asserted to carry the node's own model and the node's own `max_tokens` — the test that fails if `agent.model` becomes a label again. Last: every entry of `MODELS` routes somewhere real, and the shipped list is pinned so a model with no endpoint does not come back |
 | `settings-local.test.ts` | 15 | Law 4's third seam as a contract (ADR-007): `readSettingsLocal` returns `null` for nothing stored, a corrupt blob, a JSON array, no `localStorage` at all, and a storage that throws on *access*; `writeSettingsLocal` **merges rather than replaces** and reports `false` instead of throwing; `clearSettingsLocal` is safe twice; and `defaultSettings` reads through the seam, rejecting an unregistered theme and a truthy-but-not-true `snapToGrid` |
+| `pipeline.test.ts` | 8 | a four-agent pipeline (`u → r → d → m`) run through `engine` + the store, with no browser: a conditional edge lets `d` through on the score `r` produced and blocks `m` on the same score. Asserts the aftermath rather than the exit code — every completed agent's output is a real file under `outputs/<node>/` while the blocked one has no directory at all; `runs/<run-id>.md` exists and carries a `blocked` row explaining the skip; every lock is released and no node is left `running`; a second run over the *same* storage is not blocked by the first one's locks. The second group answers "`agent.model` really reaches the provider" with a stubbed `fetch`: one node routes to `http://127.0.0.1:11434/v1/chat/completions` as `llama3.2` and another to `https://api.deepseek.com/chat/completions` as `deepseek-reasoner` in the same run, an empty model falls back to the canvas default, and `provider: "sim"` keeps the machine offline on purpose |
+| `boot.test.ts` | 4 | boot, measured instead of guessed: a counting adapter reports the storage operations, because in a browser every one of them is an IndexedDB round-trip and the count is the part that transfers. A warm boot is ~4 ms over 12 operations and writes nothing; a cold boot is 22 operations, dominated by writes, and its wall-clock cost is `sleep(46)` pacing the boot overlay one file at a time rather than I/O. A budget of 40 operations and 6 directory listings is the regression guard, and boot is asserted not to touch the network when no backend is configured |
 | `hydrate.test.ts` | 11 | the real `hydrate()` against `MemoryStorageAdapter`: no manifest → `false` and nothing deleted; custom template found after reload; several templates + neighbouring files; files-only mode builds the canvas; locked node not restored; **a `graph.json` left in the folder is inert** (positions and text both come from the node file); broken `state.json` tolerated; the adapter in play is the adapter read (no stale cache between tests); `seedWorkspace` writes the four role files + the four schemas, no `graph.json`, one start-here note and no edges; an imported bundle loses its `graph.json` and says so |
 
 Rules for adding a test:
@@ -1412,7 +1426,7 @@ second graph to click. Cost measured: a boot that lists `nodes/*.md`; the seed's
 milliseconds, and if a few hundred nodes ever makes that slow the answer is a derived index that is *rebuilt*,
 never a second truth.
 
-**Q4 — How far should `core.ts` stay one file?** 1212 lines holding types, YAML, HTML safety, the output-schema subset and four
+**Q4 — How far should `core.ts` stay one file?** 1217 lines holding types, YAML, HTML safety, the output-schema subset and four
 adapters. It is honest today (one place where file shapes are decided) and it will hurt at ~1.5k. Natural
 split when it does: `types.ts` (no imports), `yaml.ts`, `html.ts`, `storage/*.ts`. Law 5 keeps the edges
 acyclic either way. Do it when adding the fifth adapter, not before.
@@ -1484,10 +1498,12 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 13 files / 178 tests
+npm test            vitest run            → 15 files / 193 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
-npm run build       tsc --noEmit && vite build → ~540 kB js / 166 kB gzip, 70 kB css / 12 kB gzip (chunk ceiling 600)
+npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)
+                    split into index 209 kB + vendor-react 143 kB + vendor-flow 130 kB + vendor 55 kB, so a
+                    returning reader re-downloads the app chunk alone after a deploy (ADR-010, vite.config.js)
 node scripts/check-english.mjs   language gate: RTL script only outside docs/; invisible bidi chars anywhere
 node scripts/doc-anchors.mjs     rewrites the `name 412` line anchors in §3.4 from src/lib/engine.ts (--check = exit 1)
 node scripts/check-docs.mjs      the doc map's gate: frontmatter, legal statuses, every reference resolving

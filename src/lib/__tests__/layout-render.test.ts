@@ -69,3 +69,33 @@ describe("the panels take their geometry from the store, not from a hardcoded cl
     }
   });
 });
+
+/* ============================================================
+   Both panels must actually scroll, and the handle must survive that.
+
+   The bug was one missing class: the scroller was `flex-1 overflow-y-auto` with no `min-h-0`, and a flex
+   item's `min-height` defaults to `auto`, so it refuses to shrink below its content and `overflow-y: auto`
+   never engages. Nothing fails, nothing warns — a long file tree is simply cut off by the root's
+   `overflow-hidden`. The fix is invisible to every logic test, so it is asserted here, on the rendered HTML,
+   together with the half that must not regress: the resize handle still sits on the inner edge.
+   ============================================================ */
+describe("both panels scroll, and scrolling did not cost the resize handle", () => {
+  it("the left panel has a real scroller: min-h-0 with overflow-y-auto", () => {
+    expect(left).toContain("flex-1 min-h-0 overflow-y-auto");
+    // `min-h-0` is the load-bearing half. `overflow-y-auto` alone is the shape of the bug, so asserting only
+    // the overflow would pass on the broken markup too.
+    expect(left).toMatch(/class="[^"]*\bmin-h-0\b[^"]*overflow-y-auto/);
+  });
+
+  it("the right panel scrolls the same way, from its own inner scroller", () => {
+    expect(right).toContain("flex-1 min-h-0 overflow-y-auto");
+    expect(right).toMatch(/<aside[^>]*class="[^"]*flex flex-col[^"]*min-h-0[^"]*overflow-hidden/);
+  });
+
+  it("the width still comes from layout, and the handle is still there to change it", () => {
+    expect(left).toContain(`width:${PANEL_DEFAULT_LEFT}px`);
+    expect(right).toContain(`width:${PANEL_DEFAULT_RIGHT}px`);
+    expect(left).toContain('role="separator"');
+    expect(right).toContain('role="separator"');
+  });
+});
