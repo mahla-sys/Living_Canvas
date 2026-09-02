@@ -718,6 +718,27 @@ function NodeInspector({ node }: { node: RFNode }) {
               <IPlay size={13} /> Run node
             </button>
           )}
+          {/* Run scopes (ADR-012): the choice is runtime-only, nothing here is written to a file */}
+          {agent && (
+            <>
+              <button
+                onClick={() => actions.runFromNode(node.id)}
+                disabled={runDisabled || locked}
+                title="Run this node and everything downstream of it"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-ink-850 border border-ink-600 text-ink-200 text-[11.5px] font-bold hover:border-lc-accent/60 hover:text-lc-accent transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Run from here
+              </button>
+              <button
+                onClick={() => actions.runUntilNode(node.id)}
+                disabled={runDisabled || locked}
+                title="Run everything upstream of this node, then this node"
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-ink-850 border border-ink-600 text-ink-200 text-[11.5px] font-bold hover:border-lc-accent/60 hover:text-lc-accent transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Run until here
+              </button>
+            </>
+          )}
           <button
             onClick={() => actions.setChatNode(useStore.getState().ui.chatNodeId === node.id ? null : node.id)}
             className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-ink-850 border border-ink-600 text-ink-200 text-[11.5px] font-bold hover:border-sky-lc/60 hover:text-sky-lc transition-colors cursor-pointer"

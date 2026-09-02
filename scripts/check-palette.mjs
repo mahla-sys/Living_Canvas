@@ -130,18 +130,37 @@ function hueOf(hexColour) {
   return Math.round(x < 0 ? x + 360 : x);
 }
 const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
-for (const theme of THEME_IDS) {
+/* An achromatic ramp has no hue, so "how many degrees apart" is not a question that can be asked of it — and a
+   gate that quietly computes `min(|290 - 0|, 70) = 70` for a grey would pass a theme for a reason that is not
+   the reason it works. Against a grey ramp the separation is *chroma*: the accent has to actually be a colour.
+   The neutral theme is what forced this case into the open. */
+const saturation = (hexColour) => {
+  const c = rgb(hexColour).map((v) => v / 255);
+  const mx = Math.max(...c);
+  return mx === 0 ? 0 : (mx - Math.min(...c)) / mx;
+};
+const CHROMA_MIN = 0.15;
+const INK_CHROMA_FLOOR = 0.05; // below this an ink reads as grey, not as a hue
+const separationOf = (theme) => {
   const accent = token("color-lc-accent", theme), ink = token("color-ink-950", theme);
-  if (!accent || !ink) continue;
+  if (!accent || !ink) return null;
+  if (saturation(ink) < INK_CHROMA_FLOOR) {
+    const chroma = saturation(accent);
+    if (chroma < CHROMA_MIN)
+      fail(`${theme}: this theme's ink ${ink} is achromatic, so separation has to come from chroma — and the accent ${accent} has only ${chroma.toFixed(2)}, under ${CHROMA_MIN}. A grey accent on a grey ramp is not an accent`);
+    return { kind: "chroma", value: chroma };
+  }
   const gap = hueGap(hueOf(accent), hueOf(ink));
   if (gap < HUE_MIN)
     fail(`${theme}: the accent ${accent} (hue ${hueOf(accent)}°) is only ${gap}° from this theme's ink ${ink} (hue ${hueOf(ink)}°) — under ${HUE_MIN}°, so the interface reads as one flat colour. Give this theme an accent from a different hue family`);
-}
+  return { kind: "hue", value: gap };
+};
+for (const theme of THEME_IDS) separationOf(theme);
 
 /* every theme is reported, so the numbers are in the log rather than only in a failure message */
 const report = THEME_IDS.map((t) => {
-  const a = token("color-lc-accent", t), i = token("color-ink-950", t);
-  const gap = a && i ? `accent/ink hue gap ${hueGap(hueOf(a), hueOf(i))}°` : "";
+  const sep = separationOf(t);
+  const gap = !sep ? "" : sep.kind === "hue" ? `accent/ink hue gap ${sep.value}°` : `ink achromatic → accent chroma ${sep.value.toFixed(2)}`;
   const roles = ROLES.map((r) => {
     const ratio = ratios.get(`${t}/${r.token}`);
     return `${r.label} ${ratio == null ? "—" : ratio.toFixed(2) + ":1"}`;
@@ -229,6 +248,30 @@ for (const f of [...readdirSync(dir).filter((n) => n.endsWith(".tsx")).map((n) =
     for (const step of RETIRED_AS_CHROME) {
       if (body.includes(step))
         fail(`${f.replace(ROOT + "/", "")}:${i + 1} names the retired palette step \"${step}\" — chrome paints with --color-lc-accent / --color-lc-warn; ${step} is canvas data only (ADR-010)`);
+    }
+  }
+}
+
+/* ---- a retired colour may not come back as rgb() either ----
+   Five amber usages survived the removal of amber from every component because they were written as
+   `rgba(232, 176, 75, …)`. Two of them were `--lc-selection` and `--lc-ring-running` — the selection highlight
+   and the running ring, the most visible chrome in the app — and they sat inside the `:root` token block that
+   this script strips before scanning for literals. A hex rule cannot see a triplet, so the triplet gets its
+   own check: the retired step's own r,g,b, with any alpha. */
+for (const step of RETIRED_AS_CHROME) {
+  // the palette step is declared as `--color-<step>`, not `--<step>` — looking for the latter found nothing and
+  // the whole loop silently `continue`d, which is how this rule shipped with no teeth
+  const value = (baseBlock.match(new RegExp(`--color-${step}:\\s*(#[0-9a-fA-F]{6})`)) ?? [])[1];
+  if (!value) continue;
+  const [r, g, b] = rgb(value);
+  const triplet = new RegExp(`rgba?\\(\\s*${r}\\s*,\\s*${g}\\s*,\\s*${b}\\s*[,)]`, "i");
+  const targets = [...readdirSync(dir).filter((n) => n.endsWith(".tsx")).map((n) => join(dir, n)),
+                   join(ROOT, "src/main.tsx"), join(ROOT, "index.html"), join(ROOT, "src/index.css")];
+  for (const f of targets) {
+    const text = readFileSync(f, "utf8");
+    for (const [i, line] of text.split("\n").entries()) {
+      if (triplet.test(stripComment(line)))
+        fail(`${f.replace(ROOT + "/", "")}:${i + 1} paints with the retired step ${step} as an rgb() triplet (${r}, ${g}, ${b}) — derive it from the role token with color-mix() instead (ADR-010)`);
     }
   }
 }

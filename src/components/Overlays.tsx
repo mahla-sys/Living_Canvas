@@ -121,6 +121,8 @@ export function TopBar() {
   const running = execution.status === "running";
   const waiting = execution.status === "waiting_approval";
   const progress = execution.queue.length ? execution.completed.length / execution.queue.length : 0;
+  // the scoped-run affordance only appears once there is a selection to run (ADR-012)
+  const selectedCount = useStore((s) => s.nodes.filter((n) => n.selected).length);
 
   return (
     <header className="h-[54px] shrink-0 flex items-center gap-3 px-4 border-b border-ink-700 bg-ink-900/90 backdrop-blur-sm">
@@ -190,8 +192,19 @@ export function TopBar() {
             <IWarn size={14} /> Approve &amp; continue
           </button>
         ) : (
-          <button onClick={actions.runAll} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-lc-accent text-ink-950 text-[12px] font-black hover:brightness-110 hover:shadow-[0_6px_24px_-6px_rgba(232,176,75,0.6)] transition-all cursor-pointer active:scale-[0.98]">
+          <button onClick={actions.runAll} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-lc-accent text-ink-950 text-[12px] font-black hover:brightness-110 hover:shadow-[0_6px_24px_-6px_var(--lc-accent-glow)] transition-all cursor-pointer active:scale-[0.98]">
             <IPlay size={14} /> Run pipeline
+          </button>
+        )}
+        {selectedCount > 0 && (
+          <button
+            onClick={actions.runSelected}
+            disabled={running || waiting}
+            data-lc-run-selected
+            title="Run only the selected nodes — the choice is not saved anywhere (ADR-012)"
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-ink-850 border border-lc-accent/45 text-lc-accent text-[11.5px] font-extrabold hover:bg-lc-accent/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Run selected ({selectedCount})
           </button>
         )}
       </div>

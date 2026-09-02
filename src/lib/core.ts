@@ -163,7 +163,7 @@ export interface Settings {
    one id here + one block there; the test in `theme.test.ts` fails if the two drift apart. */
 /* the default comes first: `THEMES` drives the Settings picker order and `theme.test.ts` pins the two lists to
    each other, so the reader sees the theme they are actually on at the top of the list */
-export const THEME_IDS = ["botanical", "plum"] as const;
+export const THEME_IDS = ["botanical", "plum", "neutral"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
 /* `botanical` is the default again, and the reason is a report from the reader rather than a preference: with
    `plum` as the default the interface came back as "everything is purple". That was not the background alone —
@@ -174,6 +174,7 @@ export const DEFAULT_THEME: ThemeId = "botanical";
 export const THEMES: { id: ThemeId; label: string; hint: string }[] = [
   { id: "botanical", label: "Botanical", hint: "green-black ink, violet accent — the default" },
   { id: "plum", label: "Dark plum", hint: "violet ink, jade accent — no warm colour anywhere" },
+  { id: "neutral", label: "Neutral", hint: "achromatic greys, plum accent — the chrome disappears and the canvas is the only colour" },
 ];
 export function isThemeId(v: unknown): v is ThemeId {
   return (THEME_IDS as readonly unknown[]).includes(v);

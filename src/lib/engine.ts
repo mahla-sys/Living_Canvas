@@ -640,6 +640,29 @@ export async function endLedger(api: EngineApi, status: string, detail: string) 
 const FLOW_TYPES = ["flow", "event-flow", "blackboard"];
 
 /**
+ * The transitive closure of flow edges from one node, in one direction (ADR-012).
+ *
+ * It walks the same `FLOW_TYPES` that `computeOrder` respects on purpose: two definitions of "an edge that
+ * carries the run" would mean the scope and the order disagree, and a node would be queued that the closure
+ * never claimed — or left out of a run the reader explicitly asked for.
+ */
+export function flowClosure(s: AppState, fromId: string, direction: "downstream" | "upstream"): string[] {
+  const seen = new Set<string>([fromId]);
+  const walk = [fromId];
+  while (walk.length) {
+    const id = walk.pop()!;
+    for (const e of s.edges) {
+      if (!FLOW_TYPES.includes(e.data?.edgeType ?? "flow")) continue;
+      const next = direction === "downstream"
+        ? (e.source === id ? e.target : null)
+        : (e.target === id ? e.source : null);
+      if (next && !seen.has(next)) { seen.add(next); walk.push(next); }
+    }
+  }
+  return [...seen];
+}
+
+/**
  * Contract path matching (§9). An entry is one of:
  *   "outputs/node-002/"      a directory — everything under it
  *   "memory/agents/x.md"      an exact path
@@ -715,9 +738,22 @@ export function evalCondition(raw: string, ctx: Record<string, unknown>): CondRe
  * `cyclic` lists nodes whose flow edges form a cycle — they have no valid position, are queued last,
  * and the caller says so out loud instead of pretending they ran.
  */
-export function computeOrder(s: AppState, startId: string): { order: string[]; cyclic: string[] } {
+/**
+ * Topological order over the flow edges (ADR-012).
+ *
+ * `scope` narrows the run to a subset, and the rule for it is the whole point: an edge is only counted when
+ * *both* ends are inside the scope. So a scoped node whose predecessor was left out gets `indeg = 0` and runs
+ * first — which is exactly what "run from here" has to mean. Counting the outside edge instead would make the
+ * subset wait forever on a node nobody queued.
+ *
+ * Omitting `scope` gives the old behaviour exactly, which is why the 13 existing `computeOrder` tests are
+ * untouched.
+ */
+export function computeOrder(s: AppState, startId: string, scope?: readonly string[]): { order: string[]; cyclic: string[] } {
+  const inScope = scope ? new Set(scope) : null;
   const runnable = s.nodes
     .filter((n) => n.data.nodeType === "agent" || n.data.nodeType === "output-box")
+    .filter((n) => !inScope || inScope.has(n.id))
     .slice()
     .sort((a, b) => (a.data.created_at || "").localeCompare(b.data.created_at || "") || a.id.localeCompare(b.id));
   const ids = new Set(runnable.map((n) => n.id));
@@ -1022,29 +1058,43 @@ async function processQueue(api: EngineApi) {
   }
 }
 
-export async function runPipeline(api: EngineApi) {
+/**
+ * Run the pipeline. `opts.scope` narrows it to a subset (ADR-012); the scope lives in memory only and is
+ * recorded in the ledger, because "why did only these three run" has to be answerable from the files later.
+ */
+export async function runPipeline(api: EngineApi, opts?: { scope?: string[]; label?: string }) {
   const s = api.get();
   if (s.execution.status === "running" || s.execution.status === "waiting_approval") {
     toast(api, "warn", "A run is in progress; stop or approve it first.");
     return;
   }
-  const start = findStart(s);
+  /* An explicitly passed scope is a scope, including an empty one. Letting `[]` fall through to "run
+     everything" would turn "run nothing I selected" into the most destructive thing this function can do, and
+     the only caller that could hit it today guards first — which is exactly how such a fallback survives. */
+  const scoped = opts?.scope ? opts.scope : null;
+  if (scoped && !scoped.some((id) => getNode(s, id)?.data.nodeType === "agent")) {
+    toast(api, "error", "Nothing runnable in the selection — pick at least one agent node.");
+    return;
+  }
+  const start = (scoped ? s.nodes.find((n) => n.id === scoped[0] && n.data.nodeType === "agent") : null) ?? findStart(s);
   if (!start) {
     toast(api, "error", "No agent node to run.");
     return;
   }
-  const { order, cyclic } = computeOrder(s, start.id);
+  const { order, cyclic } = computeOrder(s, start.id, scoped ?? undefined);
   api.set({
     execution: {
       ...emptyExecution(), run_id: uid("run"), status: "running",
       queue: order, started_at: nowIso(),
     },
   });
-  await startLedger(api, `Full pipeline run from “${start.data.title}”.`);
+  await startLedger(api, opts?.label
+    ? `${opts.label} — from “${start.data.title}”. Scope: ${order.join(", ")}.`
+    : `Full pipeline run from “${start.data.title}”.`);
   if (cyclic.length)
     emit(api, "validation.failed", `flow edges form a cycle through ${cyclic.join(", ")} — no valid order exists for those nodes; they are queued last`);
-  emit(api, "run.started", `pipeline started from “${start.data.title}” — ${order.length} nodes queued`);
-  toast(api, "info", `Run started — ${order.length} nodes queued`);
+  emit(api, "run.started", `pipeline started from “${start.data.title}” — ${order.length} nodes queued${scoped ? " (scoped run)" : ""}`);
+  toast(api, "info", `${scoped ? "Scoped run" : "Run"} started — ${order.length} nodes queued`);
   await processQueue(api);
 }
 

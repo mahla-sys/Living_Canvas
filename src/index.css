@@ -61,6 +61,7 @@
   --lc-text-muted: var(--color-ink-300);
   --lc-text-dim: var(--color-ink-400);
   --lc-accent: var(--color-lc-accent);
+  --lc-accent-glow: color-mix(in srgb, var(--color-lc-accent) 60%, transparent);
   --lc-warn: var(--color-lc-warn);
   --lc-danger: var(--color-ember);
 
@@ -77,13 +78,13 @@
   --lc-dot: rgba(34, 56, 52, 0.25);
   --lc-minimap-mask: rgba(11, 19, 18, 0.82);
   --lc-fail-band: rgba(23, 13, 11, 0.95);
-  --lc-selection: rgba(232, 176, 75, 0.35);
-  --lc-ring-running: rgba(232, 176, 75, 0.5);
+  --lc-selection: color-mix(in srgb, var(--color-lc-accent) 35%, transparent);
+  --lc-ring-running: color-mix(in srgb, var(--color-lc-accent) 50%, transparent);
   --lc-ring-waiting: rgba(224, 106, 78, 0.45);
   --lc-code-bg: rgba(111, 179, 199, 0.12);
   --lc-code-line: rgba(111, 179, 199, 0.24);
-  --lc-warn-line: rgba(232, 176, 75, 0.42);
-  --lc-warn-bg: rgba(232, 176, 75, 0.08);
+  --lc-warn-line: color-mix(in srgb, var(--color-lc-warn) 42%, transparent);
+  --lc-warn-bg: color-mix(in srgb, var(--color-lc-warn) 8%, transparent);
   --lc-danger-line: rgba(224, 106, 78, 0.45);
   --lc-danger-bg: rgba(224, 106, 78, 0.08);
 }
@@ -118,7 +119,7 @@
   --lc-bg-bottom: #170f24;
   --lc-glow-accent: rgba(94, 207, 168, 0.09);
   --lc-glow-sky: rgba(111, 179, 199, 0.07);
-  --lc-glow-sage: rgba(185, 139, 194, 0.07);
+  --lc-glow-sage: rgba(143, 191, 127, 0.07);
   --lc-card-top: #241a38;
   --lc-card-bottom: #1a1229;
   --lc-card-empty: rgba(23, 16, 37, 0.55);
@@ -185,8 +186,8 @@ body,
 
 @keyframes lc-pulse-ring {
   0% { box-shadow: 0 0 0 0 var(--lc-ring-running); }
-  70% { box-shadow: 0 0 0 14px rgba(232, 176, 75, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(232, 176, 75, 0); }
+  70% { box-shadow: 0 0 0 14px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 .anim-running {
   animation: lc-pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -470,4 +471,41 @@ body,
   --xy-minimap-background-color: var(--lc-panel);
   --xy-minimap-mask-background-color: var(--lc-minimap-mask);
   --xy-background-color: transparent;
+}
+
+/* Neutral: an achromatic ramp, for a reader who wants the interface to disappear and the canvas to be the only
+   thing with colour on it. Every ink step has saturation exactly 0 — one blue-tinted "grey" in the ramp and the
+   theme stops being neutral in the way that matters, which is that the canvas colours stop competing with the
+   chrome. Because the ramp has no hue, separation cannot come from hue: the accent keeps its plum chroma
+   (0.28), and `scripts/check-palette.mjs` checks chroma rather than a hue gap for this theme. */
+:root[data-theme="neutral"] {
+  --color-ink-950: #0d0d0d;
+  --color-ink-900: #131313;
+  --color-ink-850: #1c1c1c;
+  --color-ink-800: #242424;
+  --color-ink-700: #303030;
+  --color-ink-600: #404040;
+  --color-ink-500: #636363;
+  --color-ink-400: #8a8a8a;
+  --color-ink-300: #b0b0b0;
+  --color-ink-200: #d2d2d2;
+  --color-ink-100: #ebebeb;
+  --color-ink-50: #f7f7f7;
+
+  --lc-bg-top: #161616;
+  --lc-bg-mid: #0d0d0d;
+  --lc-bg-bottom: #121212;
+  --lc-glow-accent: rgba(185, 139, 194, 0.09);
+  --lc-glow-sky: rgba(111, 179, 199, 0.06);
+  --lc-glow-sage: rgba(143, 191, 127, 0.06);
+  --lc-card-top: #242424;
+  --lc-card-bottom: #1a1a1a;
+  --lc-card-empty: rgba(19, 19, 19, 0.55);
+  --lc-dot: rgba(64, 64, 64, 0.3);
+  --lc-minimap-mask: rgba(13, 13, 13, 0.82);
+  --lc-fail-band: rgba(30, 12, 14, 0.95);
+
+  /* plum keeps working here: hue is meaningless against an achromatic ramp, and its chroma (0.28) is what
+     separates it from a grey `ink-400` */
+  --color-lc-accent: #b98bc2;
 }

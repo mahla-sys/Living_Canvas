@@ -20,7 +20,7 @@ import {
   emit, toast, touch, writeNodeArtifact, writeEdgeArtifact, patchNode,
   createNode as engCreateNode, deleteNode as engDeleteNode,
   createEdge as engCreateEdge, deleteEdge as engDeleteEdge,
-  runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution,
+  runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution, flowClosure,
   sendChat, takeSnapshot, restoreSnapshot, initWorkspace, resetWorkspace,
   saveTemplate, loadTemplate, saveRoleFromNode, contractSelfTest, testFallback,
   addStroke as engAddStroke, removeStroke as engRemoveStroke, undoStroke as engUndoStroke,
@@ -79,6 +79,10 @@ interface Actions {
   updateCanvas: (p: Partial<AppState["canvas"]>) => void;
   runAll: () => void;
   runOne: (id: string) => void;
+  /** Run scopes (ADR-012). All three are runtime-only: nothing about the choice is written to a file. */
+  runSelected: () => void;
+  runFromNode: (id: string) => void;
+  runUntilNode: (id: string) => void;
   resume: () => void;
   reject: () => void;
   stop: () => void;
@@ -327,6 +331,13 @@ function buildActions(a: EngineApi): Actions {
 
     runAll: () => void runPipeline(a),
     runOne: (id) => void runSingle(a, id),
+    runSelected: () => {
+      const ids = a.get().nodes.filter((n) => n.selected).map((n) => n.id);
+      if (!ids.length) { toast(a, "warn", "Select at least one node to run."); return; }
+      void runPipeline(a, { scope: ids, label: `Run selected (${ids.length})` });
+    },
+    runFromNode: (id) => void runPipeline(a, { scope: flowClosure(a.get(), id, "downstream"), label: "Run from this node downstream" }),
+    runUntilNode: (id) => void runPipeline(a, { scope: flowClosure(a.get(), id, "upstream"), label: "Run until this node" }),
     resume: () => void resumeRun(a),
     reject: () => rejectRun(a),
     stop: () => stopRun(a),
