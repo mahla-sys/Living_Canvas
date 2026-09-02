@@ -34,7 +34,12 @@ const BIDI_CONTROL = [
 const ZWNJ = [[0x200c, 0x200c]];
 const DOCS = /^docs\//;
 
-const files = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" }).split("\0").filter(Boolean);
+/* `--others --exclude-standard`, same as check-docs.mjs: a gate that only sees committed files cannot be run
+   by the person adding the file, which is the one moment anyone would listen to it. Git-ignored material
+   stays invisible, which is the point. */
+const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+  encoding: "utf8",
+}).split("\0").filter(Boolean);
 const bad = [];
 let rtlExempt = 0;
 for (const f of files) {

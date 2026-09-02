@@ -22,19 +22,28 @@ and the app reads your edits back.** Files are the source of truth; in-memory st
 ```bash
 npm install
 npm run dev         # http://localhost:3000  (binds 0.0.0.0, accepts any host for sandboxed previews)
-npm test            # vitest run — 7 files / 118 tests, no jsdom, no extra config file
+npm test            # vitest run — 22 files / 270 tests, no jsdom, no extra config file
 npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
 npm run build       # tsc --noEmit && vite build — types are part of the build
 node scripts/check-english.mjs   # the language rule above, as CI runs it
 node scripts/check-docs.mjs      # docs/ gate: frontmatter, legal statuses, every citation resolving
 node scripts/check-palette.mjs   # appearance gate: theme registry, contrast per theme, one place per colour
 node scripts/doc-anchors.mjs     # regenerate the line anchors in ARCHITECTURE.md §3.4 (--check to gate)
+node scripts/check-facts.mjs     # regenerate every count the docs quote (--check to gate)
 ```
-CI is committed as `ci/github-actions.yml` (typecheck → test → build → language gate → docs gate → palette gate).
-Activating it is one command:
-`cp ci/github-actions.yml .github/workflows/ci.yml`. The agent account on this branch is not allowed to create files
-under `.github/workflows/` (a GitHub App permission), so that copy needs someone with repository access. Until it
-lands, the five commands above are the gate.
+CI is **defined** at [`ci/github-actions.yml`](ci/github-actions.yml) — typecheck → test → build → language gate →
+docs gate → palette gate → anchor gate → facts gate — but it is **not wired up**, and this branch cannot wire it up:
+pushing `.github/workflows/ci.yml` is refused by the remote with
+`refusing to allow a GitHub App to create or update workflow … without 'workflows' permission` (attempted
+2026-09-02). Activating it is one commit by someone with repository access:
+
+```bash
+cp ci/github-actions.yml .github/workflows/ci.yml && git add .github && git commit -m "ci: activate"
+```
+
+Until then the eight commands above are the gate, run by hand. That is a real cost and it is measurable: the
+eight stale numbers this README was carrying — "7 files / 118 tests" against a suite of 12 files and 172 tests —
+are exactly what a gate catches and a human retypes. `scripts/check-facts.mjs` now generates them instead.
 
 ## Read it
 
@@ -58,11 +67,11 @@ src/
 ├── lib/engine.ts                behaviour: events · files · memory · execution · strokes · portability
 ├── lib/portable.ts              the export bundle + rebuilding a canvas from its files
 ├── lib/fs-access.ts             the File System Access adapter (a real folder on disk)
-├── lib/__tests__/               126 tests, production code only (no fixtures that reimplement a serialiser)
+├── lib/__tests__/               270 tests, production code only (no fixtures that reimplement a serialiser)
 └── components/                  CanvasArea · SidePanels · Overlays · icons
 ```
 
-## The three guarantees
+## The four guarantees
 
 1. **A canvas can be rebuilt from `canvases/<id>/**` alone** — `state.json` is optional and `graph.json` does
    not exist any more. Tested.

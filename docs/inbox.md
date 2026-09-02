@@ -1,75 +1,25 @@
 ---
-title: اینباکس — سؤال‌های باز و چیزهایی که جایشان را نداریم
+title: Inbox — registered but undecided
 status: active
-updated: 2026-09-01
-sources: [docs/README.md, docs/ui-spec.md, docs/notes/ideas.md]
-related: [docs/README.md, docs/roadmap/README.md, docs/notes/ideas.md]
+updated: 2026-09-02
+sources: [docs/roadmap/infrastructure-horizon.md, docs/decisions/README.md]
 ---
 
 # Inbox
 
-هر چیزی که نوشته‌ایم ولی هنوز در ساختار `docs/` جایی ندارد: سؤال باز، ادعای بی‌مرجع، فیچری که هنوز فیچر نیست،
-یا تصمیمی که نمی‌دانیم تصمیم است. قانون ساده: **یا جایش را پیدا کن، یا اینجا بنویسش؛ ساکت‌اش نکن.**
+Decisions and unknowns that are **registered but not yet decided**. Nothing here is built. An item leaves
+this file by becoming a decision in a `decisions/adr-*.md` or a row in `roadmap/`.
 
-مرتب‌سازی بر پایهٔ «اگر جواب ندهیم چه چیزی گران‌تر می‌شود»، نه «کدام جذاب‌تر است».
+Kept deliberately short: if an item has grown enough to need a rationale, it has grown enough to need its own
+ADR, and staying here would hide it.
 
-## P0 — جواب‌ندادن‌شان جلوی کار را می‌گیرد
+---
 
-| # | سؤال | چرا اینجاست | هزینهٔ تأخیر | چه کسی جواب می‌دهد |
-|---|---|---|---|---|
-| 0-1 | **هویت محصول**: ارکستراتور یا ضبط‌کنندهٔ زندگی ایجنت‌ها؟ | ADR-001 هنوز نوشته نشده؛ شماره‌اش رزرو است (`docs/decisions/README.md`) | کل `docs/roadmap/phase-3.md` معلق است و هر بحث UI نصفه می‌ماند | مالک |
-| 0-4 | **docking/collapse پنل‌ها را می‌خواهیم یا نه؟** | پیش‌نویس بیرونی «toggle می‌شود» نوشته بود؛ در کد نیست (پنل‌ها `shrink-0` با عرض ثابت‌اند) | تصمیمِ layout روی §۲ `docs/ui-spec.md` و روی هر بعدی اثر می‌گذارد | مالک + تحقیق (VS Code/Obsidian) |
-| 0-5 | **تأیید ردیف‌های `docs/ui-spec.md`** | سند نوشته شده ولی `status: draft` است؛ تا تو نخوانده‌ای، «مشخصات» نیست | کار UI بر پایهٔ چیزی که تأیید نکرده‌ای شروع می‌شود | مالک (علامت‌گذاری ✓/✏️ در همان فایل) |
-
-## P1 — جواب‌ندادن‌شان هزینهٔ پنهان دارد
-
-| # | مورد | چرا الان جا ندارد |
-|---|---|---|
-| 1-1 | `library/visual-styles/` (کتابخانهٔ استایل) | دایرکتوری جدید = تصمیم فرمت فایل؛ و با `library/shapes/` همپوشانی معنایی دارد. یا ادغام، یا ADR |
-| 1-2 | `ui.yaml` / ثبت متمرکز پنل‌ها | نامی است که در یک پیش‌نویس متولد شد و در هیچ ساختاری نیست. اگر واقعاً «پنل‌های قابل تنظیم» می‌خواهیم، این همان 0-3 است؛ وگرنه باید کلاً حذف شود تا در سند بعدی «وجود دارد» خوانده نشود |
-| 1-4 | تایپوگرافی: جمع‌کردن `text-[11.5px] / [10.5px] / [9.5px] / leading-[13px]` به یک مقیاس ۴تایی | تصمیم عددی است نه سلیقه‌ای؛ باید اول مقیاس تعریف شود تا ردیف‌های `ui-spec` عدد داشته باشند |
-| 1-5 | `React.memo` نبود + هزینهٔ سلکتور هر-نود | «عملکرد» را نمی‌توان بدون اندازه‌گیری حل کرد؛ اول یک شمارش ساده (چند رندر در هر keystroke)، بعد تصمیم |
-| 1-6 | پوشهٔ سلسله‌مراتبی برای ایجنت (`agents/<id>/…` در برابر `memory/agents/<id>.md`) | تغییر فرمت = ADR + مهاجرت + تست roundtrip؛ امروز «ایجنت = یک نود» است و حذف نود تاریخچه را پاک می‌کند |
-| 1-7 | ویرایشگر اسکما (یا حداقل «اعتبارسنجی آخرین خروجی با این فایل») | گپ §۹.2 `docs/ARCHITECTURE.md#9`؛ enforcement هست، authoring نیست؛ بدون UI عملاً فقط ما اسکما می‌نویسیم |
-| 1-8 | چند یال شرطی *ورودی* یک نود = کدام قاعده؟ | رفتار امروز: `edges.find(...)` اولی را برمی‌دارد و دومی بی‌صدا نادیده می‌شود → `status: open-issue` در `docs/patterns/conditional-edges.md`. باید یا تست شود یا ADR |
-| 1-9 | **رنگ‌های تأکید (amber/ember/sage/…) با عوض‌شدن تم عوض شوند؟** | جدول‌های `STATUS_COLOR`/`EDGE_COLOR`/`EVENT_COLOR` در `src/components/` هنوز literal‌اند. اگر پاسخ «نه» است (تم فقط زمینه و سطح)، همین جدول‌ها قانون‌مندند و `check-palette.mjs` کافی است؛ اگر «بله» است، باید به توکن تبدیل شوند و `alpha`های چسبیده (`${c}33`) به `color-mix`. یک تصمیم، دو مسیر |
-| 1-10 | **مرز undo و checkpoint، با فیلتر `source`** | الگوی tldraw (فقط `source: "user"` وارد history شود) تنها چیزِ قابل‌کپی از کل ماتریس اوست: بدون آن Ctrl+Z خروجیِ ایجنت را پاک می‌کند. قبل از هر کد، یک ADR لازم است؛ بازبینی‌شدهٔ `docs/roadmap/phase-2.md` |
-| 1-11 | **گروه‌بندی: `parent` با مختصات نسبی یا `group` منطقی؟** | رندر (React Flow) توانای اولی است، ولی مختصات نسبی یعنی `position` در فایل معنی‌اش عوض می‌شود و ویرایش دستی/`git diff` می‌شکند؛ `folder` هم که «دایرکتوری» معنی است. پیشنهادِ من دومی است، ولی فایل‌فرمت است → ADR |
-| 1-12 | فعال‌سازی CI | `cp ci/github-actions.yml .github/workflows/ci.yml` — دسترسی من به `.github/` بسته است؛ تا این انجام نشود، هیچ‌کدام از گیت‌ها خودکار نیستند |
-
-## P2 — شنیده شد، بررسی شد، الان جایی ندارد (ولی فراموش نشود)
-
-- **Focus Mode** (مخفی‌کردن پنل‌ها برای تماشای بوم) — ارزان، ولی منتظر جواب 0-4.
-- **Command Palette / Ctrl+K** — ارزشمند فقط وقتی تعداد اکشن‌ها از ~۱۲ ردیف گذشته؛ امروز ۵۸ اکشن در `store.ts`
-  هست ولی نه همه قابل‌دسترس؛ اول یک بار «چه چیزهایی با کیبورد باید بشود» را فهرست کنیم.
-- **Pie Menu** — همان چیزی که در `docs/notes/ideas.md` پارک شده؛ با 0-4 تداخل دارد.
-- **نوار وضعیت پایین** — امروز کنسولِ جمع‌شدنی آن نقش را می‌گیرد؛ اگر واقعاً لازم است، باید بگوید چه چیزی
-  نشان می‌دهد که کنسول ندارد (مثلاً «۳ نود در صف» یا «۲ خطا»).
-- **CRDT / هم‌کاری زنده، tldraw/Yjs** — فعلاً رد: Git و فایل، داستان چند‌نویسندگی را دارند
-  (`docs/roadmap/phase-4.md`).
-- **چت چندایجنتی و DM بین ایجنت‌ها** — نوع یال `direct-message` در فرمت وجود دارد ولی موتور آن را معنایی
-  نمی‌دهد؛ فیچرِ بعد از function calling است.
-- **حالت‌های نمایش داده/عملکرد (overlay)** — تا «حجم داده» جایی ثبت نشود، نمایش حجم داده یعنی انیمیشنِ توخالی.
-- **keystone‌های اعلان**: یک لیست هشدارهای ماندگار (Stellaris situation log) — تصمیمِ «کجا ذخیره شود» دارد، نه
-  تصمیمِ رنگ؛ به 0-3 گره خورده.
-- **سنجهٔ مستندات**: آیا `check-docs.mjs` باید `related:` را اجباری/بررسی‌شدنی کند؟ الان کلید شناخته‌شده است
-  ولی اجباری نیست؛ اگر بعداً کسی استفاده‌اش نکند، حذف کردنش هم یک تصمیم است.
-
-## نحوهٔ مصرف این فایل
-
-1. ردیفی که جواب گرفت **به جای درستش می‌رود** (ADR، `patterns/`، `roadmap/`، یا `notes/ideas.md`) و از اینباکس
-   حذف می‌شود — با یک خط: «کجا رفت و چرا».
-2. ردیفی که رد شد هم حذف می‌شود، ولی دلیلش در `docs/notes/ideas.md` زیر «rejected once» می‌نشیند؛ دلیلِ رد،
-   جزو دارایی‌های پروژه است.
-3. این فایل بزرگ شدنش طبیعی است؛ **تمیز کردنش بدون جابه‌جایی محتوا، علامت پوسیدگی است.**
-
-## بسته شد (با مقصدش، طبق قانونِ بالای همین فایل)
-
-| # | سؤال | جواب | رفت به |
+| # | Open question | Why it is not decided yet | Where it would land |
 |---|---|---|---|
-| 0-2 | بنفشِ ستاره‌دار ترجیح تو هست؟ | **نصفش**: پس‌زمینهٔ بنفشِ تیره بله؛ «ستاره» هیچ‌جا تأیید نشد و ساخته نشد | `docs/decisions/adr-006-theme-is-device-scoped.md` (تم) — ستاره در §۸ `docs/ui-spec.md` به‌عنوان «مطرح‌نشده» ماند |
-| 0-3 | تم کجا ذخیره شود؟ | `lc-settings` (localStorage)، نه `canvas.yaml` و نه `ui.yaml`؛ «کل اپ» یعنی مالِ خواننده است نه مالِ بوم | همان ADR + Law 4 و §۶ `docs/ARCHITECTURE.md#6` (سومین seam، نام‌گذاری‌شده) |
-| 1-3 | هگزهای بیرون `@theme` | رویهٔ برنامه (پنل، کارت، کنترل‌ها، نقطه‌ها، scrollbar، band خطا) به `var()`/کلاس رفت؛ `check-palette.mjs` تولدِ مجدد را ممنوع می‌کند | `scripts/check-palette.mjs`، §۹.1 `docs/ui-spec.md`؛ باقی‌ماندهٔ بحث شد 1-9 همین فایل |
-
-**قاعدهٔ شماره‌ها:** شناسه‌ها (`0-1`، `1-6`، …) ثابت‌اند و باز شماره‌گذاری نمی‌شوند؛ یک سطرِ بسته‌شده از جدول
-حذف می‌شود و در همین بخش می‌نشیند، تا ارجاعِ یک ADR یا یک کامنت به «همان سؤال 0-4» معنایش را از دست ندهد.
+| 1 | Should the Inspector **Status** tab ever show CPU/memory? | The reader deferred it, then wrote "the same real data is enough for now" — which reads as *keep the real data, drop the bars*. Browsers expose no CPU figure at all; `performance.memory` is Chrome-only and approximate. Showing a number nobody can trust is worse than showing none. | an ADR saying the tab shows execution state only, or a phase entry to revisit if a backend ever reports it |
+| 2 | Docking / closing the side panels | Explicitly moved to a later phase this round. Needs a layout schema change (`layout.leftOpen` exists; `docked` does not) and a decision about what the canvas does with the reclaimed width. | `roadmap/infrastructure-horizon.md` → phase entry → ADR |
+| 3 | User-editable accent and background colours in Settings | The reader wants the *architecture* ready, not the feature. The role tokens (`--color-lc-accent`, `--color-lc-warn`) are the seam; what is missing is where the override is stored (`settings.themeOverride`? a `theme.css` file?) and how it interacts with the contrast gate, which measures the three shipped themes and would not see a runtime override at all. | ADR — and it must say what the gate does about runtime overrides |
+| 4 | Multi-pipeline canvases as files | Still `proposed` at `adr-005`, phase 4. Run Scope (ADR-012) narrows *one* run; it does not create a second graph. | phase 4 |
+| 5 | Does `drawMode` belong in the store? | Today it is component state in `CanvasArea`, and the tool/colour/width live in `DrawToolbar` and reach the canvas through `window.__lcDraw` — a global mutable set in a `useEffect`. It works while one toolbar is mounted, but it is untestable from outside and it is the kind of side-channel that breaks silently. Moving it into `ui` state is a small change with a real payoff. | ADR if it grows; a refactor note otherwise |
+| 6 | Should strokes be per-canvas files or one file? | `strokes/<id>.json` is one file per stroke, which matches Law 1 but means a canvas with 200 strokes has 200 tiny files. Nobody has hit that yet. | revisit when it hurts |

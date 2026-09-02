@@ -2,11 +2,14 @@
    Living Canvas — AppState, factories, roles, seed data
    ============================================================ */
 import type { Node, Edge } from "@xyflow/react";
-import { DEFAULT_THEME, isThemeId } from "./lib/core";
+import {
+  DEFAULT_THEME, DEFAULT_MODEL, isThemeId, readSettingsLocal,
+  PANEL_DEFAULT_LEFT, PANEL_DEFAULT_RIGHT,
+} from "./lib/core";
 import type {
   LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode,
   AgentConfig, MemDoc, Settings, ExecutionState, BusEvent, Toast,
-  OutputEntry, ChatMsg, SnapshotMeta, EdgeType, Stroke,
+  OutputEntry, ChatMsg, SnapshotMeta, EdgeType, Stroke, CanvasLayout,
 } from "./lib/core";
 
 export const APP_VERSION = "0.1.0"; // release v0.1 — closes phase 1 of architecture doc 1.3
@@ -33,7 +36,21 @@ export interface CanvasMeta {
   template_version: string;
   created_at: string;
   updated_at: string;
+  /**
+   * Panel widths and open/closed state (ADR-009). Canvas *content*, so it lives in `canvas.yaml` and comes
+   * back on hydrate — how wide the inspector is on this graph is part of how the graph is read, the same
+   * way `position` is. Focus mode is the opposite: a moment of work, kept in `ui`, never in a file.
+   */
+  layout: CanvasLayout;
 }
+
+/** What a canvas with no `layout:` key in its `canvas.yaml` gets — and what a fresh seed writes. */
+export const DEFAULT_LAYOUT: CanvasLayout = {
+  leftWidth: PANEL_DEFAULT_LEFT,
+  rightWidth: PANEL_DEFAULT_RIGHT,
+  leftOpen: true,
+  rightOpen: true,
+};
 
 export interface FileViewerState {
   path: string;
@@ -120,6 +137,13 @@ export interface AppState {
   typing: Record<string, boolean>;
   ui: {
     leftTab: "palette" | "files";
+    /**
+     * Which inspector tab is showing (ADR-015). Session-only: a tab that survived a reload would reopen
+     * somebody else's moment of reading, and it is a view of the node rather than a fact about it.
+     * `config` carries the editing surface that existed before tabs did — removing it to honour a literal
+     * "three tabs" would have deleted the only way to configure a node.
+     */
+    inspectorTab: "config" | "status" | "diary" | "logs";
     fileViewer: FileViewerState | null;
     historyOpen: boolean;
     settingsOpen: boolean;
@@ -127,6 +151,13 @@ export interface AppState {
     consoleOpen: boolean;
   /** is the Export/Import panel open? */
     portOpen: boolean;
+    /**
+     * Both side panels hidden and the console collapsed. Session-only by construction (ADR-009): a focus
+     * state written into a file would make the next reader open somebody else's moment of concentration.
+     */
+    focusMode: boolean;
+    /** how far into the Ctrl+K Z chord the user is — drives the TopBar hint, nothing else */
+    chordDepth: number;
   };
 }
 
@@ -152,7 +183,10 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
   drawing: "Drawing",
 };
 
-export const MODELS = ["deepseek-chat", "glm-4-flash", "ollama:qwen2.5"];
+/* Every entry must have an endpoint behind it (`resolveModelRoute`, ADR-008). `glm-4-flash` was removed
+   rather than left to 400 and degrade to the simulator: a dropdown that offers a model the app cannot
+   reach is the same lie as a validator nobody runs. Adding it back is one row in that table. */
+export const MODELS = [DEFAULT_MODEL, "ollama:qwen2.5"];
 
 /* ---------------- roles (§3.8) ---------------- */
 
@@ -412,7 +446,7 @@ export const emptyExecution = (): ExecutionState => ({
 });
 
 const SETTINGS_BASE: Settings = {
-  provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620,
+  provider: "sim", apiKey: "", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 };
 
@@ -423,11 +457,7 @@ const SETTINGS_BASE: Settings = {
  * trusted downstream.
  */
 export const defaultSettings = (): Settings => {
-  let stored: Record<string, unknown> = {};
-  try {
-    const raw = localStorage.getItem("lc-settings");
-    if (raw) stored = { ...(JSON.parse(raw) as Record<string, unknown>) };
-  } catch { /* ignore */ }
+  const stored: Record<string, unknown> = readSettingsLocal() ?? {};
   const merged: Settings = { ...SETTINGS_BASE, ...stored };
   if (!isThemeId(merged.theme)) merged.theme = DEFAULT_THEME;
   merged.snapToGrid = stored.snapToGrid === true;
@@ -499,11 +529,12 @@ export function buildSeed(owner: string) {
     owner,
     canvas_type: "agent-pipeline",
     tags: [],
-    default_model: "deepseek-chat",
+    default_model: DEFAULT_MODEL,
     template_id: "—",
     template_version: "—",
     created_at: t,
     updated_at: t,
+    layout: { ...DEFAULT_LAYOUT },
   };
 
   return { nodes: [mkNode("note-001", "lc", 80, 80, start)], edges: [] as RFEdge[], memory, canvas };

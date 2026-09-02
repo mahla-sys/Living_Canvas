@@ -48,11 +48,30 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, 
 | منطقه | امروز | فاصله/وضعیت |
 |---|---|---|
 | نوار بالا | نام بوم، چیپ «phase 1 closed»، چیپ ذخیره/حالت ذخیره، checkpoint دستی، تاریخچه، تنظیمات، کنترل‌های اجرا | `implemented` |
-| پنل چپ | `w-[268px]` ثابت، دو تب Library/Files | **قابل جمع‌شدن نیست**؛ ادعای «با دکمه toggle می‌شود» در پیش‌نویس گپ بعدی نادرست بود |
+| پنل چپ | عرض از `canvas.layout.leftWidth` (پیش‌فرض `268px`)، دو تب Library/Files، لبهٔ کشیدنی، دکمهٔ جمع‌شدن در نوار وضعیت | `implemented` — §۲.۱ |
 | بوم | React Flow؛ `minZoom 0.15 / maxZoom 2.2`؛ `Background` نقطه‌ای: `gap 26`، `size 1.4`، رنگ `#22383440`؛ MiniMap بالا-راست (pannable+zoomable)؛ Controls پایین-چپ | `implemented` |
-| پنل راست | `w-[292px]` ثابت، بازرس نود/یال/بوم | `implemented`؛ نوار وضعیت پایین **وجود ندارد** (کنسولِ جمع‌شدنی جای آن است) |
+| پنل راست | عرض از `canvas.layout.rightWidth` (پیش‌فرض `292px`)، بازرس نود/یال/بوم، لبهٔ کشیدنی | `implemented` — §۲.۱ |
 | شناورها | ChatPanel · FileViewer · HistoryModal · SettingsModal · PortModal · Toasts · BootOverlay | `implemented`؛ SettingsModal یک بخش **Appearance** دارد: تم + «snap به گریدِ ۲۶» (`src/components/Overlays.tsx#SettingsModal`) |
-| ذخیرهٔ تنظیمات ظاهری | `lc-settings` در localStorage، نوشته‌شده توسط `src/store.ts#updateSettings` | `implemented` طبق `docs/decisions/adr-006-theme-is-device-scoped.md` — و **هیچ** کلید ظاهری در `canvas.yaml` نیست، عمداً |
+| ذخیرهٔ تنظیمات ظاهری | `lc-settings` در localStorage، فقط از راه `src/lib/core.ts#writeSettingsLocal` | `implemented` طبق `docs/decisions/adr-006-theme-is-device-scoped.md` و `adr-007-settings-live-behind-two-functions.md` — و **هیچ** کلید ظاهری در `canvas.yaml` نیست، عمداً |
+| نوار وضعیت پایین | `22px` (`src/lib/core.ts#STATUS_BAR_HEIGHT`)، چپ: عنوان + شمارش + حالت ذخیره؛ راست: وضعیت اجرا + ذخیره + پنل‌ها | `implemented` — §۲.۱ |
+| حالت تمرکز | `Ctrl+K Z` روشن، `Escape` دو بار خاموش؛ هر دو پنل و کنسول پنهان | `implemented`؛ **در هیچ فایلی ذخیره نمی‌شود** |
+
+### ۲.۱ اعداد چیدمان (هر کدام یک ادعا، هر ادعا یک محل ذخیره)
+
+| مورد | مقدار | محل ذخیره | ارجاع |
+|---|---|---|---|
+| عرض پنل چپ / راست | پیش‌فرض `268px` / `292px`، بازهٔ مجاز `200px`…`520px` | `canvas.yaml` → `layout.leftWidth` / `layout.rightWidth` | `src/lib/core.ts#PANEL_MIN`، `layout.test.ts` |
+| باز/بسته بودن پنل‌ها | بولین؛ نبودنِ کلید یعنی **باز** | `canvas.yaml` → `layout.leftOpen` / `rightOpen` | `src/lib/core.ts#normalizeLayout` |
+| دستهٔ کشیدن | `5px`، `cursor-col-resize`، hover با `lc-accent/40` | — (کروم) | `src/components/SidePanels.tsx#ResizeHandle` |
+| debounce نوشتن چیدمان | `500ms` بعد از آخرین حرکت | — | `src/lib/engine.ts#touchLayout` |
+| ارتفاع نوار وضعیت | `22px`، متن `9.5px`، `border-t ink-700` | — (کروم) | `src/components/Overlays.tsx#StatusBar` |
+| اسکرولِ محتوا | `flex-1 min-h-0 overflow-y-auto overscroll-contain`؛ `min-h-0` نیمهٔ باربر است. چهار مودال هم `max-h-[…vh] flex flex-col` دارند | — (کروم) | `SidePanels.tsx#LeftPanel`، `Overlays.tsx#SettingsModal`، `interactive.test.tsx` |
+| پنل گپ | جایش از `canvas.layout` و `ui.focusMode` و `ui.consoleOpen` **محاسبه** می‌شود (نه عددِ ثابت)، و دکمهٔ بستن `shrink-0 ms-auto` + `aria-label` + `data-lc-chat-close` دارد | `canvas.yaml` → `layout` | `src/components/Overlays.tsx#ChatPanel` |
+| نشانِ living-canvas | **بی‌حرکت**؛ هیچ `anim-breathe` یا `anim-spin-slow`؛ رنگ از `lc-accent` | — (کروم) | `src/components/Overlays.tsx#Logo` |
+| تمِ پیش‌فرض | `botanical`؛ تمِ `plum` accent یشمی دارد چون مرکبش بنفش است | `lc-settings` (ADR-006) | `src/lib/core.ts#DEFAULT_THEME`، `docs/decisions/adr-010-accent-is-a-role-and-plum-is-default.md` |
+| حالت تمرکز | بولین، فقط حافظه | **هیچ فایلی** | `docs/decisions/adr-009-layout-is-canvas-content-focus-mode-is-not.md` |
+| زمانِ مجاز بین دو کلیدِ `Ctrl+K` و `Z` | `1500ms` | — | `src/lib/core.ts#createChord` |
+| فاصلهٔ دو `Escape` | `400ms` | — | `src/lib/core.ts#createDoubleTap` |
 
 **تصمیم‌های بازِ همین بخش** (در `docs/inbox.md` با اولویت): docking/collapse پنل‌ها، نوار وضعیت واقعی، و
 «Focus Mode» که هر سه پنل کناری را مخفی می‌کند.
@@ -66,7 +85,9 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, 
 | `ink-950` | `#0b1312` | پس‌زمینهٔ پایه (پیش‌نویس بیرونی `#0b0d12` گفت: **غلط**) |
 | `ink-900` / `850` / `800` / `700` | `#0f1a19` `#12201e` `#162624` `#1e3230` | سطوح پنل، کارت، خط |
 | `ink-600`→`ink-50` | `#2a423f` `#3c5854` `#5f7b76` `#8ba39d` `#b4c6c0` `#dce5e1` `#eef2ef` | متن ثانویه تا متن اصلی (`ink-50` = `#eef2ef`، نه `#e5e7eb`) |
-| `amber-lc` / `amber-deep` | `#e8b04b` / `#c98f2b` | کنش اصلی، نود ایجنت، handle |
+| **`lc-accent`** (نقش) | `#b98bc2` · در تم پلام `#cfa6da` | کنش اصلی، حلقهٔ focus، نشانِ living-canvas، یال flow، وضعیت running |
+| **`lc-warn`** (نقش) | `#d9c9a3` | متن و toast هشدار — عمداً غیر از accent، تا هشدار هرگز «دعوت به کلیک» خوانده نشود |
+| `amber-lc` | `#e8b04b` | **فقط دادهٔ بوم**: `NODE_COLORS.agent`، سواچ‌های رنگِ نود، پالت قلم. هیچ کرومی رنگش نمی‌کند (ADR-010) |
 | `ember` | `#e06a4e` | خطا، خطر، رد شدن |
 | `sage` / `sky-lc` / `plum` / `sand` | `#8fbf7f` `#6fb3c7` `#b98bc2` `#d9c9a3` | موفقیت / اطلاعات-یادداشت / pipeline-step و built-in / پوشه |
 | فونت‌ها | Inter (متن) · Space Grotesk (عنوان) · IBM Plex Mono (مسیر، id، عدد) | از Google Fonts در `index.html` بارگذاری می‌شوند |
@@ -167,13 +188,11 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, 
 
 ## ۸. پس‌زمینه، شیشه، ستاره
 
-- پس‌زمینهٔ امروز: `linear-gradient(160deg,#0d1716,#0b1312 55%,#0d1817)` + سه `radial-gradient` کم‌شدت
-  (amber بالا-راست ۷٪، sky پایین-چپ ۸٪، sage مرکز ۴٪) در کلاس `.lc-bg` — یعنی «عمق» از قبل هست، فقط
-  بی‌نام است.
+- پس‌زمینهٔ امروز در کلاس `.lc-bg`: یک `linear-gradient` سه‌تکه از `--lc-bg-top/mid/bottom` + سه
+  `radial-gradient` کم‌شدت (`--lc-glow-plum` بالا-راست، `--lc-glow-sky` پایین-چپ، `--lc-glow-sage` مرکز). «عمق» از قبل بود؛ حالا تم‌پذیر هم هست، چون هر شش توکن در هر بلوکِ تم مقدار می‌گیرند.
 - **ستاره‌ها و بنفش الکتریکی**: در تحقیق به‌عنوان «ترجیح کاربر» نوشته شده بودند و در این ریپو هیچ‌جا توسط خودِ
   کاربر اعلام نشده‌اند. تا تأیید نشده‌اند، `proposed` هم نیستند → `docs/inbox.md` (سؤال P0).
-- اگر یک‌روز تصدیق شد: یک لایهٔ CSS (radial-gradient تکرارشدنی یا SVG بسیار سبک) پشت React Flow، بدون
-  canvas overlay و بدون انیمیشن دائمی؛ و تنظیمش در همان محلی که تم ذخیره می‌شود، نه در JSX.
+- اگر یک‌روز تصدیق شد: یک لایهٔ CSS پشت React Flow، بدون canvas overlay و بدون انیمیشن دائمی، و تنظیمش همان‌جا که تم ذخیره می‌شود — نه در JSX.
 
 ## ۹. بدهی‌های ظاهری که همین‌جا ثبت می‌شوند (نه در چت)
 

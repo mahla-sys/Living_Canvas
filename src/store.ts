@@ -6,30 +6,48 @@ import type { NodeChange, EdgeChange, Connection } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import {
   storage, nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, toYaml, logText, frontmatter,
-  nowIso, storageMode,
+  nowIso, storageMode, clamp, createChord, createDoubleTap, writeSettingsLocal,
+  PANEL_MIN, PANEL_MAX,
   type Settings, type LCNodeData, type LCEdgeData, type Stroke, type NodeType,
 } from "./lib/core";
 import type { CanvasFiles } from "./lib/portable";
 import {
   ROOT, CANVAS_ID, defaultSettings, emptyExecution, makeNodeData, makeEdgeData, roleById, MODELS,
-
+  DEFAULT_LAYOUT,
   type AppState, type RFNode, type RFEdge, type FileViewerState,
 } from "./state";
 import {
   emit, toast, touch, writeNodeArtifact, writeEdgeArtifact, patchNode,
   createNode as engCreateNode, deleteNode as engDeleteNode,
   createEdge as engCreateEdge, deleteEdge as engDeleteEdge,
-  runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution,
+  runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution, flowClosure, pauseRun, stepRun,
   sendChat, takeSnapshot, restoreSnapshot, initWorkspace, resetWorkspace,
   saveTemplate, loadTemplate, saveRoleFromNode, contractSelfTest, testFallback,
   addStroke as engAddStroke, removeStroke as engRemoveStroke, undoStroke as engUndoStroke,
   clearStrokes as engClearStrokes, convertStrokesToGraph as engConvertStrokes,
   pickCanvasFolder, detachWorkspaceFolder, exportToJsonFile, exportToFolder,
   importFromFolder, importFromFile, previewImportText, applyImport, flushPending, reloadFromStorage,
+  touchLayout,
   type ImportPreview, type EngineApi,
 } from "./lib/engine";
 
 let api: EngineApi;
+
+/** The one place focus mode is entered or left, so all three entry points agree on what happens. */
+function setFocus(a: EngineApi, on: boolean) {
+  focusChord.reset();
+  escapeTap.reset();
+  a.set({ ui: { ...a.get().ui, focusMode: on, chordDepth: 0 } });
+  emit(a, "system", on ? "focus mode on — two Escapes, or Ctrl+K Z again, to come back" : "focus mode off");
+}
+
+/* ---------------- the two multi-key sequences ----------------
+   Instances of the pure machines in core.ts, held here rather than in a component: a half-pressed chord is
+   not something to re-render for, and holding it in a component would reset it on every unrelated update.
+   Ctrl+K Z toggles focus mode; Escape twice leaves it (one Escape still belongs to in-place editing and to
+   the modals, so focus mode must not steal it). Both are session-only — ADR-009. */
+const focusChord = createChord(["k", "z"]);
+const escapeTap = createDoubleTap(400);
 
 export const useStore = create<AppState & { actions: Actions }>()((set, get) => {
   api = { get: () => get() as AppState, set: (p) => set(p as never) };
@@ -52,6 +70,7 @@ interface Actions {
   selectNode: (id: string | null) => void;
   selectEdge: (id: string | null) => void;
   setLeftTab: (t: AppState["ui"]["leftTab"]) => void;
+  setInspectorTab: (t: AppState["ui"]["inspectorTab"]) => void;
   openFile: (f: FileViewerState | null) => void;
   setHistoryOpen: (v: boolean) => void;
   setSettingsOpen: (v: boolean) => void;
@@ -61,9 +80,15 @@ interface Actions {
   updateCanvas: (p: Partial<AppState["canvas"]>) => void;
   runAll: () => void;
   runOne: (id: string) => void;
+  /** Run scopes (ADR-012). All three are runtime-only: nothing about the choice is written to a file. */
+  runSelected: () => void;
+  runFromNode: (id: string) => void;
+  runUntilNode: (id: string) => void;
   resume: () => void;
   reject: () => void;
   stop: () => void;
+  pause: () => void;
+  step: () => void;
   resetRun: () => void;
   chat: (id: string, text: string) => void;
   snapshot: () => void;
@@ -95,6 +120,15 @@ interface Actions {
   undoStroke: () => void;
   clearStrokes: () => void;
   convertStrokes: (opts: { nodeType: NodeType; connect: boolean }) => void;
+  /** show/hide a side panel. Persisted in `canvas.yaml` (ADR-009). */
+  togglePanel: (side: "left" | "right") => void;
+  /** live panel resize: state moves immediately, the file follows 500 ms after the drag stops. */
+  resizePanel: (side: "left" | "right", width: number) => void;
+  toggleFocusMode: () => void;
+  /** feed one key to the Ctrl+K Z chord; the caller decides which keys are worth feeding */
+  chordKey: (key: string) => void;
+  /** feed an Escape; only the *second* one inside 400 ms does anything, and only in focus mode */
+  escapeKey: () => void;
 }
 
 function initialState(): AppState {
@@ -106,6 +140,7 @@ function initialState(): AppState {
       title: "…", owner: "mahla", canvas_type: "agent-pipeline", tags: ["nexus"],
       default_model: "deepseek-chat", template_id: "—", template_version: "—",
       created_at: nowIso(), updated_at: nowIso(),
+      layout: { ...DEFAULT_LAYOUT },
     },
     nodes: [] as RFNode[],
     edges: [] as RFEdge[],
@@ -131,12 +166,15 @@ function initialState(): AppState {
     typing: {} as AppState["typing"],
     ui: {
       leftTab: "palette" as const,
+      inspectorTab: "config" as const,
       fileViewer: null,
       historyOpen: false,
       settingsOpen: false,
       chatNodeId: null,
       consoleOpen: true,
       portOpen: false,
+      focusMode: false,
+      chordDepth: 0,
     },
   };
   return seedless;
@@ -233,27 +271,62 @@ function buildActions(a: EngineApi): Actions {
     selectNode: () => undefined,
     selectEdge: () => undefined,
     setLeftTab: (t) => useStore.setState((s) => ({ ui: { ...s.ui, leftTab: t } })),
+    setInspectorTab: (t) => useStore.setState((s) => ({ ui: { ...s.ui, inspectorTab: t } })),
     openFile: (f) => useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: f } })),
     setHistoryOpen: (v) => useStore.setState((s) => ({ ui: { ...s.ui, historyOpen: v } })),
     setSettingsOpen: (v) => useStore.setState((s) => ({ ui: { ...s.ui, settingsOpen: v } })),
     setChatNode: (id) => useStore.setState((s) => ({ ui: { ...s.ui, chatNodeId: id } })),
     toggleConsole: () => useStore.setState((s) => ({ ui: { ...s.ui, consoleOpen: !s.ui.consoleOpen } })),
 
+    /* ---- layout (ADR-009): the widths are canvas content, so they land in `canvas.yaml`; focus mode is a
+           moment of work, so it lands nowhere ---- */
+    togglePanel: (side) => {
+      const lay = a.get().canvas.layout;
+      const key = side === "left" ? "leftOpen" : "rightOpen";
+      const next = !lay[key];
+      a.set({ canvas: { ...a.get().canvas, layout: { ...lay, [key]: next } } });
+      emit(a, "system", `${side} panel ${next ? "shown" : "hidden"}`);
+      touchLayout(a);
+    },
+
+    resizePanel: (side, width) => {
+      const w = clamp(width, PANEL_MIN, PANEL_MAX);
+      const key = side === "left" ? "leftWidth" : "rightWidth";
+      const lay = a.get().canvas.layout;
+      if (lay[key] === w) return; // no store write and no file write while the handle is not moving
+      a.set({ canvas: { ...a.get().canvas, layout: { ...lay, [key]: w } } });
+      touchLayout(a); // debounced 500 ms — the drag writes the file once, at the end
+    },
+
+    toggleFocusMode: () => setFocus(a, !a.get().ui.focusMode),
+
+    chordKey: (key) => {
+      const before = a.get().ui.chordDepth;
+      const hit = focusChord.push(key, Date.now());
+      const depth = hit ? 0 : focusChord.depth;
+      // only write when the hint would actually change: a keydown is not a reason to re-render the app
+      if (depth !== before) a.set({ ui: { ...a.get().ui, chordDepth: depth } });
+      if (hit) setFocus(a, !a.get().ui.focusMode);
+    },
+
+    escapeKey: () => {
+      if (!a.get().ui.focusMode) return; // one Escape still belongs to in-place editing and the modals
+      if (!escapeTap.push(Date.now())) return;
+      setFocus(a, false);
+    },
+
+    /* Both go through `writeSettingsLocal` (ADR-007): the seam is only auditable while it has one writer.
+       The old `updateSettings` wrote the key with its own `setItem`, which is what made "what lives in local
+       settings" a question answered by grep. */
     updateSettings: (p) => {
       useStore.setState((s) => ({ settings: { ...s.settings, ...p } }));
-      try {
-        localStorage.setItem("lc-settings", JSON.stringify(useStore.getState().settings));
-      } catch { /* ignore */ }
+      writeSettingsLocal(useStore.getState().settings as unknown as Record<string, unknown>);
       touch(a);
     },
 
     saveSettingsLocal: () => {
-      try {
-        localStorage.setItem("lc-settings", JSON.stringify(a.get().settings));
-        toast(a, "success", "Settings saved.");
-      } catch {
-        toast(a, "error", "Saving settings failed.");
-      }
+      const ok = writeSettingsLocal(a.get().settings as unknown as Record<string, unknown>);
+      toast(a, ok ? "success" : "error", ok ? "Settings saved." : "Saving settings failed.");
     },
 
     updateCanvas: (p) => {
@@ -263,9 +336,18 @@ function buildActions(a: EngineApi): Actions {
 
     runAll: () => void runPipeline(a),
     runOne: (id) => void runSingle(a, id),
+    runSelected: () => {
+      const ids = a.get().nodes.filter((n) => n.selected).map((n) => n.id);
+      if (!ids.length) { toast(a, "warn", "Select at least one node to run."); return; }
+      void runPipeline(a, { scope: ids, label: `Run selected (${ids.length})` });
+    },
+    runFromNode: (id) => void runPipeline(a, { scope: flowClosure(a.get(), id, "downstream"), label: "Run from this node downstream" }),
+    runUntilNode: (id) => void runPipeline(a, { scope: flowClosure(a.get(), id, "upstream"), label: "Run until this node" }),
     resume: () => void resumeRun(a),
     reject: () => rejectRun(a),
     stop: () => stopRun(a),
+    pause: () => pauseRun(a),
+    step: () => void stepRun(a),
     resetRun: () => resetExecution(a),
     chat: (id, text) => void sendChat(a, id, text),
     snapshot: () => void takeSnapshot(a, "Manual checkpoint"),

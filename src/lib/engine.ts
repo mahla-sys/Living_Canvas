@@ -5,8 +5,9 @@
 import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  validateAgainstSchema, parseOutputSchema,
+  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout,
   type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
+  type ModelRoute,
 } from "./core";
 import {
   FsAccessStorageAdapter, isFsAccessSupported, pickCanvasDirectory, ensurePermission,
@@ -18,7 +19,7 @@ import {
 } from "./portable";
 import {
   ROOT, CANVAS_ID, APP_VERSION, STRUCTURE_VERSION, buildSeed, emptyExecution, roleById,
-  makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc,
+  makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc, DEFAULT_LAYOUT,
   ROLE_SCHEMAS, schemaPathFor, makeRoleSchema,
   type AppState, type RFNode, type RFEdge, type TemplateSpec, type TemplateInfo,
 } from "../state";
@@ -123,6 +124,25 @@ function overviewMd(s: AppState): string {
   );
 }
 
+/**
+ * The single writer of `canvas.yaml` (ADR-009). Two triggers reach it — the 700 ms content save and the
+ * 500 ms layout drag — and that is the point: a second writer for the same file is how a canvas grows two
+ * truths about itself. `layout` is canvas content, so it is written here and read back by `hydrate`.
+ */
+export async function writeCanvasYaml(s: AppState): Promise<void> {
+  const lay = normalizeLayout(s.canvas.layout);
+  await storage.writeFile(`${ROOT}/canvas.yaml`, toYaml({
+    id: s.canvasId, title: s.canvas.title, created_at: s.canvas.created_at,
+    updated_at: nowIso(), owner: s.canvas.owner, default_model: s.canvas.default_model,
+    canvas_type: s.canvas.canvas_type, tags: s.canvas.tags,
+    template_id: s.canvas.template_id, template_version: s.canvas.template_version,
+    layout: {
+      leftWidth: lay.leftWidth, rightWidth: lay.rightWidth,
+      leftOpen: lay.leftOpen, rightOpen: lay.rightOpen,
+    },
+  }));
+}
+
 async function writeCore(s: AppState) {
   // no graph.json: the node/edge files are the graph, and a cache that can disagree with them is a bug
   // factory (Q3). state.json stays for what the files do not carry (outputs, chats, logs, snapshots).
@@ -139,12 +159,7 @@ async function writeCore(s: AppState) {
   await Promise.all([
     storage.writeJson(`${ROOT}/state.json`, state),
     storage.writeFile(`${ROOT}/canvas-overview.md`, overviewMd(s)),
-    storage.writeFile(`${ROOT}/canvas.yaml`, toYaml({
-      id: s.canvasId, title: s.canvas.title, created_at: s.canvas.created_at,
-      updated_at: nowIso(), owner: s.canvas.owner, default_model: s.canvas.default_model,
-      canvas_type: s.canvas.canvas_type, tags: s.canvas.tags,
-      template_id: s.canvas.template_id, template_version: s.canvas.template_version,
-    })),
+    writeCanvasYaml(s),
   ]);
 }
 
@@ -170,9 +185,26 @@ export function touch(api: EngineApi) {
   debouncedSave(api);
 }
 
+/**
+ * The panel-resize debounce: 500 ms, shorter than the content save because a drag should reach the file
+ * while the user still remembers moving it, and it writes only `canvas.yaml` (ADR-009). It rides the same
+ * `saveChain`, so a flush before Export or a reload waits for the layout too.
+ */
+const debouncedSaveLayout = debounce((api: EngineApi) => {
+  const s = api.get();
+  saveChain = saveChain.then(() => writeCanvasYaml(s)).catch(() => undefined);
+}, 500);
+
+/** Called at the end of a panel drag / toggle. State is already updated; this only schedules the file. */
+export function touchLayout(api: EngineApi) {
+  api.set({ saveState: "saving" });
+  debouncedSaveLayout(api);
+}
+
 /** Waits until every pending write has landed on the StorageAdapter. Export always calls this first. */
 export async function flushPending(): Promise<void> {
   debouncedSave.flush();
+  debouncedSaveLayout.flush();
   await saveChain;
 }
 
@@ -305,11 +337,12 @@ export async function testFallback(api: EngineApi) {
     toast(api, "info", "No key configured; the system runs on the internal simulator.");
     return;
   }
-  emit(api, "system", "fallback test: calling DeepSeek for real…");
+  const route = resolveModelRoute(s.settings.model, s.settings.model);
+  emit(api, "system", `fallback test: calling ${route.provider}/${route.model} for real…`);
   try {
-    const text = await askModel(s.settings.apiKey.trim(), s.settings.model, [
+    const text = await askModel(route, s.settings.apiKey.trim(), [
       { role: "user", content: "Answer in one word: hello" },
-    ]);
+    ], 16);
     emit(api, "system", `fallback test passed — model answered “${String(text).slice(0, 50)}”`);
     toast(api, "success", "DeepSeek connection is up ✓");
   } catch (err) {
@@ -444,13 +477,18 @@ export async function writeOutputs(api: EngineApi, nodeId: string, entries: Outp
 
 interface LlmMsg { role: "system" | "user" | "assistant"; content: string }
 
-async function askModel(apiKey: string, model: string, messages: LlmMsg[]): Promise<string> {
-  const res = await fetch("https://api.deepseek.com/chat/completions", {
+/**
+ * One provider call. The endpoint comes from `resolveModelRoute` (ADR-008) — the model a node names decides
+ * where the request goes — and `max_tokens` comes from that node's own `AgentConfig`, which used to be
+ * pinned at 900 here while the UI offered 4000. Both were controls that did not control anything.
+ */
+async function askModel(route: ModelRoute, apiKey: string, messages: LlmMsg[], maxTokens: number): Promise<string> {
+  const res = await fetch(route.endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: model || "deepseek-chat", messages, max_tokens: 900, temperature: 0.7 }),
+    body: JSON.stringify({ model: route.model, messages, max_tokens: maxTokens, temperature: 0.7 }),
   });
-  if (!res.ok) throw new Error(`DeepSeek API ${res.status}`);
+  if (!res.ok) throw new Error(`${route.provider} API ${res.status}`);
   const j = await res.json();
   const text = j?.choices?.[0]?.message?.content;
   if (!text) throw new Error("empty response from the model");
@@ -602,6 +640,29 @@ export async function endLedger(api: EngineApi, status: string, detail: string) 
 const FLOW_TYPES = ["flow", "event-flow", "blackboard"];
 
 /**
+ * The transitive closure of flow edges from one node, in one direction (ADR-012).
+ *
+ * It walks the same `FLOW_TYPES` that `computeOrder` respects on purpose: two definitions of "an edge that
+ * carries the run" would mean the scope and the order disagree, and a node would be queued that the closure
+ * never claimed — or left out of a run the reader explicitly asked for.
+ */
+export function flowClosure(s: AppState, fromId: string, direction: "downstream" | "upstream"): string[] {
+  const seen = new Set<string>([fromId]);
+  const walk = [fromId];
+  while (walk.length) {
+    const id = walk.pop()!;
+    for (const e of s.edges) {
+      if (!FLOW_TYPES.includes(e.data?.edgeType ?? "flow")) continue;
+      const next = direction === "downstream"
+        ? (e.source === id ? e.target : null)
+        : (e.target === id ? e.source : null);
+      if (next && !seen.has(next)) { seen.add(next); walk.push(next); }
+    }
+  }
+  return [...seen];
+}
+
+/**
  * Contract path matching (§9). An entry is one of:
  *   "outputs/node-002/"      a directory — everything under it
  *   "memory/agents/x.md"      an exact path
@@ -677,9 +738,22 @@ export function evalCondition(raw: string, ctx: Record<string, unknown>): CondRe
  * `cyclic` lists nodes whose flow edges form a cycle — they have no valid position, are queued last,
  * and the caller says so out loud instead of pretending they ran.
  */
-export function computeOrder(s: AppState, startId: string): { order: string[]; cyclic: string[] } {
+/**
+ * Topological order over the flow edges (ADR-012).
+ *
+ * `scope` narrows the run to a subset, and the rule for it is the whole point: an edge is only counted when
+ * *both* ends are inside the scope. So a scoped node whose predecessor was left out gets `indeg = 0` and runs
+ * first — which is exactly what "run from here" has to mean. Counting the outside edge instead would make the
+ * subset wait forever on a node nobody queued.
+ *
+ * Omitting `scope` gives the old behaviour exactly, which is why the 13 existing `computeOrder` tests are
+ * untouched.
+ */
+export function computeOrder(s: AppState, startId: string, scope?: readonly string[]): { order: string[]; cyclic: string[] } {
+  const inScope = scope ? new Set(scope) : null;
   const runnable = s.nodes
     .filter((n) => n.data.nodeType === "agent" || n.data.nodeType === "output-box")
+    .filter((n) => !inScope || inScope.has(n.id))
     .slice()
     .sort((a, b) => (a.data.created_at || "").localeCompare(b.data.created_at || "") || a.id.localeCompare(b.id));
   const ids = new Set(runnable.map((n) => n.id));
@@ -799,18 +873,20 @@ async function executeNode(api: EngineApi, nodeId: string) {
       await ledgerRow(api, { node: nodeId, tool: "read_output", status: "denied", detail: blockedReads.join(", ") });
     }
 
-    // step 4 — generation
+    // step 4 — generation. `agent.model` is the model that runs (ADR-008); `settings.model` is only the
+    // fallback for a node whose file predates the field or whose author left it empty.
+    const route = resolveModelRoute(agent?.model, api.get().settings.model);
     await appendLog(api, nodeId, agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey
-      ? `calling model ${api.get().settings.model}…`
+      ? `calling ${route.provider}/${route.model} (max_tokens ${agent?.max_tokens ?? 900})…`
       : "generating a response in the phase 1 simulator…");
     let fields: Record<string, string>;
     const required = agent?.context_contract.output_contract.required_fields ?? ["summary"];
     if (agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey) {
       try {
-        const text = await askModel(api.get().settings.apiKey, api.get().settings.model, [
+        const text = await askModel(route, api.get().settings.apiKey, [
           { role: "system", content: agent.system_prompt },
           { role: "user", content: `Canvas summary and memory:\n${memoryTxt.slice(0, 1200)}\n\nOutput of the previous node:\n${upstream.slice(0, 800)}\n\nWrite the output with these fields: ${required.join(", ")}.` },
-        ]);
+        ], agent.max_tokens);
         fields = { summary: text, ...simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner) };
       } catch (err) {
         await appendLog(api, nodeId, `API error: ${String(err)} — falling back to the simulator (§12.6 fallback)`);
@@ -937,6 +1013,11 @@ async function collectToBox(api: EngineApi, boxId: string) {
   await takeSnapshot(api, "final output collection", true);
 }
 
+/* Step mode. Module-scoped rather than a field on `execution`, because "run exactly one more" is a moment of
+   work (Law 3, ADR-009) and must not reach `state.json` — a flag that survived a reload would silently make
+   the next run stop after one node. */
+let stepOnce = false;
+
 async function processQueue(api: EngineApi) {
   while (true) {
     const ex = api.get().execution;
@@ -979,32 +1060,56 @@ async function processQueue(api: EngineApi) {
     else if (node.data.nodeType === "output-box") await collectToBox(api, nextId);
     else api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nextId] } }));
     touch(api);
+    /* Step mode stops here, at the node boundary, with that node's own output already written — which is the
+       whole point of pausing cooperatively (ADR-013). */
+    if (stepOnce) {
+      stepOnce = false;
+      api.set((st) => ({ execution: { ...st.execution, status: "paused" } }));
+      await ledgerRow(api, { node: nextId, tool: "step", status: "ok", detail: "one step — the run is now paused" });
+      emit(api, "run.paused", `one step executed (${nextId}) — the run is paused`);
+      toast(api, "info", "One step done — the run is paused.");
+      return;
+    }
   }
 }
 
-export async function runPipeline(api: EngineApi) {
+/**
+ * Run the pipeline. `opts.scope` narrows it to a subset (ADR-012); the scope lives in memory only and is
+ * recorded in the ledger, because "why did only these three run" has to be answerable from the files later.
+ */
+export async function runPipeline(api: EngineApi, opts?: { scope?: string[]; label?: string }) {
   const s = api.get();
   if (s.execution.status === "running" || s.execution.status === "waiting_approval") {
     toast(api, "warn", "A run is in progress; stop or approve it first.");
     return;
   }
-  const start = findStart(s);
+  /* An explicitly passed scope is a scope, including an empty one. Letting `[]` fall through to "run
+     everything" would turn "run nothing I selected" into the most destructive thing this function can do, and
+     the only caller that could hit it today guards first — which is exactly how such a fallback survives. */
+  const scoped = opts?.scope ? opts.scope : null;
+  if (scoped && !scoped.some((id) => getNode(s, id)?.data.nodeType === "agent")) {
+    toast(api, "error", "Nothing runnable in the selection — pick at least one agent node.");
+    return;
+  }
+  const start = (scoped ? s.nodes.find((n) => n.id === scoped[0] && n.data.nodeType === "agent") : null) ?? findStart(s);
   if (!start) {
     toast(api, "error", "No agent node to run.");
     return;
   }
-  const { order, cyclic } = computeOrder(s, start.id);
+  const { order, cyclic } = computeOrder(s, start.id, scoped ?? undefined);
   api.set({
     execution: {
       ...emptyExecution(), run_id: uid("run"), status: "running",
       queue: order, started_at: nowIso(),
     },
   });
-  await startLedger(api, `Full pipeline run from “${start.data.title}”.`);
+  await startLedger(api, opts?.label
+    ? `${opts.label} — from “${start.data.title}”. Scope: ${order.join(", ")}.`
+    : `Full pipeline run from “${start.data.title}”.`);
   if (cyclic.length)
     emit(api, "validation.failed", `flow edges form a cycle through ${cyclic.join(", ")} — no valid order exists for those nodes; they are queued last`);
-  emit(api, "run.started", `pipeline started from “${start.data.title}” — ${order.length} nodes queued`);
-  toast(api, "info", `Run started — ${order.length} nodes queued`);
+  emit(api, "run.started", `pipeline started from “${start.data.title}” — ${order.length} nodes queued${scoped ? " (scoped run)" : ""}`);
+  toast(api, "info", `${scoped ? "Scoped run" : "Run"} started — ${order.length} nodes queued`);
   await processQueue(api);
 }
 
@@ -1024,12 +1129,56 @@ export async function runSingle(api: EngineApi, nodeId: string) {
   touch(api);
 }
 
+/**
+ * Pause (ADR-013). Cooperative: this sets the status and returns, and the queue stops at the *next node
+ * boundary*. The node already running finishes and its output is written, because `run_id` is left alone —
+ * that is exactly how it differs from `stopRun`, which invalidates `run_id` and drops the in-flight node at
+ * its next guard. Both are needed: "finish this step" and "let go right now" are different asks.
+ */
+export function pauseRun(api: EngineApi) {
+  const ex = api.get().execution;
+  if (ex.status !== "running") { toast(api, "warn", "Nothing is running to pause."); return; }
+  stepOnce = false; // a queued step must not fire after the pause and stop the run one node early
+  api.set((st) => ({ execution: { ...st.execution, status: "paused" } }));
+  void ledgerRow(api, { node: ex.current_node_id ?? "—", tool: "pause", status: "ok", detail: "the user paused; the current node was allowed to finish" });
+  emit(api, "run.paused", "the run was paused — the current node finishes, then the queue stops");
+  toast(api, "info", "Pausing after the current node finishes…");
+}
+
+/**
+ * Step (ADR-013): run exactly one more node, then pause. From idle it starts the queue; from paused it
+ * continues it. Both end in `paused`, so repeated presses walk the pipeline one node at a time.
+ */
+export async function stepRun(api: EngineApi) {
+  const ex = api.get().execution;
+  if (ex.status === "running") { toast(api, "warn", "A run is already in progress."); return; }
+  if (ex.status === "waiting_approval") { toast(api, "warn", "A step is waiting for approval."); return; }
+  stepOnce = true;
+  if (ex.status === "paused" && ex.queue.length) {
+    api.set((st) => ({ execution: { ...st.execution, status: "running" } }));
+    await processQueue(api);
+    return;
+  }
+  // from idle or stopped: start a run that will stop after its first node
+  const s = api.get();
+  const start = findStart(s);
+  if (!start) { stepOnce = false; toast(api, "error", "No agent node to run."); return; }
+  const { order, cyclic } = computeOrder(s, start.id);
+  api.set({ execution: { ...emptyExecution(), run_id: uid("run"), status: "running", queue: order, started_at: nowIso() } });
+  await startLedger(api, `Stepping through the pipeline from “${start.data.title}”.`);
+  if (cyclic.length) emit(api, "validation.failed", `flow edges form a cycle through ${cyclic.join(", ")} — queued last`);
+  emit(api, "run.started", `stepping from “${start.data.title}” — ${order.length} nodes queued`);
+  await processQueue(api);
+}
+
 export async function resumeRun(api: EngineApi) {
   const ex = api.get().execution;
-  if (ex.status !== "waiting_approval") return;
+  // two ways to reach a stopped queue — a pause and an approval — and one way back out of it
+  if (ex.status !== "waiting_approval" && ex.status !== "paused") return;
+  const wasPaused = ex.status === "paused";
   api.set((st) => ({ execution: { ...st.execution, status: "running" } }));
-  emit(api, "run.resumed", "human approval recorded — the run continued");
-  toast(api, "success", "Approved — resuming the run…");
+  emit(api, "run.resumed", wasPaused ? "the paused run continued" : "human approval recorded — the run continued");
+  toast(api, "success", wasPaused ? "Resuming the run…" : "Approved — resuming the run…");
   await processQueue(api);
 }
 
@@ -1138,10 +1287,15 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
         role: m.role === "user" ? "user" as const : "assistant" as const,
         content: m.text,
       }));
-      reply = await askModel(settings.apiKey, settings.model, [
-        { role: "system", content: node.data.agent.system_prompt },
-        ...history,
-      ]);
+      reply = await askModel(
+        resolveModelRoute(node.data.agent.model, settings.model),
+        settings.apiKey,
+        [
+          { role: "system", content: node.data.agent.system_prompt },
+          ...history,
+        ],
+        node.data.agent.max_tokens
+      );
     } catch {
       toast(api, "warn", "Model unavailable; the reply was simulated.");
       reply = simChatReply(node.data.agent.role_id, node.data.title, text, api.get().memory.agents[nodeId]);
@@ -1496,7 +1650,14 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
     const mode = storageMode();
 
     api.set({
-      canvas: { ...api.get().canvas, ...(state?.canvas ?? {}), title: derived.canvasTitle ?? state?.canvas?.title ?? api.get().canvas.title },
+      canvas: {
+        ...api.get().canvas,
+        ...(state?.canvas ?? {}),
+        title: derived.canvasTitle ?? state?.canvas?.title ?? api.get().canvas.title,
+        /* the file wins (Law 1): `state.json` carries a copy of `canvas` for the cache's benefit, but
+           `layout` is canvas content, so `canvas.yaml` decides it. Absent key -> defaults, not hidden. */
+        layout: normalizeLayout(derived.layout ?? api.get().canvas.layout ?? DEFAULT_LAYOUT),
+      },
       memory,
       outputs: state?.outputs ?? {},
       chats: state?.chats ?? {},

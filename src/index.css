@@ -1,4 +1,10 @@
-@import "tailwindcss";
+/* Auto-detection is switched off and the sources named explicitly. Tailwind v4 otherwise scans every tracked
+   file in the repo, so a class name written in `docs/ARCHITECTURE.md` — or in a comment in a build script —
+   generated a real utility in the shipped stylesheet, which is how amber rules survived the removal of
+   amber from every component: nothing rendered them, and the CSS still carried them. */
+@import "tailwindcss" source(none);
+@source "../index.html";
+@source "../src";
 
 @theme {
   --font-display: "Space Grotesk", "Inter", ui-sans-serif, sans-serif;
@@ -18,8 +24,20 @@
   --color-ink-100: #dce5e1;
   --color-ink-50: #eef2ef;
 
+  /* ---- accent roles ---------------------------------------------------------
+     `lc-accent` and `lc-warn` are the two *roles* the interface paints with. They are separate tokens from the
+     palette steps precisely so a theme can re-map them: a `:root[data-theme="…"]` block that sets
+     `--color-lc-accent` changes every button, chip and focus ring at once. Before they existed, components
+     named the palette step directly in a utility class, and `--lc-accent` below was defined and read by
+     nobody, so "themable" was true of the background and false of every control on it.
+
+     `amber-lc` stays in the palette because it is still a *canvas data* colour: `NODE_COLORS.agent`, the
+     node-colour swatches and the stroke palette all write it into files (`nodes/<id>.md`, `strokes/<id>.json`).
+     No chrome uses it any more. */
+  --color-lc-accent: #b98bc2;
+  --color-lc-warn: #d9c9a3;
+  --color-jade: #5ecfa8;
   --color-amber-lc: #e8b04b;
-  --color-amber-deep: #c98f2b;
   --color-ember: #e06a4e;
   --color-sage: #8fbf7f;
   --color-sky-lc: #6fb3c7;
@@ -42,14 +60,16 @@
   --lc-text-bright: var(--color-ink-50);
   --lc-text-muted: var(--color-ink-300);
   --lc-text-dim: var(--color-ink-400);
-  --lc-accent: var(--color-amber-lc);
+  --lc-accent: var(--color-lc-accent);
+  --lc-accent-glow: color-mix(in srgb, var(--color-lc-accent) 60%, transparent);
+  --lc-warn: var(--color-lc-warn);
   --lc-danger: var(--color-ember);
 
   /* surfaces that are deliberately between two palette steps, so they are not derivable */
   --lc-bg-top: #0d1716;
   --lc-bg-mid: #0b1312;
   --lc-bg-bottom: #0d1817;
-  --lc-glow-amber: rgba(232, 176, 75, 0.07);
+  --lc-glow-accent: rgba(185, 139, 194, 0.08);
   --lc-glow-sky: rgba(111, 179, 199, 0.08);
   --lc-glow-sage: rgba(143, 191, 127, 0.04);
   --lc-card-top: #182826;
@@ -58,15 +78,24 @@
   --lc-dot: rgba(34, 56, 52, 0.25);
   --lc-minimap-mask: rgba(11, 19, 18, 0.82);
   --lc-fail-band: rgba(23, 13, 11, 0.95);
-  --lc-selection: rgba(232, 176, 75, 0.35);
-  --lc-ring-running: rgba(232, 176, 75, 0.5);
+  --lc-selection: color-mix(in srgb, var(--color-lc-accent) 35%, transparent);
+  --lc-ring-running: color-mix(in srgb, var(--color-lc-accent) 50%, transparent);
   --lc-ring-waiting: rgba(224, 106, 78, 0.45);
   --lc-code-bg: rgba(111, 179, 199, 0.12);
   --lc-code-line: rgba(111, 179, 199, 0.24);
-  --lc-warn-line: rgba(232, 176, 75, 0.42);
-  --lc-warn-bg: rgba(232, 176, 75, 0.08);
+  --lc-warn-line: color-mix(in srgb, var(--color-lc-warn) 42%, transparent);
+  --lc-warn-bg: color-mix(in srgb, var(--color-lc-warn) 8%, transparent);
   --lc-danger-line: rgba(224, 106, 78, 0.45);
   --lc-danger-bg: rgba(224, 106, 78, 0.08);
+}
+
+/* Botanical is the base palette, so everything it needs is already in `@theme` above — except the accent,
+   which is stated here anyway. One line of duplication buys a real property: `--color-lc-accent` is spelled
+   out once per theme, so "what is the accent under this theme" is a grep and not a chain of fallbacks, and
+   `scripts/check-palette.mjs` can measure both themes instead of inferring one of them. */
+:root[data-theme="botanical"] {
+  /* violet accent on a green-black ink ramp: hue 290 against hue 173, 117 degrees apart */
+  --color-lc-accent: #b98bc2;
 }
 
 /* Dark plum: the ink ramp re-tinted toward violet, every accent left alone — node colours are canvas
@@ -88,18 +117,33 @@
   --lc-bg-top: #1a1128;
   --lc-bg-mid: #120b1c;
   --lc-bg-bottom: #170f24;
-  --lc-glow-amber: rgba(232, 176, 75, 0.08);
+  --lc-glow-accent: rgba(94, 207, 168, 0.09);
   --lc-glow-sky: rgba(111, 179, 199, 0.07);
-  --lc-glow-sage: rgba(185, 139, 194, 0.07);
+  --lc-glow-sage: rgba(143, 191, 127, 0.07);
   --lc-card-top: #241a38;
   --lc-card-bottom: #1a1229;
   --lc-card-empty: rgba(23, 16, 37, 0.55);
   --lc-dot: rgba(61, 47, 88, 0.3);
   --lc-minimap-mask: rgba(18, 11, 28, 0.82);
   --lc-fail-band: rgba(30, 12, 14, 0.95);
+
+  /* Not plum. This theme's ink ramp is violet (hue 265), and a plum accent is hue 290 — 25 degrees apart,
+     which is why the interface read as one undifferentiated purple: the accent could not be told from
+     `ink-400`. Jade is hue 159, 106 degrees away, and still clears 10:1 on this background. The rule this
+     obeys is enforced by `scripts/check-palette.mjs`, not left to taste. */
+  --color-lc-accent: #5ecfa8;
 }
 
-html,
+/* `html` must have its OWN rule. Written as `html, body, #root { … }`, the bundler emitted the list as
+   `,body,#root{…}` — the `html` selector dropped and the leading comma left behind. A selector list starting
+   with a comma is invalid, and CSS error recovery discards the *whole* rule, so body and #root silently lost
+   `height: 100%` too. With no bounded height anywhere in the app, no `overflow-y: auto` container can ever
+   scroll: adding `min-h-0` to the scrollers fixed nothing, because the missing height was three levels up.
+   `scripts/check-css.mjs` fails the build if this is ever merged back into one rule. */
+html {
+  height: 100%;
+}
+
 body,
 #root {
   height: 100%;
@@ -133,7 +177,7 @@ body,
 /* ---------- layered workspace background ---------- */
 .lc-bg {
   background:
-    radial-gradient(900px 520px at 85% -10%, var(--lc-glow-amber), transparent 60%),
+    radial-gradient(900px 520px at 85% -10%, var(--lc-glow-accent), transparent 60%),
     radial-gradient(800px 600px at 8% 108%, var(--lc-glow-sky), transparent 62%),
     radial-gradient(600px 400px at 50% 50%, var(--lc-glow-sage), transparent 70%),
     linear-gradient(160deg, var(--lc-bg-top) 0%, var(--lc-bg-mid) 55%, var(--lc-bg-bottom) 100%);
@@ -151,8 +195,8 @@ body,
 
 @keyframes lc-pulse-ring {
   0% { box-shadow: 0 0 0 0 var(--lc-ring-running); }
-  70% { box-shadow: 0 0 0 14px rgba(232, 176, 75, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(232, 176, 75, 0); }
+  70% { box-shadow: 0 0 0 14px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 .anim-running {
   animation: lc-pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -345,7 +389,7 @@ body,
 .lc-menu-item:hover:not(:disabled) {
   background: var(--color-ink-850);
   border-color: var(--color-ink-600);
-  color: var(--color-amber-lc);
+  color: var(--color-lc-accent);
 }
 .lc-menu-item:disabled {
   opacity: 0.42;
@@ -408,7 +452,7 @@ body,
 .lc-import-warn {
   border: 1px solid var(--lc-warn-line);
   background: var(--lc-warn-bg);
-  color: var(--color-amber-lc);
+  color: var(--color-lc-warn);
   border-radius: 10px;
   padding: 8px 10px;
   font-size: 10.5px;
@@ -436,4 +480,41 @@ body,
   --xy-minimap-background-color: var(--lc-panel);
   --xy-minimap-mask-background-color: var(--lc-minimap-mask);
   --xy-background-color: transparent;
+}
+
+/* Neutral: an achromatic ramp, for a reader who wants the interface to disappear and the canvas to be the only
+   thing with colour on it. Every ink step has saturation exactly 0 — one blue-tinted "grey" in the ramp and the
+   theme stops being neutral in the way that matters, which is that the canvas colours stop competing with the
+   chrome. Because the ramp has no hue, separation cannot come from hue: the accent keeps its plum chroma
+   (0.28), and `scripts/check-palette.mjs` checks chroma rather than a hue gap for this theme. */
+:root[data-theme="neutral"] {
+  --color-ink-950: #0d0d0d;
+  --color-ink-900: #131313;
+  --color-ink-850: #1c1c1c;
+  --color-ink-800: #242424;
+  --color-ink-700: #303030;
+  --color-ink-600: #404040;
+  --color-ink-500: #636363;
+  --color-ink-400: #8a8a8a;
+  --color-ink-300: #b0b0b0;
+  --color-ink-200: #d2d2d2;
+  --color-ink-100: #ebebeb;
+  --color-ink-50: #f7f7f7;
+
+  --lc-bg-top: #161616;
+  --lc-bg-mid: #0d0d0d;
+  --lc-bg-bottom: #121212;
+  --lc-glow-accent: rgba(185, 139, 194, 0.09);
+  --lc-glow-sky: rgba(111, 179, 199, 0.06);
+  --lc-glow-sage: rgba(143, 191, 127, 0.06);
+  --lc-card-top: #242424;
+  --lc-card-bottom: #1a1a1a;
+  --lc-card-empty: rgba(19, 19, 19, 0.55);
+  --lc-dot: rgba(64, 64, 64, 0.3);
+  --lc-minimap-mask: rgba(13, 13, 13, 0.82);
+  --lc-fail-band: rgba(30, 12, 14, 0.95);
+
+  /* plum keeps working here: hue is meaningless against an achromatic ramp, and its chroma (0.28) is what
+     separates it from a grey `ink-400` */
+  --color-lc-accent: #b98bc2;
 }

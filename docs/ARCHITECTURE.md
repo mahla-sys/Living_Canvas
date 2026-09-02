@@ -136,8 +136,13 @@ back from disk would freeze the UI forever after a crash. Likewise `agent.status
 All I/O goes through `StorageAdapter` (9 methods, §3.1.4). No component or engine function calls
 `indexedDB`, `fetch`, `localStorage` or `showDirectoryPicker` directly — except `lib/fs-access.ts` (the
 adapter itself) and `engine`'s root-handle persistence, which are the two sanctioned seams.
-The third, since themes arrived, is `localStorage["lc-settings"]`: written only by `store.ts#saveSettingsLocal`
-and read by `defaultSettings()`. It is sanctioned because settings are **not canvas content** — an API key, an
+The third, since themes arrived, is `localStorage["lc-settings"]`, and since ADR-007 it is a seam in the
+strong sense: `readSettingsLocal` / `writeSettingsLocal` / `clearSettingsLocal` in `core.ts` are the only three
+functions that mention the key, and `main.tsx`, `state.ts#defaultSettings` and `store.ts` all go through them.
+(Before that it was a *sentence* rather than a contract — `updateSettings` had its own `setItem` and `main.tsx`
+its own `getItem`, so "what lives in local settings" was answered by grep. `settings-local.test.ts` holds it.)
+They live in `core` and not in `store` because `state.ts` sits below `store.ts` (Law 5) and `main.tsx` needs
+the theme before the first paint. Settings are sanctioned as browser storage at all because they are **not canvas content** — an API key, an
 owner name and a theme belong to the person at the keyboard, so they must not be exported with a bundle, must not
 appear in a folder diff, and must not be resurrected by `hydrate` (ADR-006). A seam that is named is auditable;
 a fourth one is not, and if a third kind of browser storage appears, it belongs behind the adapter instead.
@@ -164,26 +169,26 @@ instead of growing the exceptions.
 
 ```
 src/
-├── main.tsx                    114  L   boot, global error surface, React error boundary
-├── App.tsx                      59  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
-├── state.ts                    510  L   ★ constants, types re-exports, factories, role schemas, seed
-├── store.ts                    395  L   ★ zustand store + Actions façade (the only UI-facing API)
-├── index.css                   439  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
+├── main.tsx                    113  L   boot, global error surface, React error boundary
+├── App.tsx                      93  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
+├── state.ts                    541  L   ★ constants, types re-exports, factories, role schemas, seed
+├── store.ts                    477  L   ★ zustand store + Actions façade (the only UI-facing API)
+├── index.css                   520  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
-│   ├── core.ts                1026  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
-│   ├── engine.ts              2096  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
-│   ├── portable.ts             439  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
+│   ├── core.ts                1220  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
+│   ├── engine.ts              2257  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
+│   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             1712  L   126 tests in 9 files (§7)
+│   └── __tests__/             4120  L   270 tests in 22 files (§7)
 └── components/
-    ├── CanvasArea.tsx          794  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
-    ├── SidePanels.tsx          847  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx            793  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    ├── CanvasArea.tsx          827  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
+    ├── SidePanels.tsx          1148  L   ★ library/files tabs, file tree, live folder tree, inspector
+    ├── Overlays.tsx            986  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **9 310 lines** in 21 files (8 968 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **13 276 lines** in 36 files (12 756 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -202,7 +207,7 @@ decision that must not change behaviour (§10 Q3).
 
 # 3. Branches — one section per module
 
-## 3.1 `src/lib/core.ts` (1026 lines) — types, serialisers, storage, HTML safety, schemas
+## 3.1 `src/lib/core.ts` (1220 lines) — types, serialisers, storage, HTML safety, schemas
 
 No imports from inside the project. This is the only file allowed to know how a file looks on disk and how
 a folder is listed. Seven sections, in this order:
@@ -252,7 +257,9 @@ interface OutputEntry { file; type; description; content }        // one file in
 interface ChatMsg { role: "user"|"agent"|"system"; text: string; at: string }
 interface SnapshotMeta { id; at; label; node_count; edge_count; status }
 interface Stroke { id; canvas_id; tool: "pen"|"highlight"; color; width; points: {x,y}[]; author; created_at }
-interface Settings { provider: "sim"|"deepseek"; apiKey; model; owner; simDelay; backendUrl; workspaceRoot?: string|null }
+interface Settings { provider: "sim"|"deepseek"; apiKey; model; owner; simDelay; backendUrl;
+                     workspaceRoot?: string|null; theme: ThemeId; snapToGrid: boolean }
+                     // theme + snapToGrid are reader-scoped, so they live in lc-settings and not in canvas.yaml (ADR-006)
 interface ExecutionState { run_id; canvas_id; current_node_id; queue: string[]; completed: string[];
                            context: Record<string,unknown>;
                            status: "idle"|"running"|"paused"|"waiting_approval"|"completed"|"failed"|"stopped";
@@ -395,7 +402,7 @@ problem kills a node (`engine.validateAgainstContract`, §5.8 does). A malformed
 reported as the *schema's* failure (`“a” declares an invalid pattern in the schema`), not swallowed. Full format
 and ownership in §4.9.1.
 
-## 3.2 `src/state.ts` (510 lines) — constants, factories, role schemas, seed
+## 3.2 `src/state.ts` (541 lines) — constants, factories, role schemas, seed
 
 Pure data + construction; no behaviour, no async, no I/O (one exception: `defaultSettings()` reads
 `localStorage["lc-settings"]`, see debt §9.5).
@@ -407,7 +414,7 @@ Pure data + construction; no behaviour, no async, no I/O (one exception: `defaul
 | `memory` shape | `{ global, decisions, progress, user, agents: Record<nodeId, MemDoc> }` — the five documents of §6 legacy anchor |
 | `ui` shape | `{ leftTab:"palette"|"files", fileViewer, historyOpen, settingsOpen, chatNodeId, consoleOpen, portOpen }` |
 | `NODE_COLORS`, `NODE_TYPE_LABEL`, `PALETTE`, `MODELS` | presentation constants (palette cards: node/note/agent/output-box/pipeline-step/folder/shape) |
-| `ROLES: RoleDef[]`, `roleById(id)` | the 4 built-in roles: understander, risk-analyst, solution-designer, decision-maker — each with `default_output_contract` (format/required_fields/validator/save_to) and `default_context_contract`. `risk-analyst` requires a numeric `risk_score` field, which is what the seed's conditional edge reads — not a value the engine hardcodes |
+| `ROLES: RoleDef[]`, `roleById(id)` | the 4 built-in roles: understander, risk-analyst, solution-designer, decision-maker — each with `default_output_contract` (format/required_fields/validator/save_to) and `default_context_contract`. `risk-analyst` requires a numeric `risk_score` field, which is what a conditional edge like `{{ risk_score < 7 }}` reads — the value comes from the model's output, not from the engine. **The seed contains no edges at all** (`buildSeed` returns `edges: []`, §5.3); the condition is something the user draws |
 | `makeNodeData(type, title, owner, partial?)` | the single place a node's defaults are decided (also stamps `updated_at: nowIso()` — this is why tests project instead of deep-comparing) |
 | `makeEdgeData(partial?)`, `makeMemDoc(path,title,body,confidence,source)` | same, for edges/memories |
 | `makeAgentConfig(nodeId, roleId, opts?)` + `AgentConfigOverrides` | role defaults → a node's `AgentConfig`. `opts.context_contract` is merged **list by list**, because a caller that narrows `allowed_read_paths` must not silently drop `allowed_write_paths` or the output contract |
@@ -421,7 +428,7 @@ ship a five-node pipeline and register it as a template on first boot, which mea
 screenshot, and the "load a template" flow all pointed at fabricated data. `loadTemplates()` returns exactly
 what is in `library/templates/`, which for a new canvas is nothing.
 
-## 3.3 `src/store.ts` (395 lines) — zustand store and the `actions` façade
+## 3.3 `src/store.ts` (477 lines) — zustand store and the `actions` façade
 
 ```ts
 export const useStore = create<AppState & { actions: Actions }>()((set, get) => ({ ...initialState, actions }))
@@ -434,7 +441,7 @@ Two halves, and the discipline is the point:
    `touch(api)` afterwards refreshes the cache and the chips. Selection changes are the one class of change that
    touches no file. No other component may mutate a node/edge array — and this is why the two rows above exist:
    `touch` alone writes `state.json`, `canvas-overview.md` and `canvas.yaml`, never a node file.
-2. **The `actions` object** — the entire API the UI is allowed to call (58 members). Each is a two-line
+2. **The `actions` object** — the entire API the UI is allowed to call (66 members). Each is a two-line
    delegation: resolve `api = { get, set }`, forward to `engine`, done. Nothing in `actions` writes a file
    or builds a string itself.
 
@@ -446,6 +453,11 @@ Notable behaviour living here (small but load-bearing):
 - Storage/port actions (added with the portability work): `storageMode, flushSave, reloadFromDisk,
   attachFolder, detachFolder, exportJson, exportFolder, importFolder, importJsonFile, previewImport,
   commitImport, setPortOpen, openStorageFile`.
+- Layout actions (§6.1): `togglePanel(side)`, `resizePanel(side, width)`, `toggleFocusMode()`, plus the two
+  keyboard feeds `chordKey(key)` and `escapeKey()`. `resizePanel` clamps through `core.clamp` and calls
+  `touchLayout` — the store never writes a width to a file itself, and never trusts one.
+- `updateSettings` and `saveSettingsLocal` both go through `core.writeSettingsLocal` (ADR-007); neither calls
+  `localStorage.setItem` any more, which is what made the seam auditable instead of habitual.
 - `openStorageFile(path)` reads the file **through the adapter**, not from state, in folder mode — so the
   File Tree shows bytes on disk, including files the app did not write. `state.json` is previewable through the
   same path (it replaced the old `graph.json` preview, which showed a cache nobody should have to reason about).
@@ -453,39 +465,39 @@ Notable behaviour living here (small but load-bearing):
   tree builds `runs/` from `state.runs` (a projection of the folder, refreshed by `hydrate` and by each ledger
   open, §4.13).
 
-## 3.4 `src/lib/engine.ts` (2096 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (2257 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
 
 | section | exports (with line anchors) | contract |
 |---|---|---|
-| **events** | `emit(api,type,msg)` 33, `toast(api,kind,text)` 38 | `emit` builds a `BusEvent` through `bus` and prepends it to `state.events` (cap 250). `bus.on` currently has **zero subscribers** — it is the seam for SSE/plugins later (§10 ideas) |
-| **patching** | `getNode` 49, `patchNode(api,id,data,internal=false)` 56 | user edits are refused when `lock.status==="locked"` (§12.5); `internal=true` is how the executor itself writes |
-| **artifacts** | `writeNodeArtifact(api,id,quiet)` 76, `writeEdgeArtifact` 83, `appendLog` 92, `writeCanvasOverview` → `overviewMd` (private) 104 | one node = one file; `quiet` suppresses the event (used in bulk loops). `nodePath`/`edgePath` are the only path builders |
-| **saving** | `touch(api)` 168 (debounced 700 ms, flips `saveState`), `flushPending()` 174, `saveNow` (private) | every write sits on one promise chain so `flushPending` can await them all. Export calls it; `App.tsx` calls it
+| **events** | `emit(api,type,msg)` 34, `toast(api,kind,text)` 39 | `emit` builds a `BusEvent` through `bus` and prepends it to `state.events` (cap 250). `bus.on` currently has **zero subscribers** — it is the seam for SSE/plugins later (§10 ideas) |
+| **patching** | `getNode` 50, `patchNode(api,id,data,internal=false)` 57 | user edits are refused when `lock.status==="locked"` (§12.5); `internal=true` is how the executor itself writes |
+| **artifacts** | `writeNodeArtifact(api,id,quiet)` 77, `writeEdgeArtifact` 84, `appendLog` 93, `writeCanvasOverview` → `overviewMd` (private) 105 | one node = one file; `quiet` suppresses the event (used in bulk loops). `nodePath`/`edgePath` are the only path builders |
+| **saving** | `touch(api)` 183 (debounced 700 ms, flips `saveState`), `flushPending()` 205, `saveNow` (private) | every write sits on one promise chain so `flushPending` can await them all. Export calls it; `App.tsx` calls it
 on `visibilitychange:hidden` and `pagehide`, because a tab closed inside the 700 ms window used to swallow the last
 edit. `reloadFromDisk` does **not** flush — it refuses while `saveState === "saving"`, so a reload is never racing
 a write |
 | **memory** | `MemoryManager.read/write/list` 231 | conflict rule: incoming `confidence` must strictly exceed the stored one, else the old entry is kept and a `memory.updated` event explains it; equal weight → replaced + "ask the user later". A write into a locked node is refused. Writes are checked against `allowed_write_paths`; reads resolve **any** allowed path against the real tree |
-| **self-checks** | `testFallback` 301, `contractSelfTest` 323 | `contractSelfTest` = one allowed write + two attempted intrusions (global memory, another agent's memory) and reports in the console. This is the executable form of the context contract, and since `1.4` it also parses the role's declared schema file, naming in the event which dimension failed (a missing file, a bad JSON object, an unsupported keyword), so a broken contract is caught before a run instead of during one |
-| **outputs** | `FIELD_DESC` 372, `writeOutputs(api,nodeId,entries,shared)` 435 | writes `outputs/<node>/index.yaml` + one file per entry; `shared=true` puts it under `outputs/shared/<node>/` (used by the collection box) |
-| **contract enforcement** | `setNodeError` 389, `validateAgainstContract` 408 | the seam between "the model answered" and "the canvas accepted it": `required_fields` must be non-empty, and a named `validator` must be a file under `library/schemas/`, present in the canvas, one parseable JSON object, and satisfied by these fields (§4.9.1, §5.8). Returns messages; the caller decides. `setNodeError` is the only writer of `execution.errors`, so the reason appears on the card exactly as often as it exists |
-| **LLM** | `askModel` (private) 447, `simFields` (private) 462, `buildEntries` 494 | `buildEntries` turns validated fields into output files (it filters to what is present; it no longer *decides* validity — that is the row above). provider `sim` returns templated, plausible phase-1 answers; `deepseek` POSTs to the configured endpoint and falls back to `sim` on any error (§12.6). `throw` on an empty response |
-| **tools** | `TOOL_NAMES` 527, `hasTool` 531, `unknownTools` 538 | the vocabulary an agent may act through. `get_canvas_overview`/`get_agent_brief` are the harness (always on); every other name must be in `agent.tools`, or the step is skipped (`read_memory`, `write_memory`), the node fails (`write_output`), or the chat is refused (`chat_with_user`). `unknownTools` names what this app cannot run, so the log says so instead of pretending |
-| **run ledger** | `startLedger` 554, `ledgerRow` 570, `endLedger` 591 | `runs/<run-id>.md`, one row per step: read-modify-write so a reload extends the same file, capped at 300 rows, closed with `**run completed/stopped/rejected**`. Format: §4.13 |
-| **execution** | `findStart` 713, `executeNode` 720, `runPipeline` 985, `runSingle` 1011, `resumeRun` 1027, `rejectRun` 1036, `stopRun` 1044, `resetExecution` 1060 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node. `execution.errors` is written only by `setNodeError` — cleared at `node.started`, set by a contract refusal or by the generic catch |
-| **contract matching** | `isPathAllowed` 615, `numericScope` 626, `evalCondition` 644 | one matcher for `allowed_read_paths` and `allowed_write_paths`: a directory entry (trailing `/`), an exact path, or a glob over **one** segment (`outputs/*/summary.md`). `evalCondition` is fail-closed and returns `{ ok, reason }` — see §5.8. `numericScope` lifts a node's numeric output fields into `execution.context`, so a condition reads data, not prose |
-| **chat** | `sendChat(api,nodeId,text)` 1104 | appends to `chats/chat-<id>.md`; the simulated replies are per-role. A node without `chat_with_user` in `tools` still gets the user's message recorded, followed by an explicit refusal line — the gate stops the *reply*, never the record |
-| **snapshots** | `takeSnapshot(api,label,quiet)` 1165, `restoreSnapshot(api,id)` 1186 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
-| **strokes** | `clusterStrokes(strokes,gap=80)` 1230, `addStroke` 1267, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1299 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
-| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1326, `deleteNode` 1359, `createEdge` 1379, `deleteEdge` 1391 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
-| **loaders** | `loadStrokes` 1401, `loadTemplates` 1420, `pickMemory` (private) 1450 (the memory reads), `loadRunIds` 1440, **`hydrate(api)`** 1470 | `hydrate` is the heart — see §5.2. It has one branch now: files first, `state.json` for the slices the tree does not carry, and `loadRunIds` to project `runs/` into `state.runs` for the file tree. `loadTemplates` starts from `[]` — there is no built-in template to prepend, in this file or anywhere |
-| **workspace** | `seedWorkspace(api)` 1526, `initWorkspace(api)` 1594, `reloadFromStorage` 1610, `resetWorkspace` 1624 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds. The seed writes the four role files, the two shapes and the four `library/schemas/*.json`, and nothing else: one note, no edges, no template, no `graph.json` (§5.3) |
-| **templates/roles** | `saveTemplate(api,name)` 1643, `loadTemplate(api,id)` 1699, `saveRoleFromNode(api,nodeId)` 1758 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
-| **portability** | `applyRootHandle` 1845, `attachWorkspaceFolder` 1859, `detachWorkspaceFolder` 1876, `pickCanvasFolder` 1887, `exportBundleText` 1909, `exportToJsonFile` 1924, `exportToFolder` 1940, `ImportPreview` 1961, `previewImportText` 1994, `applyImport` 2001, `importFromText` 2031, `importFromFolder` 2040, `importFromFile` 2070, `maybeResumeWorkspace` 2081 | see §5.5-§5.8. `applyImport` deletes a legacy `graph.json` from the incoming file map before installing anything, emits why, and lets `hydrate` rebuild from the files — the bundle's cache never becomes the canvas |
+| **self-checks** | `testFallback` 333, `contractSelfTest` 356 | `contractSelfTest` = one allowed write + two attempted intrusions (global memory, another agent's memory) and reports in the console. This is the executable form of the context contract, and since `1.4` it also parses the role's declared schema file, naming in the event which dimension failed (a missing file, a bad JSON object, an unsupported keyword), so a broken contract is caught before a run instead of during one |
+| **outputs** | `FIELD_DESC` 405, `writeOutputs(api,nodeId,entries,shared)` 468 | writes `outputs/<node>/index.yaml` + one file per entry; `shared=true` puts it under `outputs/shared/<node>/` (used by the collection box) |
+| **contract enforcement** | `setNodeError` 422, `validateAgainstContract` 441 | the seam between "the model answered" and "the canvas accepted it": `required_fields` must be non-empty, and a named `validator` must be a file under `library/schemas/`, present in the canvas, one parseable JSON object, and satisfied by these fields (§4.9.1, §5.8). Returns messages; the caller decides. `setNodeError` is the only writer of `execution.errors`, so the reason appears on the card exactly as often as it exists |
+| **LLM** | `askModel` (private) 485, `simFields` (private) 500, `buildEntries` 532 | `buildEntries` turns validated fields into output files (it filters to what is present; it no longer *decides* validity — that is the row above). provider `sim` returns templated, plausible phase-1 answers; `deepseek` POSTs to the configured endpoint and falls back to `sim` on any error (§12.6). `throw` on an empty response |
+| **tools** | `TOOL_NAMES` 565, `hasTool` 569, `unknownTools` 576 | the vocabulary an agent may act through. `get_canvas_overview`/`get_agent_brief` are the harness (always on); every other name must be in `agent.tools`, or the step is skipped (`read_memory`, `write_memory`), the node fails (`write_output`), or the chat is refused (`chat_with_user`). `unknownTools` names what this app cannot run, so the log says so instead of pretending |
+| **run ledger** | `startLedger` 592, `ledgerRow` 608, `endLedger` 629 | `runs/<run-id>.md`, one row per step: read-modify-write so a reload extends the same file, capped at 300 rows, closed with `**run completed/stopped/rejected**`. Format: §4.13 |
+| **execution** | `findStart` 787, `executeNode` 794, `runPipeline` 1080, `runSingle` 1116, `resumeRun` 1174, `rejectRun` 1185, `stopRun` 1193, `resetExecution` 1209 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node. `execution.errors` is written only by `setNodeError` — cleared at `node.started`, set by a contract refusal or by the generic catch |
+| **contract matching** | `isPathAllowed` 676, `numericScope` 687, `evalCondition` 705 | one matcher for `allowed_read_paths` and `allowed_write_paths`: a directory entry (trailing `/`), an exact path, or a glob over **one** segment (`outputs/*/summary.md`). `evalCondition` is fail-closed and returns `{ ok, reason }` — see §5.8. `numericScope` lifts a node's numeric output fields into `execution.context`, so a condition reads data, not prose |
+| **chat** | `sendChat(api,nodeId,text)` 1253 | appends to `chats/chat-<id>.md`; the simulated replies are per-role. A node without `chat_with_user` in `tools` still gets the user's message recorded, followed by an explicit refusal line — the gate stops the *reply*, never the record |
+| **snapshots** | `takeSnapshot(api,label,quiet)` 1319, `restoreSnapshot(api,id)` 1340 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
+| **strokes** | `clusterStrokes(strokes,gap=80)` 1384, `addStroke` 1421, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1453 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
+| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1480, `deleteNode` 1513, `createEdge` 1533, `deleteEdge` 1545 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
+| **loaders** | `loadStrokes` 1555, `loadTemplates` 1574, `pickMemory` (private) 1604 (the memory reads), `loadRunIds` 1594, **`hydrate(api)`** 1624 | `hydrate` is the heart — see §5.2. It has one branch now: files first, `state.json` for the slices the tree does not carry, and `loadRunIds` to project `runs/` into `state.runs` for the file tree. `loadTemplates` starts from `[]` — there is no built-in template to prepend, in this file or anywhere |
+| **workspace** | `seedWorkspace(api)` 1687, `initWorkspace(api)` 1755, `reloadFromStorage` 1771, `resetWorkspace` 1785 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds. The seed writes the four role files, the two shapes and the four `library/schemas/*.json`, and nothing else: one note, no edges, no template, no `graph.json` (§5.3) |
+| **templates/roles** | `saveTemplate(api,name)` 1804, `loadTemplate(api,id)` 1860, `saveRoleFromNode(api,nodeId)` 1919 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
+| **portability** | `applyRootHandle` 2006, `attachWorkspaceFolder` 2020, `detachWorkspaceFolder` 2037, `pickCanvasFolder` 2048, `exportBundleText` 2070, `exportToJsonFile` 2085, `exportToFolder` 2101, `ImportPreview` 2122, `previewImportText` 2155, `applyImport` 2162, `importFromText` 2192, `importFromFolder` 2201, `importFromFile` 2231, `maybeResumeWorkspace` 2242 | see §5.5-§5.8. `applyImport` deletes a legacy `graph.json` from the incoming file map before installing anything, emits why, and lets `hydrate` rebuild from the files — the bundle's cache never becomes the canvas |
 
-## 3.5 `src/lib/portable.ts` (439 lines) — the bundle and the file-first rebuild
+## 3.5 `src/lib/portable.ts` (444 lines) — the bundle and the file-first rebuild
 
 Imported by `engine` and `store`; imports only `core` and `state` (deliberate: `engine` must not be a
 dependency of the thing that reads its files). Three responsibilities:
@@ -531,14 +543,14 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 2 442 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 3 082 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
-| `CanvasArea.tsx` 794 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
-| `SidePanels.tsx` 839 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
-| `Overlays.tsx` 753 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
+| `CanvasArea.tsx` 827 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
+| `SidePanels.tsx` 1148 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
+| `Overlays.tsx` 986 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
 
 ---
@@ -554,7 +566,7 @@ export→import byte-for-byte will tell you.
 ```
 canvases/nexus-edu-001/
 ├── manifest.json            identity + versions; hydrate refuses a canvas without it
-├── canvas.yaml              canvas metadata (title/owner/type/tags)
+├── canvas.yaml              canvas metadata (title/owner/type/tags) + `layout:` panel widths (§6.1, ADR-009)
 ├── canvas-overview.md       the summary agents read first (frontmatter + prose)
 ├── nodes/<node-id>.md       one file per node            §4.2
 ├── edges/<edge-id>.yaml     one file per edge            §4.3
@@ -896,8 +908,11 @@ Rules a reader needs:
 
 ## 4.12 What is *not* in a file (and why that is fine)
 
-`events` (250 last lines of the console), `toasts`, `ui.*`, `typing`, `bootLines`, the `saveState` chip.
-They are session-local by definition. If you ever need to persist one of them, it becomes a file and the
+`events` (250 last lines of the console), `toasts`, `ui.*`, `typing`, `bootLines`, the `saveState` chip — and,
+since the layout system, `ui.focusMode` explicitly (§6.1: a moment of work, not a setting).
+They are session-local by definition. `ui.*` is the one with a trap in it: panel widths *look* like the same
+kind of thing and are not — they are canvas content in `canvas.yaml` (ADR-009), so `ui` holds the moments and
+`canvas.layout` holds the shape. If you ever need to persist one of them, it becomes a file and the
 tests for `deriveCanvasFromFiles` must be updated — that is the intended friction.
 
 ---
@@ -1019,7 +1034,7 @@ edits" button and refuses to run while a save is in flight (so a half-written ed
 <input type=file> → readFileAsText → previewImportText(api, text)
    parseBundleText → { ok, files, canvasId, title, skipped[] } → deriveCanvasFromFiles(files)
    ImportPreview { name, canvasId, title, bytes, fileCount, nodes, edges, skipped[], warning? }
-   UI shows: file, canvas id (amber if it differs from the current one), node/edge counts,
+   UI shows: file, canvas id (warn-toned if it differs from the current one), node/edge counts,
              skipped list with reasons, "Replace the whole current canvas" checkbox
 user confirms → commitImport → engine.applyImport(api, files, { replace })
    replace ? storage.clear() (canvas-scoped) : merge
@@ -1095,16 +1110,24 @@ appearance goes there, a mechanism that makes it renderable goes here.
 
 Direction: **LTR**, English only. Fonts: Inter (body), Space Grotesk (display), IBM Plex Mono (paths, ids,
 numbers). Palette is defined once as Tailwind v4 `@theme` tokens in `src/index.css` — 12 ink shades
-(`ink-50` lightest → `ink-950` background) plus 7 accents:
+(`ink-50` lightest → `ink-950` background) plus accents. **Two of them are roles, not palette steps** (ADR-010):
+a theme re-maps the roles and leaves the data colours alone, which is what makes a third theme one CSS block
+instead of a search-and-replace across three components.
 
-| token | hex | used for |
+| token | hex (botanical) | used for |
 |---|---|---|
-| `amber-lc` / `amber-deep` | `#e8b04b` / `#c98f2b` | primary action, agent nodes, the living-canvas dot |
+| **`lc-accent`** (role) | `#b98bc2` · plum: `#cfa6da` | primary action, focus rings, the living-canvas mark, flow edges, running status |
+| **`lc-warn`** (role) | `#d9c9a3` | warning text and toasts — deliberately *not* the accent, so a warning never reads as a call to action |
 | `ember` | `#e06a4e` | danger, errors, delete affordances |
 | `sage` | `#8fbf7f` | success, output boxes, live-folder chip |
 | `sky-lc` | `#6fb3c7` | info, notes, backend/http mode |
 | `plum` | `#b98bc2` | built-in badges, pipeline steps, "convert" |
 | `sand` | `#d9c9a3` | folders |
+| `amber-lc` | `#e8b04b` | **canvas data only** — `NODE_COLORS.agent`, the node-colour swatches, the stroke palette. No chrome paints it; re-tinting it would rewrite graphs people have drawn (ADR-010) |
+
+`check-palette.mjs` measures both themes against seven roles per theme and prints the ratios; it also scans
+`src/main.tsx`, where a hex is legal only as the fallback of a `var()` — the crash panel is the one place a
+bare `var()` is unsafe, because the stylesheet may be the thing that failed to load.
 
 Layout (`App.tsx`, LTR order):
 
@@ -1120,10 +1143,55 @@ Layout (`App.tsx`, LTR order):
 │ Files    │   · approval banner (top centre)      │  edge      │
 │          │   · draw toolbar (bottom centre)      │  canvas    │
 │          │   · ActivityConsole (collapsible)      │            │
-└──────────┴──────────────────────────────────────┴────────────┘
+├──────────┴──────────────────────────────────────┴────────────┤
+│ StatusBar 22px: title · counts · mode  │  run · save · panels│
+└──────────────────────────────────────────────────────────────┘
  floating: ChatPanel (right, above the inspector) · FileViewer · HistoryModal
            SettingsModal · PortModal · Toasts (bottom centre) · BootOverlay
 ```
+
+The panel edges are draggable (`ResizeHandle` in `SidePanels.tsx`) and the two widths come from
+`canvas.layout` — see §6.1.
+
+### 6.1 The layout system (ADR-009, `docs/patterns/layout-system.md`)
+
+Three parts, and the interesting question is which of them is *data*.
+
+| thing | where it lives | why |
+|---|---|---|
+| `leftWidth` / `rightWidth` (`PANEL_MIN` 200 … `PANEL_MAX` 520) | `canvas.yaml` under `layout:` | how wide the inspector is on *this* graph is part of how the graph is read, exactly like `position` |
+| `leftOpen` / `rightOpen` | `canvas.yaml` under `layout:` | same; a collapsed panel is a reading choice the next reader should inherit |
+| focus mode | `ui.focusMode`, memory only | a moment of work, like `lock` (Law 3). Written to a file it would make the next reader open somebody else's concentration |
+| the status strip | nothing — it is pure chrome | 22px (`STATUS_BAR_HEIGHT`), read-only, no setting |
+
+Flows:
+
+```
+drag the panel edge → ResizeHandle onPointerMove → actions.resizePanel(side, w)
+   → core.clamp(w, PANEL_MIN, PANEL_MAX)         // the file is the contract, so the clamp is at the door
+   → state moves immediately (the panel follows the pointer)
+   → touchLayout(api)                            // debounce 500 ms → writeCanvasYaml(api)
+release → nothing more happens; the write already fired 500 ms after the last move
+
+Ctrl+K Z  → actions.chordKey("k") then ("z")  → core.createChord(["k","z"]) completes → setFocus(!focus)
+Escape ×2 → actions.escapeKey()               → core.createDoubleTap(400) reports the 2nd → setFocus(false)
+```
+
+Four rules worth naming:
+
+- **One writer for `canvas.yaml`.** `writeCanvasYaml(s)` is called by `writeCore` (the 700 ms content save) and
+  by `touchLayout` (the 500 ms layout save). Two triggers, one function — a second writer for the same file is
+  how a canvas grows two truths about itself. Both ride `saveChain`, so `flushPending()` waits for the layout
+  too, and Export cannot ship a canvas whose widths are 500 ms stale.
+- **`hydrate` reads the layout from the file and from nowhere else.** `deriveCanvasFromFiles` returns
+  `layout: CanvasLayout | null`; a missing `layout:` key means *defaults*, not hidden panels — so a folder from
+  before this feature opens with both panels visible.
+- **`normalizeLayout` is the only door.** Widths are clamped, `false` is the only way to be closed, and a
+  non-number is absent rather than zero. A hand-edited `canvas.yaml` with `leftWidth: 9000` comes back at 520.
+- **The keyboard sequences are pure functions**, so the shortcuts are tested without a DOM (`layout.test.ts`).
+  A half-pressed chord lives in a module-level instance in `store.ts`, not in a component — a re-render must
+  not forget that Ctrl was already pressed. Only `k`, `z` (while the chord is half-pressed) and `Escape` are
+  ever fed, so typing on the canvas and `Ctrl+Z` undo are untouched.
 
 Selector discipline (this is a real constraint, not style): zustand + `useSyncExternalStore` means a
 selector returning a fresh array/object re-renders forever. Every empty fallback uses `EMPTY_ARR`
@@ -1191,7 +1259,15 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **9 files, 126 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **22 files, 270 tests**, no config file (vitest reads `vite.config.js`).
+
+**On jsdom, a reversal worth stating plainly.** This section used to say the suite runs with no jsdom, and
+called that a principle. It was not one — it was a limitation dressed as a rule, and three bugs got through
+it: a `/* … */` written in JSX *children* (which renders as literal text) replaced the canvas with four lines
+of prose about `min-h-0`; four scrollers had `overflow-y: auto` with no `min-h-0` and nothing scrolled; the
+Settings modal had no scroll container at all. Every one of them passes typecheck and every unit test, because
+none is a logic error — they are only visible once something is mounted. jsdom is now loaded, **per file**, by
+a `@vitest-environment jsdom` docblock: the 193 data-layer tests still run in node, untouched.
 Every test runs the **production** functions — no re-implementations. `src/lib/test-helpers.ts` exists so a
 test cannot accidentally grow its own serialiser (that is how a fixture hides a bug).
 
@@ -1205,6 +1281,17 @@ test cannot accidentally grow its own serialiser (that is how a fixture hides a 
 | `execution.test.ts` | 37 | the run rules: `evalCondition` fail-closed (unsatisfied / unknown variable / unparsable / non-numeric data / string compare), `numericScope`, `isPathAllowed` (dir, exact, one-segment glob, no neighbour leakage), `computeOrder` (diamond, disconnected, cycle, parallel edges, determinism, mid-graph start), `hasTool`/`unknownTools`; plus `runPipeline` end to end on a two-agent graph — an ungranted upstream path is not read, `write_output` missing makes the node fail with no output files, a conditional edge skips the node and logs the reason, the run ledger is written row by row and closed, and `MemoryManager.read` returns a granted `outputs/` file. The last group is the contract *enforced*: a score outside the schema's range fails the node with the reason in `execution.errors`, nothing lands in `outputs/`, the log and the ledger both record `rejected`; a schema file that is missing, outside `library/schemas/`, not one JSON object, or built from an unsupported keyword is refused before it can pass anything; and `validator: null` opts out of all of it — on purpose, with the cost asserted in the same test |
 | `store-write.test.ts` | 5 | the two paths that used to stop at the store: `Delete` on a node must delete `nodes/<id>.md` (and cascade its edges, exactly as the inspector button does), a run-locked node must survive both the change and the files with a toast that says why, and a drag end must land in the node file — while a drag still in progress must not touch the disk |
 | `theme.test.ts` | 3 | the settings half of appearance: every registered theme has a label and a hint, and `defaultSettings()` refuses an unregistered id, a corrupt blob and a truthy-not-boolean `snapToGrid` (a theme that selects nothing, or a document change that was not asked for, are both worse than the default). The colour half is in `scripts/check-palette.mjs`, because a test that reads `node:fs` does not belong inside `src/` |
+| `layout.test.ts` | 18 | the layout system (§6.1, ADR-009): `normalizeLayout` clamps a hand-edited `canvas.yaml` (absurd widths, the string `"300"`, a missing key meaning *open*, garbage without throwing); `writeCanvasYaml` → `hydrate` round-trips the widths; a canvas with no `layout:` key hydrates to the defaults; **`hydrate` leaves focus mode off and nothing in the tree mentions focus**; and the two keyboard machines as pure functions — a chord that restarts on a wrong key, expires after 1500 ms and is case-insensitive, a double tap that forgets itself after it fires |
+| `layout-render.test.ts` | 9 | the layout chrome *renders*: `renderToStaticMarkup` on the real `StatusBar`, `LeftPanel` and `RightPanel`. It proves the strip mounts at `STATUS_BAR_HEIGHT`, both panels take their width from `canvas.layout` (the old `w-[268px]`/`w-[292px]` utilities are asserted gone), the handle sits on the inner edge as a `role="separator"`, and the focus-mode way out is not offered before focus mode is on. It also pins the scroll contract on the
+rendered HTML: both panels carry `min-h-0` *and* `overflow-y-auto`, because `overflow-y-auto` alone is exactly
+the shape of the bug — a flex item's `min-height: auto` keeps it at content height so the scroller never
+engages, nothing throws, and a long file tree is quietly cut off. Removing `min-h-0` fails two of these tests.
+**Its limit is in the file**: zustand v5 gives `renderToStaticMarkup` the store's *initial* state, so state-driven behaviour is asserted in `interactive.test.tsx` instead |
+| `model-route.test.ts` | 13 | `resolveModelRoute` (ADR-008): the provider comes from the model name, `ollama:` is stripped before the request, an empty model falls back to the global setting, and the function is pure. Then the half that matters: **`sendChat` is run against a stubbed `fetch`** and the request body is asserted to carry the node's own model and the node's own `max_tokens` — the test that fails if `agent.model` becomes a label again. Last: every entry of `MODELS` routes somewhere real, and the shipped list is pinned so a model with no endpoint does not come back |
+| `settings-local.test.ts` | 15 | Law 4's third seam as a contract (ADR-007): `readSettingsLocal` returns `null` for nothing stored, a corrupt blob, a JSON array, no `localStorage` at all, and a storage that throws on *access*; `writeSettingsLocal` **merges rather than replaces** and reports `false` instead of throwing; `clearSettingsLocal` is safe twice; and `defaultSettings` reads through the seam, rejecting an unregistered theme and a truthy-but-not-true `snapToGrid` |
+| `pipeline.test.ts` | 8 | a four-agent pipeline (`u → r → d → m`) run through `engine` + the store, with no browser: a conditional edge lets `d` through on the score `r` produced and blocks `m` on the same score. Asserts the aftermath rather than the exit code — every completed agent's output is a real file under `outputs/<node>/` while the blocked one has no directory at all; `runs/<run-id>.md` exists and carries a `blocked` row explaining the skip; every lock is released and no node is left `running`; a second run over the *same* storage is not blocked by the first one's locks. The second group answers "`agent.model` really reaches the provider" with a stubbed `fetch`: one node routes to `http://127.0.0.1:11434/v1/chat/completions` as `llama3.2` and another to `https://api.deepseek.com/chat/completions` as `deepseek-reasoner` in the same run, an empty model falls back to the canvas default, and `provider: "sim"` keeps the machine offline on purpose |
+| `interactive.test.tsx` | 12 | **jsdom**, real components against the real store with real DOM events — the layer that catches what no unit test can. Panels open and close, focus mode hides both, the status strip offers the way out only once focus mode is on; every scroller carries `min-h-0` *and* an overflow (asserting the overflow alone passes on the broken markup); the chat panel's close button exists, is labelled, has `shrink-0`, and closes it, and the panel sits at `rightWidth + 14` rather than a hardcoded 306; selecting a node puts its title and its own file path in the inspector; every registered theme is clickable in Settings; and no component leaks its own comments into the page. Each of the three bugs above was mutation-tested back in and fails exactly one of these |
+| `boot.test.ts` | 4 | boot, measured instead of guessed: a counting adapter reports the storage operations, because in a browser every one of them is an IndexedDB round-trip and the count is the part that transfers. A warm boot is ~4 ms over 12 operations and writes nothing; a cold boot is 22 operations, dominated by writes, and its wall-clock cost is `sleep(46)` pacing the boot overlay one file at a time rather than I/O. A budget of 40 operations and 6 directory listings is the regression guard, and boot is asserted not to touch the network when no backend is configured |
 | `hydrate.test.ts` | 11 | the real `hydrate()` against `MemoryStorageAdapter`: no manifest → `false` and nothing deleted; custom template found after reload; several templates + neighbouring files; files-only mode builds the canvas; locked node not restored; **a `graph.json` left in the folder is inert** (positions and text both come from the node file); broken `state.json` tolerated; the adapter in play is the adapter read (no stale cache between tests); `seedWorkspace` writes the four role files + the four schemas, no `graph.json`, one start-here note and no edges; an imported bundle loses its `graph.json` and says so |
 
 Rules for adding a test:
@@ -1264,8 +1351,14 @@ demo pipeline and a fake built-in template made a fresh canvas look like someone
 npm dependencies and a 40 MB tracked snapshot; nothing that ran automatically (the CI definition now exists at
 `ci/github-actions.yml` but is not wired up yet — §11.3).
 
-1. **`askModel` still hardcodes the endpoint and the sampling budget** (`https://api.deepseek.com/chat/completions`,
-   `max_tokens: 900` while `AgentConfig`/UI carry 4000). More structurally: the model does not *choose* tools — the
+1. **The provider table has two rows and only one of them has been exercised end to end.** `resolveModelRoute`
+   (ADR-008) derives the endpoint from the model name: `ollama:` → a local OpenAI-compatible Ollama, everything
+   else → DeepSeek. `agent.model` and `agent.max_tokens` are now real inputs (`model-route.test.ts` stubs `fetch`
+   and asserts both reach the request body), so the inspector's model dropdown is no longer a label. What is
+   *not* done: only the DeepSeek path has a key and has actually been called; Ollama is a standard endpoint with
+   no service behind it in CI. And a model that has no endpoint must leave `MODELS` rather than 400 into the
+   simulator — which is why `glm-4-flash` was removed (`docs/decisions/adr-008-agent-model-selects-the-model.md`).
+   More structurally: the model does not *choose* tools — the
    executor walks the six steps and `agent.tools` only decides which of them are permitted. Function calling means
    handing `TOOL_NAMES` to the provider as JSON-schema tools and looping on the calls it returns; the gate it needs
    is already in place (`hasTool`), so this is now an additive change rather than a rewrite.
@@ -1342,7 +1435,7 @@ second graph to click. Cost measured: a boot that lists `nodes/*.md`; the seed's
 milliseconds, and if a few hundred nodes ever makes that slow the answer is a derived index that is *rebuilt*,
 never a second truth.
 
-**Q4 — How far should `core.ts` stay one file?** 998 lines holding types, YAML, HTML safety, the output-schema subset and four
+**Q4 — How far should `core.ts` stay one file?** 1220 lines holding types, YAML, HTML safety, the output-schema subset and four
 adapters. It is honest today (one place where file shapes are decided) and it will hurt at ~1.5k. Natural
 split when it does: `types.ts` (no imports), `yaml.ts`, `html.ts`, `storage/*.ts`. Law 5 keeps the edges
 acyclic either way. Do it when adding the fifth adapter, not before.
@@ -1414,23 +1507,42 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 9 files / 126 tests
+npm test            vitest run            → 22 files / 270 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
-npm run build       tsc --noEmit && vite build → ~530 kB js / 164 kB gzip, 68 kB css / 12 kB gzip (chunk ceiling 600)
+npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)
+                    split into index 209 kB + vendor-react 143 kB + vendor-flow 130 kB + vendor 55 kB, so a
+                    returning reader re-downloads the app chunk alone after a deploy (ADR-010, vite.config.js)
 node scripts/check-english.mjs   language gate: RTL script only outside docs/; invisible bidi chars anywhere
 node scripts/doc-anchors.mjs     rewrites the `name 412` line anchors in §3.4 from src/lib/engine.ts (--check = exit 1)
 node scripts/check-docs.mjs      the doc map's gate: frontmatter, legal statuses, every reference resolving
 node scripts/check-palette.mjs   the appearance gate: theme registry, WCAG contrast per theme, no colour literals
                                  outside the token blocks in src/index.css or in src/components/*.tsx
+node scripts/check-css.mjs       the layout-height gate: `html { height: 100% }` must be its own rule in the
+                                 source and must survive into dist/ — a selector list starting with a comma is
+                                 discarded whole, and without the height no panel can scroll
+node scripts/check-facts.mjs     regenerates every count the prose quotes (--check = exit 1 on a stale number)
 ```
 
-Those checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**` — including the anchor gate,
-because a reference document is only worth having if nothing can quietly make it wrong. The definition is committed as
-**`ci/github-actions.yml`** rather than under `.github/`, because the agent connection maintaining this branch may not
-create files in `.github/workflows/` (a GitHub App permission, not a code problem). Activating it is one human commit:
-`cp ci/github-actions.yml .github/workflows/ci.yml`. Until that lands there is no automation guarding `main`, so whoever
-merges runs the commands above by hand.
+Those checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**` — including the anchor and
+facts gates, because a reference document is only worth having if nothing can quietly make it wrong.
+
+**CI is defined but not active.** The definition is `ci/github-actions.yml`; `.github/workflows/ci.yml` does not
+exist in the repository, because the remote refuses to accept it from this connection:
+
+```
+! [remote rejected] arena/01a061ef-living-canvas (refusing to allow a GitHub App to create or
+   update workflow `.github/workflows/ci.yml` without `workflows` permission)
+```
+
+Writing the file locally succeeds — the block is on the push, not on the filesystem, which is how it can look
+solved from inside the sandbox and not be. One human commit activates it:
+`cp ci/github-actions.yml .github/workflows/ci.yml && git add .github && git commit`. The workflow's last step
+then diffs the two copies so they cannot drift apart afterwards.
+
+Until it lands there is no automation guarding `main`, and the cost is not hypothetical: eight counts in this
+document and in the README had already gone stale. `scripts/check-facts.mjs` generates them now, so the failure
+mode is closed even while the runner is not.
 
 No lint step and no formatter config (§9.9) — adding
 one is a decision, not a cleanup, because it would reformat 9.3k lines in one commit. If you add one, match the four

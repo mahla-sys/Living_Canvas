@@ -161,12 +161,20 @@ export interface Settings {
    A theme is a set of CSS custom properties, never a colour literal in a component: `src/index.css`
    defines the palette under `@theme` and re-maps it under `:root[data-theme="…"]`. Adding a theme is
    one id here + one block there; the test in `theme.test.ts` fails if the two drift apart. */
-export const THEME_IDS = ["botanical", "plum"] as const;
+/* the default comes first: `THEMES` drives the Settings picker order and `theme.test.ts` pins the two lists to
+   each other, so the reader sees the theme they are actually on at the top of the list */
+export const THEME_IDS = ["botanical", "plum", "neutral"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
+/* `botanical` is the default again, and the reason is a report from the reader rather than a preference: with
+   `plum` as the default the interface came back as "everything is purple". That was not the background alone —
+   the plum theme's accent was also plum, so ink and accent shared a hue and nothing could be told apart from
+   anything else. Botanical's green-black ramp with a violet accent keeps 117 degrees between them, and the
+   plum theme keeps 106 by taking a jade accent instead (ADR-010). The choice is per reader, in `lc-settings`. */
 export const DEFAULT_THEME: ThemeId = "botanical";
 export const THEMES: { id: ThemeId; label: string; hint: string }[] = [
-  { id: "botanical", label: "Botanical", hint: "green-black ink, amber accent — the shipped palette" },
-  { id: "plum", label: "Dark plum", hint: "violet background, ink ramp re-tinted so muted text stays readable" },
+  { id: "botanical", label: "Botanical", hint: "green-black ink, violet accent — the default" },
+  { id: "plum", label: "Dark plum", hint: "violet ink, jade accent — no warm colour anywhere" },
+  { id: "neutral", label: "Neutral", hint: "achromatic greys, plum accent — the chrome disappears and the canvas is the only colour" },
 ];
 export function isThemeId(v: unknown): v is ThemeId {
   return (THEME_IDS as readonly unknown[]).includes(v);
@@ -178,6 +186,192 @@ export function isThemeId(v: unknown): v is ThemeId {
  * 26 is what the dots already used; Excalidraw's 20 is only "compatible" with its own grid.
  */
 export const GRID_GAP = 26;
+
+/* ---------------- reader-scoped settings — Law 4's third seam (ADR-007) ----------------
+   `lc-settings` is the one browser store that is not canvas content: an API key, an owner name, a theme.
+   Law 4 only sanctions it because it is *named*, and named means auditable — so there are exactly three
+   functions that touch it and every caller goes through them. They live in `core` rather than `store`
+   because `state.ts#defaultSettings` sits below `store.ts` (Law 5) and `main.tsx` needs the theme before
+   the first paint, i.e. before anything imports the store.
+
+   Before this, the seam was a sentence rather than a contract: `updateSettings` wrote the key too, and
+   `main.tsx` read it with its own `getItem`. Two writers meant "what lives in local settings" was answered
+   by a grep instead of by a function. */
+export const SETTINGS_KEY = "lc-settings";
+
+/** `null` when there is no `localStorage` at all — Safari private mode throws on *access*, not on read. */
+function settingsStore(): Storage | null {
+  try {
+    return typeof localStorage !== "undefined" && localStorage ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The stored blob, or `null` when nothing is stored, it is not a JSON object, or storage is unavailable.
+ * Never throws: a broken settings blob must cost the user a default, not a blank page.
+ */
+export function readSettingsLocal(): Record<string, unknown> | null {
+  const s = settingsStore();
+  if (!s) return null;
+  try {
+    const raw = s.getItem(SETTINGS_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge, never replace (ADR-007): a caller that sets one key must not silently drop the others, which is
+ * what a second writer made possible. Returns whether the write landed, so the UI can say so.
+ */
+export function writeSettingsLocal(patch: Record<string, unknown>): boolean {
+  const s = settingsStore();
+  if (!s) return false;
+  try {
+    s.setItem(SETTINGS_KEY, JSON.stringify({ ...(readSettingsLocal() ?? {}), ...patch }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The recovery path's only sanctioned way to forget local settings. */
+export function clearSettingsLocal(): void {
+  const s = settingsStore();
+  if (!s) return;
+  try {
+    s.removeItem(SETTINGS_KEY);
+  } catch { /* nothing to clear */ }
+}
+
+/* ---------------- model routing (ADR-008) ----------------
+   `agent.model` is an input to execution, not a label on the card. The provider is derived from the model
+   *name* rather than from a second setting, because two sources for "where does this request go" is the
+   same shape of bug that made `graph.json` a cache competing with the node files.
+
+   A model with no endpoint must not sit in `MODELS`: routing it anywhere would answer with a 400 that
+   degrades to the simulator, which reads to the user as "the model ignored me". That is why `glm-4-flash`
+   left the list instead of gaining a placeholder URL (docs/ARCHITECTURE.md §9.1). */
+export const DEEPSEEK_BASE = "https://api.deepseek.com";
+export const OLLAMA_BASE = "http://127.0.0.1:11434";
+export const DEFAULT_MODEL = "deepseek-chat";
+
+export interface ModelRoute {
+  /** an OpenAI-compatible chat-completions endpoint */
+  endpoint: string;
+  /** the model name as the provider expects it — an `ollama:` prefix is ours, so it is stripped */
+  model: string;
+  provider: "deepseek" | "ollama";
+}
+
+/** Pure, so the routing table is testable without a network (`model-route.test.ts`). */
+export function resolveModelRoute(id: string | null | undefined, fallback?: string | null): ModelRoute {
+  const wanted = String(id ?? "").trim();
+  const name = wanted || String(fallback ?? "").trim() || DEFAULT_MODEL;
+  if (name.startsWith("ollama:")) {
+    const local = name.slice("ollama:".length).trim();
+    return { endpoint: `${OLLAMA_BASE}/v1/chat/completions`, model: local || "llama3.2", provider: "ollama" };
+  }
+  return { endpoint: `${DEEPSEEK_BASE}/chat/completions`, model: name, provider: "deepseek" };
+}
+
+/* ---------------- panel layout (ADR-009) ----------------
+   Panel widths are canvas *content*: they live under `layout:` in `canvas.yaml` and come back on hydrate,
+   because "how wide is the inspector on this graph" is part of how the graph is read, exactly like
+   `position`. Focus mode is the opposite — a moment of work, like `lock` (Law 3) — and no file carries it.
+
+   Everything a hand-edited `canvas.yaml` could get wrong is clamped here, at the reader, so a stray
+   `leftWidth: 9000` cannot push the canvas off screen. */
+export interface CanvasLayout {
+  leftWidth: number;
+  rightWidth: number;
+  leftOpen: boolean;
+  rightOpen: boolean;
+}
+export const PANEL_MIN = 200;
+export const PANEL_MAX = 520;
+export const PANEL_DEFAULT_LEFT = 268;
+export const PANEL_DEFAULT_RIGHT = 292;
+/** the status strip along the bottom: tall enough for one line of 9.5px type, short enough to not cost canvas */
+export const STATUS_BAR_HEIGHT = 22;
+
+/** `true` only for a finite number — `Number.isFinite` rejects `NaN`, `Infinity` and the string `"300"`.
+ *  Note the argument order: `clamp(value, min, max)` (src/lib/core.ts#clamp), which `tsc` cannot check for
+ *  you because all three are `number`. */
+const num = (v: unknown, lo: number, hi: number, dflt: number): number =>
+  typeof v === "number" && Number.isFinite(v) ? clamp(v, lo, hi) : dflt;
+
+/** Coerce anything read out of a YAML file into a layout the UI can trust. Never throws. */
+export function normalizeLayout(v: unknown, dflt?: Partial<CanvasLayout>): CanvasLayout {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const dl = dflt ?? { leftWidth: PANEL_DEFAULT_LEFT, rightWidth: PANEL_DEFAULT_RIGHT };
+  return {
+    leftWidth: num(o.leftWidth, PANEL_MIN, PANEL_MAX, num(dl.leftWidth, PANEL_MIN, PANEL_MAX, PANEL_DEFAULT_LEFT)),
+    rightWidth: num(o.rightWidth, PANEL_MIN, PANEL_MAX, num(dl.rightWidth, PANEL_MIN, PANEL_MAX, PANEL_DEFAULT_RIGHT)),
+    // an absent key is *open*: a hand-written canvas.yaml that never heard of layout must not hide a panel
+    leftOpen: o.leftOpen === undefined ? true : o.leftOpen !== false,
+    rightOpen: o.rightOpen === undefined ? true : o.rightOpen !== false,
+  };
+}
+
+/* ---------------- keyboard sequences ----------------
+   Pure state machines, so the two multi-key shortcuts are testable without a DOM: a chord (Ctrl+K then Z,
+   the focus-mode toggle) and a double tap (Escape twice, the way back out — one Escape is taken by
+   in-place editing and by the modals, so leaving focus mode must not steal it). */
+
+/** Feed one key per keydown; returns `true` exactly once, on the key that completes the sequence. */
+export function createChord(keys: readonly string[], windowMs = 1500) {
+  let at = 0;
+  let last = Number.NEGATIVE_INFINITY;
+  return {
+    push(key: string, t: number): boolean {
+      if (t - last > windowMs) at = 0; // the previous partial press has expired
+      last = t;
+      const k = key.toLowerCase();
+      if (k === keys[at]) {
+        at += 1;
+        if (at >= keys.length) {
+          at = 0;
+          return true;
+        }
+        return false;
+      }
+      // a wrong key restarts rather than merely failing, so "k, x, k, z" still fires
+      at = k === keys[0] ? 1 : 0;
+      return false;
+    },
+    reset(): void {
+      at = 0;
+      last = Number.NEGATIVE_INFINITY;
+    },
+    /** how far into the sequence the next key is expected — the TopBar hint reads this */
+    get depth(): number {
+      return at;
+    },
+  };
+}
+
+/** Two presses inside `windowMs`. The second press reports `true` and both are then forgotten. */
+export function createDoubleTap(windowMs = 400) {
+  let last = Number.NEGATIVE_INFINITY;
+  return {
+    push(t: number): boolean {
+      const hit = t - last <= windowMs;
+      last = hit ? Number.NEGATIVE_INFINITY : t;
+      return hit;
+    },
+    reset(): void {
+      last = Number.NEGATIVE_INFINITY;
+    },
+  };
+}
 
 export interface ExecutionState {
   run_id: string | null;

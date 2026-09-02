@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "./store";
 import CanvasArea from "./components/CanvasArea";
 import { LeftPanel, RightPanel, FileViewer } from "./components/SidePanels";
-import { TopBar, ActivityConsole, ChatPanel, HistoryModal, SettingsModal, PortModal, Toasts, BootOverlay } from "./components/Overlays";
+import { TopBar, ActivityConsole, ChatPanel, HistoryModal, SettingsModal, PortModal, Toasts, BootOverlay, StatusBar } from "./components/Overlays";
 
 export default function App() {
   const init = useStore((s) => s.actions.init);
@@ -19,8 +19,10 @@ export default function App() {
   }, [theme]);
 
   useEffect(() => {
-    // a save is debounced 700ms (§11.3 of the architecture doc); Export flushes, and so does a hidden tab,
-    // or the last edit dies with the tab — which is a real loss here, because the files are the product
+    // a save is debounced 700ms (§11.3 of the architecture doc) and a layout drag 500ms; Export flushes, and
+    // so does a hidden tab, or the last edit dies with the tab — a real loss here, because the files are the
+    // product. `pagehide` rather than `beforeunload`: it also fires when the page enters the back/forward
+    // cache, where `beforeunload` does not, and it does not opt the tab out of bfcache.
     const flush = () => {
       if (document.visibilityState === "hidden") void useStore.getState().actions.flushSave();
     };
@@ -30,6 +32,36 @@ export default function App() {
       document.removeEventListener("visibilitychange", flush);
       window.removeEventListener("pagehide", flush);
     };
+  }, []);
+
+  useEffect(() => {
+    /* The two multi-key sequences (docs/patterns/layout-system.md). Both delegate to the store, which owns
+       the state machines — so a half-pressed chord survives a re-render, and the sequences stay testable as
+       pure functions in core.ts. Only keys that can matter are fed, so typing on the canvas is untouched. */
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      const a = useStore.getState().actions;
+      const k = e.key.toLowerCase();
+
+      if (k === "escape") {
+        // one Escape still belongs to in-place node editing and the modals; `escapeKey` decides what is left
+        if (!typing) a.escapeKey();
+        return;
+      }
+      if (k === "k" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault(); // Ctrl+K is "search" in most browsers; on the canvas it starts this chord
+        if (!typing) a.chordKey("k");
+        return;
+      }
+      // a bare Z only counts while the chord is half-pressed — Ctrl+Z must stay the browser's undo
+      if (k === "z" && !e.ctrlKey && !e.metaKey && useStore.getState().ui.chordDepth === 1) {
+        e.preventDefault();
+        if (!typing) a.chordKey("z");
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   return (
@@ -46,6 +78,8 @@ export default function App() {
         </main>
         <RightPanel />
       </div>
+
+      <StatusBar />
 
       <ChatPanel />
       <FileViewer />

@@ -4,9 +4,9 @@
    never an internal state object. On Import, if graph.json/state.json are missing,
    the canvas is rebuilt from nodes/*.md + edges/*.yaml + memory/*.md.
    ============================================================ */
-import { storage, uid, nowIso, safeRelPath, extractFrontmatter, parseYaml, type StorageAdapter, type MemDoc } from "./core";
+import { storage, uid, nowIso, safeRelPath, extractFrontmatter, parseYaml, normalizeLayout, type StorageAdapter, type MemDoc } from "./core";
 import { ROOT, CANVAS_ID, APP_VERSION, makeNodeData, makeEdgeData } from "../state";
-import type { LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode } from "./core";
+import type { LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode, CanvasLayout } from "./core";
 
 export const BUNDLE_KIND = "living-canvas-export";
 export const BUNDLE_VERSION = 1;
@@ -324,6 +324,8 @@ export interface DerivedCanvas {
     agents: Record<string, MemDoc>;
   };
   canvasTitle: string | null;
+  /** panel layout from `canvas.yaml`; `null` when the file has no `layout:` key (ADR-009) */
+  layout: CanvasLayout | null;
   unreadable: string[];
 }
 
@@ -335,7 +337,7 @@ export function deriveCanvasFromFiles(files: CanvasFiles): DerivedCanvas {
   const d: DerivedCanvas = {
     nodes: [], edges: [],
     memory: { global: null, decisions: null, progress: null, user: null, agents: {} },
-    canvasTitle: null, unreadable: [],
+    canvasTitle: null, layout: null, unreadable: [],
   };
   for (const [path, text] of Object.entries(files)) {
     if (!path.startsWith(ROOT + "/")) continue;
@@ -356,6 +358,9 @@ export function deriveCanvasFromFiles(files: CanvasFiles): DerivedCanvas {
       const y = parseYaml(text);
       const t = y && str(y.title);
       if (t) d.canvasTitle = t;
+      /* `layout` is canvas content (ADR-009), so it comes from this file and from nowhere else. A missing
+         key means "defaults", not "hidden panels": `normalizeLayout` treats absent as open. */
+      if (y && y.layout && typeof y.layout === "object") d.layout = normalizeLayout(y.layout);
       continue;
     }
     const agentMem = rel.match(/^memory\/agents\/([^/]+)\.md$/);
