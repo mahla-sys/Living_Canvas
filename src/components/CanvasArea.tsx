@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, MiniMap, Controls,
-  Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow,
+  Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow, SelectionMode,
   type NodeProps, type EdgeProps, type NodeTypes, type EdgeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -45,8 +45,10 @@ function Md({ text, compact = false }: { text: string; compact?: boolean }) {
 const STATUS_LABEL: Record<AgentStatus, string> = {
   idle: "Ready", running: "Running", done: "Done", failed: "Failed", waiting: "Awaiting approval",
 };
+/* Roles, not colours: a status is chrome, so it follows the theme like every other accent (§6). */
 const STATUS_COLOR: Record<AgentStatus, string> = {
-  idle: "#8ba39d", running: "#e8b04b", done: "#8fbf7f", failed: "#e06a4e", waiting: "#e06a4e",
+  idle: "var(--color-ink-300)", running: "var(--color-amber-lc)", done: "var(--color-sage)",
+  failed: "var(--color-ember)", waiting: "var(--color-ember)",
 };
 
 function TypeIcon({ type, size = 14 }: { type: LCNodeData["nodeType"]; size?: number }) {
@@ -284,14 +286,17 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
 
 /* ---------------- custom edge ---------------- */
 
+/* The edge *type* picks a role; the edge file carries no colour, so this is chrome and it themes. */
 const EDGE_COLOR: Record<string, string> = {
-  flow: "#e8b04b", relation: "#5f7b76", "event-flow": "#6fb3c7", blackboard: "#8fbf7f", "direct-message": "#b98bc2",
+  flow: "var(--color-amber-lc)", relation: "var(--color-ink-400)", "event-flow": "var(--color-sky-lc)",
+  blackboard: "var(--color-sage)", "direct-message": "var(--color-plum)",
 };
+const EDGE_FALLBACK = "var(--color-ink-400)";
 
 function LcEdge(props: EdgeProps<RFEdge>) {
   const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd } = props;
   const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.28 });
-  const color = EDGE_COLOR[data?.edgeType ?? "flow"] ?? "#5f7b76";
+  const color = EDGE_COLOR[data?.edgeType ?? "flow"] ?? EDGE_FALLBACK;
   const anim = data?.animation === "flow" ? "lc-edge-flow" : data?.animation === "pulse" ? "lc-edge-pulse" : "";
   const line = data?.line_style === "dashed" ? "lc-edge-dashed" : data?.line_style === "dotted" ? "lc-edge-dotted" : "";
   return (
@@ -306,7 +311,9 @@ function LcEdge(props: EdgeProps<RFEdge>) {
             className="absolute pointer-events-none text-[9.5px] font-bold px-1.5 py-0.5 rounded-md border anim-fade"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
-              background: "#12201e", borderColor: `${color}55`, color,
+              // `var()` cannot take a hex-alpha suffix, so the tint is a colour-mix — which also means the
+              // tint follows the theme instead of freezing the botanical palette into an inline style
+              background: "var(--color-ink-850)", borderColor: `color-mix(in srgb, ${color} 33%, transparent)`, color,
             }}
           >
             {data.label}
@@ -323,7 +330,9 @@ const edgeTypes: EdgeTypes = { lc: LcEdge as never };
 
 /* ---------------- freehand drawing layer (§2 strokes/) ---------------- */
 
-const DRAW_COLORS = ["#e8b04b", "#e06a4e", "#6fb3c7", "#8fbf7f", "#b98bc2", "#eef2ef"];
+/* lc-data-colour: a stroke's colour is written into `strokes/<id>.json`, so it is canvas *data* (§4.8).
+   A theme that re-tinted it would rewrite what the user drew — Law 1 seen from the other side. */
+const DRAW_COLORS = ["#e8b04b", "#e06a4e", "#6fb3c7", "#8fbf7f", "#b98bc2", "#eef2ef"]; // lc-data-colour
 const DRAW_WIDTHS = [2, 4, 7];
 
 function strokePath(pts: StrokePoint[]): string {
@@ -580,7 +589,7 @@ function CanvasInner() {
 
   const drawCfg = () =>
     ((window as unknown as { __lcDraw?: { tool: "pen" | "highlight" | "eraser"; color: string; width: number } }).__lcDraw ?? {
-      tool: "pen" as const, color: "#e8b04b", width: 4,
+      tool: "pen" as const, color: DRAW_COLORS[0], width: 4,
     });
 
   const toFlow = (e: React.PointerEvent) => screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -698,6 +707,11 @@ function CanvasInner() {
         /* §11.3 of the spec: the grid and the dots are one number, and a snap that falls between two
            visible dots reads as broken alignment. Opt-in, because it rewrites `position` in node files. */
         elevateNodesOnSelect
+        /* Marquee selection needs the whole node inside the box. This is already the library default in
+           @xyflow/react v12 (`selectionMode = SelectionMode.Full` in its Pane), so the prop is stated rather
+           than relied upon: a library default is not a decision this app made, and a silent upstream change
+           would otherwise change what "select these three" means. */
+        selectionMode={SelectionMode.Full}
         snapToGrid={snapToGrid}
         snapGrid={[GRID_GAP, GRID_GAP]}
         panOnDrag={drawMode ? [1, 2] : true}
@@ -746,7 +760,7 @@ function CanvasInner() {
           <span>{edges.length} edges</span>
           <span className="w-px h-3.5 bg-ink-700" />
           <span className={`flex items-center gap-1.5 font-bold ${running ? "text-amber-lc" : execution.status === "completed" ? "text-sage" : ""}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${running ? "anim-blink" : ""}`} style={{ background: running ? "#e8b04b" : execution.status === "completed" ? "#8fbf7f" : "#5f7b76" }} />
+            <span className={`w-1.5 h-1.5 rounded-full ${running ? "anim-blink" : ""}`} style={{ background: running ? "var(--color-amber-lc)" : execution.status === "completed" ? "var(--color-sage)" : "var(--color-ink-400)" }} />
             {running ? "Running" : execution.status === "waiting_approval" ? "Awaiting approval" : execution.status === "completed" ? "Completed" : execution.status === "failed" ? "Failed" : "Ready"}
           </span>
         </div>

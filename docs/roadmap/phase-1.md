@@ -1,15 +1,16 @@
 ---
 title: Phase 1 — file substrate, contract, executor, ledger
 status: shipped
-updated: 2026-09-01
+updated: 2026-09-02
 sources: [docs/ARCHITECTURE.md#0.2, docs/decisions/README.md]
 ---
 
 # Phase 1 — closed
 
 Everything below is shipped and guarded; the citation in parentheses is what fails if it regresses. Verification
-is `npx vitest run` (118 tests in 7 files) plus the three repository gates
-(`scripts/check-english.mjs`, `scripts/check-docs.mjs`, `scripts/doc-anchors.mjs`).
+is `npx vitest run` (178 tests in 13 files) plus the five repository gates (`scripts/check-english.mjs`,
+`scripts/check-docs.mjs`, `scripts/check-palette.mjs`, `scripts/doc-anchors.mjs`, `scripts/check-facts.mjs`),
+which is exactly what `.github/workflows/ci.yml` runs.
 
 - [x] files are the substrate, `state.json` is only a cache (`roundtrip.test.ts`, `hydrate.test.ts`)
 - [x] `graph.json` deleted — one source of truth for geometry and graph (`hydrate.test.ts`, `adr-002-graph-json-deleted.md`)
@@ -28,9 +29,14 @@ is `npx vitest run` (118 tests in 7 files) plus the three repository gates
 - [x] memory conflict rule: strictly-higher confidence wins, and says so (`execution.test.ts`)
 - [x] chat is gated by `chat_with_user`, and the question is still recorded (`execution.test.ts`)
 - [x] the language rule is a gate, not a habit: English in code/UI/tests, RTL confined to `docs/`, bidi controls nowhere (`scripts/check-english.mjs`)
-- [x] CI definition committed, activation pending one human step (`ci/github-actions.yml`)
+- [x] CI definition complete, activation blocked on a `workflows` permission this branch does not have (`ci/github-actions.yml`)
 - [x] line anchors in the architecture doc regenerate and are checked (`scripts/doc-anchors.mjs`)
 - [x] dependencies: four runtime libraries, the unused ones pruned (`docs/ARCHITECTURE.md#2`)
+- [x] counts quoted in the prose are generated, not retyped (`scripts/check-facts.mjs`)
+- [x] `lc-settings` is a seam with three functions and no other reader or writer (`settings-local.test.ts`, `adr-007-settings-live-behind-two-functions.md`)
+- [x] `agent.model` and `agent.max_tokens` reach the provider request (`model-route.test.ts`, `adr-008-agent-model-selects-the-model.md`)
+- [x] layout system: resizable panels in `canvas.yaml`, 22px status strip, focus mode in memory only (`layout.test.ts`, `layout-render.test.ts`, `docs/patterns/layout-system.md`)
+- [x] colour literals confined to the token blocks, including inline styles in components (`scripts/check-palette.mjs`)
 
 ## Explicitly not in phase 1
 

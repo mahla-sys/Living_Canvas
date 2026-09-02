@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStore, buildFileContent } from "../store";
-import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT } from "../state";
+import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT, NODE_COLORS } from "../state";
 import type { RFNode } from "../state";
 import { storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType } from "../lib/core";
 import {
@@ -8,7 +8,9 @@ import {
   ISpark, IDatabase, IHistory, IX, IEye, INode, IPulse, ICheck,
 } from "./icons";
 
-const SWATCHES = ["#e8b04b", "#e06a4e", "#8fbf7f", "#6fb3c7", "#b98bc2", "#d9c9a3", "#c96a8a", "#8ba39d"];
+/* lc-data-colour: the picker writes the chosen value into the node file, so these are canvas data, not
+   chrome. Re-tinting them under a theme would silently rewrite somebody's graph (docs/ARCHITECTURE.md §6). */
+const SWATCHES = ["#e8b04b", "#e06a4e", "#8fbf7f", "#6fb3c7", "#b98bc2", "#d9c9a3", "#c96a8a", "#8ba39d"]; // lc-data-colour
 const ALL_TOOLS = ["read_memory", "write_memory", "chat_with_user", "write_output", "get_canvas_overview", "get_node_context", "get_agent_brief"];
 import { FIELD_DESC } from "../lib/engine";
 
@@ -113,9 +115,11 @@ function Palette() {
   );
 }
 
+/* The palette preview shows the colour a new node will actually get, so it reads the one place that decides
+   it (`NODE_COLORS` in state.ts) instead of keeping a second copy of the map here. Those are node *data*
+   colours, written into `nodes/<id>.md`, so they are literals by design and do not follow the theme. */
 function nodeColor(t: NodeType) {
-  const map: Record<string, string> = { agent: "#e8b04b", note: "#6fb3c7", "output-box": "#8fbf7f", "pipeline-step": "#b98bc2", folder: "#d9c9a3", shape: "#e06a4e" };
-  return map[t] ?? "#8ba39d";
+  return NODE_COLORS[t] ?? "#8ba39d"; // lc-data-colour
 }
 
 function Folder({ name, children, badge, defaultOpen = false }: { name: string; children: React.ReactNode; badge?: number; defaultOpen?: boolean }) {
@@ -400,11 +404,59 @@ function TemplatesSection() {
   );
 }
 
+/**
+ * The draggable edge of a side panel (docs/patterns/layout-system.md).
+ *
+ * Two rules worth naming. The drag writes state on every move — the panel has to follow the pointer — but
+ * reaches the file only once, 500 ms after the last move (`touchLayout`, ADR-009). And `clamp` lives in
+ * `resizePanel`, not here: the file is the contract, so a hand-edited `canvas.yaml` is clamped at the same
+ * door as a mouse drag.
+ */
+function ResizeHandle({ side }: { side: "left" | "right" }) {
+  const resizePanel = useStore((s) => s.actions.resizePanel);
+  const drag = useRef<{ x: number; w: number } | null>(null);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize the ${side} panel`}
+      title="Drag to resize"
+      data-lc-resize={side}
+      className={`w-[5px] shrink-0 cursor-col-resize bg-transparent hover:bg-amber-lc/40 active:bg-amber-lc/70 transition-colors ${
+        side === "left" ? "border-e" : "border-s"
+      } border-ink-700`}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        const lay = useStore.getState().canvas.layout;
+        drag.current = { x: e.clientX, w: side === "left" ? lay.leftWidth : lay.rightWidth };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        if (!drag.current) return;
+        const dx = e.clientX - drag.current.x;
+        // dragging right widens the left panel and narrows the right one
+        resizePanel(side, drag.current.w + (side === "left" ? dx : -dx));
+      }}
+      onPointerUp={(e) => {
+        drag.current = null;
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+      }}
+      onPointerCancel={() => { drag.current = null; }}
+    />
+  );
+}
+
 export function LeftPanel() {
   const tab = useStore((s) => s.ui.leftTab);
   const actions = useStore((s) => s.actions);
+  const open = useStore((s) => s.canvas.layout.leftOpen);
+  const width = useStore((s) => s.canvas.layout.leftWidth);
+  const focus = useStore((s) => s.ui.focusMode);
+  // focus mode is a moment of work, not a setting: nothing here is written to a file (ADR-009)
+  if (focus || !open) return null;
   return (
-    <aside className="w-[268px] shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full">
+    <>
+    <aside style={{ width }} className="shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full">
       <div className="flex border-b border-ink-700">
         {([["palette", "Library", ISpark], ["files", "Files", IFolder]] as const).map(([key, label, Icon]) => (
           <button
@@ -420,6 +472,8 @@ export function LeftPanel() {
       </div>
       <div className="flex-1 overflow-y-auto">{tab === "palette" ? <Palette /> : <FileTree />}</div>
     </aside>
+    <ResizeHandle side="left" />
+    </>
   );
 }
 
@@ -618,13 +672,13 @@ function NodeInspector({ node }: { node: RFNode }) {
 
             <ContractGroup
               title="Read"
-              color="#6fb3c7"
+              color="var(--color-sky-lc)"
               paths={agent.context_contract.allowed_read_paths}
               nodeId={node.id}
             />
             <ContractGroup
               title="Write"
-              color="#8fbf7f"
+              color="var(--color-sage)"
               paths={agent.context_contract.allowed_write_paths}
               nodeId={node.id}
             />
@@ -802,10 +856,17 @@ function CanvasInspector() {
 export function RightPanel() {
   const selectedNode = useStore((s) => s.nodes.find((n) => n.selected));
   const selectedEdge = useStore((s) => s.edges.find((e) => e.selected));
+  const open = useStore((s) => s.canvas.layout.rightOpen);
+  const width = useStore((s) => s.canvas.layout.rightWidth);
+  const focus = useStore((s) => s.ui.focusMode);
+  if (focus || !open) return null;
   return (
-    <aside className="w-[292px] shrink-0 border-s border-ink-700 bg-ink-900/80 h-full overflow-y-auto">
+    <>
+    <ResizeHandle side="right" />
+    <aside style={{ width }} className="shrink-0 border-s border-ink-700 bg-ink-900/80 h-full overflow-y-auto">
       {selectedNode ? <NodeInspector node={selectedNode} /> : selectedEdge ? <EdgeInspector edgeId={selectedEdge.id} /> : <CanvasInspector />}
     </aside>
+    </>
   );
 }
 
@@ -816,14 +877,14 @@ export function FileViewer() {
   const actions = useStore((s) => s.actions);
   const [copied, setCopied] = useState(false);
   if (!viewer) return null;
-  const langColor = viewer.lang === "json" ? "#6fb3c7" : viewer.lang === "yaml" ? "#8fbf7f" : viewer.lang === "log" ? "#e06a4e" : "#e8b04b";
+  const langColor = viewer.lang === "json" ? "var(--color-sky-lc)" : viewer.lang === "yaml" ? "var(--color-sage)" : viewer.lang === "log" ? "var(--color-ember)" : "var(--color-amber-lc)";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-950/75 backdrop-blur-[3px] anim-fade" onClick={() => actions.openFile(null)}>
       <div className="w-full max-w-[720px] max-h-[80vh] flex flex-col rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] anim-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2.5 px-4 py-3 border-b border-ink-700 bg-ink-850">
           <IFile size={15} style={{ color: langColor }} />
           <p className="text-[12px] font-mono text-ink-100 truncate">{CANVAS_ID}/{viewer.path}</p>
-          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border" style={{ color: langColor, borderColor: `${langColor}55`, background: `${langColor}12` }}>{viewer.lang}</span>
+          <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border" style={{ color: langColor, borderColor: `color-mix(in srgb, ${langColor} 33%, transparent)`, background: `color-mix(in srgb, ${langColor} 7%, transparent)` }}>{viewer.lang}</span>
           <div className="ms-auto flex items-center gap-1.5">
             <button
               onClick={() => { void navigator.clipboard?.writeText(viewer.content); setCopied(true); setTimeout(() => setCopied(false), 1500); }}

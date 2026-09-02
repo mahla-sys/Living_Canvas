@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { roleById, APP_VERSION, type RFNode } from "../state";
-import { fmtClock, fmtDate, EMPTY_ARR, THEMES, GRID_GAP, type BusEvent, type ChatMsg } from "../lib/core";
+import { fmtClock, fmtDate, EMPTY_ARR, THEMES, GRID_GAP, STATUS_BAR_HEIGHT, type BusEvent, type ChatMsg } from "../lib/core";
 import {
   IPlay, IStop, ICamera, IHistory, IGear, IChat, IX, ISend, ICheck, IWarn,
   ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD, IFolder, IFile,
@@ -9,12 +9,100 @@ import {
 import { storageMode } from "../lib/core";
 import { isFsAccessSupported } from "../lib/fs-access";
 
+/* ================= status strip =================
+   22px along the bottom (docs/patterns/layout-system.md). The split is the design, not the width: the left
+   half describes the *document* — what this canvas is, where its files live, how big it is — and the right
+   half describes the *moment* — what a run is doing, whether the last write landed, how to leave focus mode.
+   One is read back from files on every boot; the other is gone when the tab closes. A reader should be able
+   to tell which is which without being told. */
+
+const RUN_TONE: Record<string, string> = {
+  idle: "text-ink-500",
+  running: "text-amber-lc",
+  paused: "text-amber-lc",
+  waiting_approval: "text-amber-lc",
+  completed: "text-sage",
+  failed: "text-ember",
+  stopped: "text-ember",
+};
+
+export function StatusBar() {
+  const title = useStore((s) => s.canvas.title);
+  const nodeCount = useStore((s) => s.nodes.length);
+  const edgeCount = useStore((s) => s.edges.length);
+  const saveState = useStore((s) => s.saveState);
+  const status = useStore((s) => s.execution.status);
+  const leftOpen = useStore((s) => s.canvas.layout.leftOpen);
+  const rightOpen = useStore((s) => s.canvas.layout.rightOpen);
+  const focus = useStore((s) => s.ui.focusMode);
+  const chordDepth = useStore((s) => s.ui.chordDepth);
+  const actions = useStore((s) => s.actions);
+  const mode = storageMode();
+
+  const chip = "text-[9.5px] font-mono leading-none px-1.5 py-0.5 rounded border border-ink-700 bg-ink-850";
+  return (
+    <div
+      data-lc-statusbar
+      className="h-[22px] shrink-0 flex items-center justify-between gap-3 px-2.5 border-t border-ink-700 bg-ink-900 text-ink-400 select-none"
+      style={{ height: STATUS_BAR_HEIGHT }}
+    >
+      {/* left — the document */}
+      <div className="flex items-center gap-2 min-w-0">
+        <button
+          onClick={() => actions.togglePanel("left")}
+          title={`${leftOpen ? "Hide" : "Show"} the left panel`}
+          className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
+            leftOpen ? "border-ink-600 text-ink-200 hover:border-amber-lc/60" : "border-ink-700 text-ink-500 hover:text-ink-200"
+          }`}
+        >
+          {leftOpen ? "◧ Library" : "▫ Library"}
+        </button>
+        <span className="truncate text-[10px] font-bold text-ink-200">{title}</span>
+        <span className={chip}>{nodeCount} nodes</span>
+        <span className={chip}>{edgeCount} edges</span>
+        <button
+          onClick={() => actions.setPortOpen(true)}
+          title="Where the files live — and how to move them"
+          className={`${chip} text-sky-lc hover:border-sky-lc/60 cursor-pointer`}
+        >
+          {mode}
+        </button>
+      </div>
+
+      {/* right — the moment */}
+      <div className="flex items-center gap-2 shrink-0">
+        {chordDepth > 0 && <span className="text-[9.5px] font-mono text-amber-lc">Ctrl+K … press Z</span>}
+        {focus && (
+          <button
+            onClick={actions.toggleFocusMode}
+            title="Leave focus mode — or press Escape twice"
+            className="text-[9.5px] font-bold text-amber-lc px-1.5 py-0.5 rounded border border-amber-lc/50 cursor-pointer hover:bg-amber-lc/10"
+          >
+            Focus mode — Esc Esc
+          </button>
+        )}
+        <span className={`text-[9.5px] font-bold ${RUN_TONE[status] ?? "text-ink-500"}`}>run: {status}</span>
+        <span className={chip}>{saveState}</span>
+        <button
+          onClick={() => actions.togglePanel("right")}
+          title={`${rightOpen ? "Hide" : "Show"} the inspector`}
+          className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
+            rightOpen ? "border-ink-600 text-ink-200 hover:border-amber-lc/60" : "border-ink-700 text-ink-500 hover:text-ink-200"
+          }`}
+        >
+          {rightOpen ? "Inspector ▨" : "Inspector ▫"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /* ================= top bar ================= */
 
 function Logo() {
   return (
     <span className="relative w-8 h-8 rounded-[9px] bg-ink-800 border border-amber-lc/35 flex items-center justify-center overflow-visible">
-      <span className="w-2.5 h-2.5 rounded-full bg-amber-lc anim-breathe" style={{ boxShadow: "0 0 12px #e8b04b" }} />
+      <span className="w-2.5 h-2.5 rounded-full bg-amber-lc anim-breathe" style={{ boxShadow: "0 0 12px var(--color-amber-lc)" }} />
       <span className="absolute inset-1 rounded-[6px] border border-dashed border-amber-lc/30 anim-spin-slow" />
     </span>
   );
@@ -110,22 +198,26 @@ export function TopBar() {
 /* ================= activity console ================= */
 
 const TAG_COLOR: Record<string, string> = {
-  "node.completed": "#8fbf7f", "node.created": "#6fb3c7", "node.deleted": "#e06a4e", "node.updated": "#6fb3c7",
-  "node.started": "#e8b04b", "node.failed": "#e06a4e",
-  "edge.created": "#6fb3c7", "edge.deleted": "#e06a4e", "edge.updated": "#6fb3c7",
-  "run.started": "#e8b04b", "run.completed": "#8fbf7f", "run.paused": "#e06a4e", "run.resumed": "#8fbf7f", "run.stopped": "#e06a4e",
-  "lock.acquired": "#e8b04b", "lock.released": "#8ba39d",
-  "memory.updated": "#6fb3c7", "output.written": "#8fbf7f",
-  "snapshot.saved": "#b98bc2", "snapshot.restored": "#b98bc2",
-  "graph.saved": "#5f7b76", "file.written": "#5f7b76", "chat.message": "#6fb3c7",
-  "stroke.created": "#d9c9a3", "stroke.deleted": "#d9c9a3", "strokes.converted": "#b98bc2", "strokes.cleared": "#d9c9a3",
-  "validation.failed": "#e06a4e", system: "#8ba39d",
+  /* event-tag colours are chrome: six palette roles, re-mapped by whichever theme is on */
+  "node.completed": "var(--color-sage)", "node.created": "var(--color-sky-lc)", "node.deleted": "var(--color-ember)", "node.updated": "var(--color-sky-lc)",
+  "node.started": "var(--color-amber-lc)", "node.failed": "var(--color-ember)",
+  "edge.created": "var(--color-sky-lc)", "edge.deleted": "var(--color-ember)", "edge.updated": "var(--color-sky-lc)",
+  "run.started": "var(--color-amber-lc)", "run.completed": "var(--color-sage)", "run.paused": "var(--color-ember)", "run.resumed": "var(--color-sage)", "run.stopped": "var(--color-ember)",
+  "lock.acquired": "var(--color-amber-lc)", "lock.released": "var(--color-ink-300)",
+  "memory.updated": "var(--color-sky-lc)", "output.written": "var(--color-sage)",
+  "snapshot.saved": "var(--color-plum)", "snapshot.restored": "var(--color-plum)",
+  "graph.saved": "var(--color-ink-400)", "file.written": "var(--color-ink-400)", "chat.message": "var(--color-sky-lc)",
+  "stroke.created": "var(--color-sand)", "stroke.deleted": "var(--color-sand)", "strokes.converted": "var(--color-plum)", "strokes.cleared": "var(--color-sand)",
+  "validation.failed": "var(--color-ember)", system: "var(--color-ink-300)",
 };
 
 export function ActivityConsole() {
   const events = useStore((s) => s.events);
   const open = useStore((s) => s.ui.consoleOpen);
+  const focus = useStore((s) => s.ui.focusMode);
   const actions = useStore((s) => s.actions);
+  // focus mode is about the board: the log is chrome, and chrome is what leaves
+  if (focus) return null;
   return (
     <div className={`shrink-0 border-t border-ink-700 bg-ink-900/90 transition-all duration-300 ${open ? "h-[168px]" : "h-[34px]"} flex flex-col`}>
       <button onClick={actions.toggleConsole} className="flex items-center gap-2 px-3.5 h-[34px] shrink-0 text-ink-300 hover:text-ink-100 transition-colors cursor-pointer">
@@ -138,18 +230,22 @@ export function ActivityConsole() {
       {open && (
         <div className="flex-1 overflow-y-auto px-3.5 pb-2 space-y-[3px]">
           {events.length === 0 && <p className="text-[10.5px] text-ink-500 py-2">No event yet — start working on the canvas.</p>}
-          {events.map((e: BusEvent) => (
+          {events.map((e: BusEvent) => {
+            // one lookup per row, because the two alpha tints are derived from the same role
+            const tagColor = TAG_COLOR[e.type] ?? "var(--color-ink-300)";
+            return (
             <div key={e.id} className="flex items-center gap-2 text-[10.5px] anim-rise">
               <span className="font-mono text-ink-500 shrink-0 w-[52px]">{fmtClock(e.at)}</span>
               <span
                 className="shrink-0 font-mono text-[9px] px-1.5 py-px rounded border"
-                style={{ color: TAG_COLOR[e.type] ?? "#8ba39d", borderColor: `${TAG_COLOR[e.type] ?? "#8ba39d"}44`, background: `${TAG_COLOR[e.type] ?? "#8ba39d"}10` }}
+                style={{ color: tagColor, borderColor: `color-mix(in srgb, ${tagColor} 27%, transparent)`, background: `color-mix(in srgb, ${tagColor} 6%, transparent)` }}
               >
                 {e.type}
               </span>
               <span className="text-ink-300 truncate">{e.message}</span>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -453,10 +549,10 @@ export function Toasts() {
   const toasts = useStore((s) => s.toasts);
   const actions = useStore((s) => s.actions);
   const KIND = {
-    info: { c: "#6fb3c7", Icon: ISpark },
-    success: { c: "#8fbf7f", Icon: ICheck },
-    warn: { c: "#e8b04b", Icon: IWarn },
-    error: { c: "#e06a4e", Icon: IWarn },
+    info: { c: "var(--color-sky-lc)", Icon: ISpark },
+    success: { c: "var(--color-sage)", Icon: ICheck },
+    warn: { c: "var(--color-amber-lc)", Icon: IWarn },
+    error: { c: "var(--color-ember)", Icon: IWarn },
   } as const;
   return (
     <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] space-y-2 w-[380px] max-w-[calc(100vw-2rem)] pointer-events-none">
@@ -500,7 +596,7 @@ export function BootOverlay() {
       <div className="w-[420px] max-w-[90vw]">
         <div className="flex items-center gap-3 mb-6">
           <span className="relative w-11 h-11 rounded-xl bg-ink-800 border border-amber-lc/40 flex items-center justify-center">
-            <span className="w-3.5 h-3.5 rounded-full bg-amber-lc anim-breathe" style={{ boxShadow: "0 0 16px #e8b04b" }} />
+            <span className="w-3.5 h-3.5 rounded-full bg-amber-lc anim-breathe" style={{ boxShadow: "0 0 16px var(--color-amber-lc)" }} />
             <span className="absolute inset-1.5 rounded-lg border border-dashed border-amber-lc/30 anim-spin-slow" />
           </span>
           <div>

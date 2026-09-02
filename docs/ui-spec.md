@@ -48,11 +48,26 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, 
 | منطقه | امروز | فاصله/وضعیت |
 |---|---|---|
 | نوار بالا | نام بوم، چیپ «phase 1 closed»، چیپ ذخیره/حالت ذخیره، checkpoint دستی، تاریخچه، تنظیمات، کنترل‌های اجرا | `implemented` |
-| پنل چپ | `w-[268px]` ثابت، دو تب Library/Files | **قابل جمع‌شدن نیست**؛ ادعای «با دکمه toggle می‌شود» در پیش‌نویس گپ بعدی نادرست بود |
+| پنل چپ | عرض از `canvas.layout.leftWidth` (پیش‌فرض `268px`)، دو تب Library/Files، لبهٔ کشیدنی، دکمهٔ جمع‌شدن در نوار وضعیت | `implemented` — §۲.۱ |
 | بوم | React Flow؛ `minZoom 0.15 / maxZoom 2.2`؛ `Background` نقطه‌ای: `gap 26`، `size 1.4`، رنگ `#22383440`؛ MiniMap بالا-راست (pannable+zoomable)؛ Controls پایین-چپ | `implemented` |
-| پنل راست | `w-[292px]` ثابت، بازرس نود/یال/بوم | `implemented`؛ نوار وضعیت پایین **وجود ندارد** (کنسولِ جمع‌شدنی جای آن است) |
+| پنل راست | عرض از `canvas.layout.rightWidth` (پیش‌فرض `292px`)، بازرس نود/یال/بوم، لبهٔ کشیدنی | `implemented` — §۲.۱ |
 | شناورها | ChatPanel · FileViewer · HistoryModal · SettingsModal · PortModal · Toasts · BootOverlay | `implemented`؛ SettingsModal یک بخش **Appearance** دارد: تم + «snap به گریدِ ۲۶» (`src/components/Overlays.tsx#SettingsModal`) |
-| ذخیرهٔ تنظیمات ظاهری | `lc-settings` در localStorage، نوشته‌شده توسط `src/store.ts#updateSettings` | `implemented` طبق `docs/decisions/adr-006-theme-is-device-scoped.md` — و **هیچ** کلید ظاهری در `canvas.yaml` نیست، عمداً |
+| ذخیرهٔ تنظیمات ظاهری | `lc-settings` در localStorage، فقط از راه `src/lib/core.ts#writeSettingsLocal` | `implemented` طبق `docs/decisions/adr-006-theme-is-device-scoped.md` و `adr-007-settings-live-behind-two-functions.md` — و **هیچ** کلید ظاهری در `canvas.yaml` نیست، عمداً |
+| نوار وضعیت پایین | `22px` (`src/lib/core.ts#STATUS_BAR_HEIGHT`)، چپ: عنوان + شمارش + حالت ذخیره؛ راست: وضعیت اجرا + ذخیره + پنل‌ها | `implemented` — §۲.۱ |
+| حالت تمرکز | `Ctrl+K Z` روشن، `Escape` دو بار خاموش؛ هر دو پنل و کنسول پنهان | `implemented`؛ **در هیچ فایلی ذخیره نمی‌شود** |
+
+### ۲.۱ اعداد چیدمان (هر کدام یک ادعا، هر ادعا یک محل ذخیره)
+
+| مورد | مقدار | محل ذخیره | ارجاع |
+|---|---|---|---|
+| عرض پنل چپ / راست | پیش‌فرض `268px` / `292px`، بازهٔ مجاز `200px`…`520px` | `canvas.yaml` → `layout.leftWidth` / `layout.rightWidth` | `src/lib/core.ts#PANEL_MIN`، `layout.test.ts` |
+| باز/بسته بودن پنل‌ها | بولین؛ نبودنِ کلید یعنی **باز** | `canvas.yaml` → `layout.leftOpen` / `rightOpen` | `src/lib/core.ts#normalizeLayout` |
+| دستهٔ کشیدن | `5px`، `cursor-col-resize`، hover با `amber-lc/40` | — (کروم) | `src/components/SidePanels.tsx#ResizeHandle` |
+| debounce نوشتن چیدمان | `500ms` بعد از آخرین حرکت | — | `src/lib/engine.ts#touchLayout` |
+| ارتفاع نوار وضعیت | `22px`، متن `9.5px`، `border-t ink-700` | — (کروم) | `src/components/Overlays.tsx#StatusBar` |
+| حالت تمرکز | بولین، فقط حافظه | **هیچ فایلی** | `docs/decisions/adr-009-layout-is-canvas-content-focus-mode-is-not.md` |
+| زمانِ مجاز بین دو کلیدِ `Ctrl+K` و `Z` | `1500ms` | — | `src/lib/core.ts#createChord` |
+| فاصلهٔ دو `Escape` | `400ms` | — | `src/lib/core.ts#createDoubleTap` |
 
 **تصمیم‌های بازِ همین بخش** (در `docs/inbox.md` با اولویت): docking/collapse پنل‌ها، نوار وضعیت واقعی، و
 «Focus Mode» که هر سه پنل کناری را مخفی می‌کند.

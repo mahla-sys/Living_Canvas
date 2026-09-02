@@ -5,8 +5,9 @@
 import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  validateAgainstSchema, parseOutputSchema,
+  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout,
   type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
+  type ModelRoute,
 } from "./core";
 import {
   FsAccessStorageAdapter, isFsAccessSupported, pickCanvasDirectory, ensurePermission,
@@ -18,7 +19,7 @@ import {
 } from "./portable";
 import {
   ROOT, CANVAS_ID, APP_VERSION, STRUCTURE_VERSION, buildSeed, emptyExecution, roleById,
-  makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc,
+  makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc, DEFAULT_LAYOUT,
   ROLE_SCHEMAS, schemaPathFor, makeRoleSchema,
   type AppState, type RFNode, type RFEdge, type TemplateSpec, type TemplateInfo,
 } from "../state";
@@ -123,6 +124,25 @@ function overviewMd(s: AppState): string {
   );
 }
 
+/**
+ * The single writer of `canvas.yaml` (ADR-009). Two triggers reach it — the 700 ms content save and the
+ * 500 ms layout drag — and that is the point: a second writer for the same file is how a canvas grows two
+ * truths about itself. `layout` is canvas content, so it is written here and read back by `hydrate`.
+ */
+export async function writeCanvasYaml(s: AppState): Promise<void> {
+  const lay = normalizeLayout(s.canvas.layout);
+  await storage.writeFile(`${ROOT}/canvas.yaml`, toYaml({
+    id: s.canvasId, title: s.canvas.title, created_at: s.canvas.created_at,
+    updated_at: nowIso(), owner: s.canvas.owner, default_model: s.canvas.default_model,
+    canvas_type: s.canvas.canvas_type, tags: s.canvas.tags,
+    template_id: s.canvas.template_id, template_version: s.canvas.template_version,
+    layout: {
+      leftWidth: lay.leftWidth, rightWidth: lay.rightWidth,
+      leftOpen: lay.leftOpen, rightOpen: lay.rightOpen,
+    },
+  }));
+}
+
 async function writeCore(s: AppState) {
   // no graph.json: the node/edge files are the graph, and a cache that can disagree with them is a bug
   // factory (Q3). state.json stays for what the files do not carry (outputs, chats, logs, snapshots).
@@ -139,12 +159,7 @@ async function writeCore(s: AppState) {
   await Promise.all([
     storage.writeJson(`${ROOT}/state.json`, state),
     storage.writeFile(`${ROOT}/canvas-overview.md`, overviewMd(s)),
-    storage.writeFile(`${ROOT}/canvas.yaml`, toYaml({
-      id: s.canvasId, title: s.canvas.title, created_at: s.canvas.created_at,
-      updated_at: nowIso(), owner: s.canvas.owner, default_model: s.canvas.default_model,
-      canvas_type: s.canvas.canvas_type, tags: s.canvas.tags,
-      template_id: s.canvas.template_id, template_version: s.canvas.template_version,
-    })),
+    writeCanvasYaml(s),
   ]);
 }
 
@@ -170,9 +185,26 @@ export function touch(api: EngineApi) {
   debouncedSave(api);
 }
 
+/**
+ * The panel-resize debounce: 500 ms, shorter than the content save because a drag should reach the file
+ * while the user still remembers moving it, and it writes only `canvas.yaml` (ADR-009). It rides the same
+ * `saveChain`, so a flush before Export or a reload waits for the layout too.
+ */
+const debouncedSaveLayout = debounce((api: EngineApi) => {
+  const s = api.get();
+  saveChain = saveChain.then(() => writeCanvasYaml(s)).catch(() => undefined);
+}, 500);
+
+/** Called at the end of a panel drag / toggle. State is already updated; this only schedules the file. */
+export function touchLayout(api: EngineApi) {
+  api.set({ saveState: "saving" });
+  debouncedSaveLayout(api);
+}
+
 /** Waits until every pending write has landed on the StorageAdapter. Export always calls this first. */
 export async function flushPending(): Promise<void> {
   debouncedSave.flush();
+  debouncedSaveLayout.flush();
   await saveChain;
 }
 
@@ -305,11 +337,12 @@ export async function testFallback(api: EngineApi) {
     toast(api, "info", "No key configured; the system runs on the internal simulator.");
     return;
   }
-  emit(api, "system", "fallback test: calling DeepSeek for real…");
+  const route = resolveModelRoute(s.settings.model, s.settings.model);
+  emit(api, "system", `fallback test: calling ${route.provider}/${route.model} for real…`);
   try {
-    const text = await askModel(s.settings.apiKey.trim(), s.settings.model, [
+    const text = await askModel(route, s.settings.apiKey.trim(), [
       { role: "user", content: "Answer in one word: hello" },
-    ]);
+    ], 16);
     emit(api, "system", `fallback test passed — model answered “${String(text).slice(0, 50)}”`);
     toast(api, "success", "DeepSeek connection is up ✓");
   } catch (err) {
@@ -444,13 +477,18 @@ export async function writeOutputs(api: EngineApi, nodeId: string, entries: Outp
 
 interface LlmMsg { role: "system" | "user" | "assistant"; content: string }
 
-async function askModel(apiKey: string, model: string, messages: LlmMsg[]): Promise<string> {
-  const res = await fetch("https://api.deepseek.com/chat/completions", {
+/**
+ * One provider call. The endpoint comes from `resolveModelRoute` (ADR-008) — the model a node names decides
+ * where the request goes — and `max_tokens` comes from that node's own `AgentConfig`, which used to be
+ * pinned at 900 here while the UI offered 4000. Both were controls that did not control anything.
+ */
+async function askModel(route: ModelRoute, apiKey: string, messages: LlmMsg[], maxTokens: number): Promise<string> {
+  const res = await fetch(route.endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: model || "deepseek-chat", messages, max_tokens: 900, temperature: 0.7 }),
+    body: JSON.stringify({ model: route.model, messages, max_tokens: maxTokens, temperature: 0.7 }),
   });
-  if (!res.ok) throw new Error(`DeepSeek API ${res.status}`);
+  if (!res.ok) throw new Error(`${route.provider} API ${res.status}`);
   const j = await res.json();
   const text = j?.choices?.[0]?.message?.content;
   if (!text) throw new Error("empty response from the model");
@@ -799,18 +837,20 @@ async function executeNode(api: EngineApi, nodeId: string) {
       await ledgerRow(api, { node: nodeId, tool: "read_output", status: "denied", detail: blockedReads.join(", ") });
     }
 
-    // step 4 — generation
+    // step 4 — generation. `agent.model` is the model that runs (ADR-008); `settings.model` is only the
+    // fallback for a node whose file predates the field or whose author left it empty.
+    const route = resolveModelRoute(agent?.model, api.get().settings.model);
     await appendLog(api, nodeId, agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey
-      ? `calling model ${api.get().settings.model}…`
+      ? `calling ${route.provider}/${route.model} (max_tokens ${agent?.max_tokens ?? 900})…`
       : "generating a response in the phase 1 simulator…");
     let fields: Record<string, string>;
     const required = agent?.context_contract.output_contract.required_fields ?? ["summary"];
     if (agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey) {
       try {
-        const text = await askModel(api.get().settings.apiKey, api.get().settings.model, [
+        const text = await askModel(route, api.get().settings.apiKey, [
           { role: "system", content: agent.system_prompt },
           { role: "user", content: `Canvas summary and memory:\n${memoryTxt.slice(0, 1200)}\n\nOutput of the previous node:\n${upstream.slice(0, 800)}\n\nWrite the output with these fields: ${required.join(", ")}.` },
-        ]);
+        ], agent.max_tokens);
         fields = { summary: text, ...simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner) };
       } catch (err) {
         await appendLog(api, nodeId, `API error: ${String(err)} — falling back to the simulator (§12.6 fallback)`);
@@ -1138,10 +1178,15 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
         role: m.role === "user" ? "user" as const : "assistant" as const,
         content: m.text,
       }));
-      reply = await askModel(settings.apiKey, settings.model, [
-        { role: "system", content: node.data.agent.system_prompt },
-        ...history,
-      ]);
+      reply = await askModel(
+        resolveModelRoute(node.data.agent.model, settings.model),
+        settings.apiKey,
+        [
+          { role: "system", content: node.data.agent.system_prompt },
+          ...history,
+        ],
+        node.data.agent.max_tokens
+      );
     } catch {
       toast(api, "warn", "Model unavailable; the reply was simulated.");
       reply = simChatReply(node.data.agent.role_id, node.data.title, text, api.get().memory.agents[nodeId]);
@@ -1496,7 +1541,14 @@ export async function hydrate(api: EngineApi): Promise<boolean> {
     const mode = storageMode();
 
     api.set({
-      canvas: { ...api.get().canvas, ...(state?.canvas ?? {}), title: derived.canvasTitle ?? state?.canvas?.title ?? api.get().canvas.title },
+      canvas: {
+        ...api.get().canvas,
+        ...(state?.canvas ?? {}),
+        title: derived.canvasTitle ?? state?.canvas?.title ?? api.get().canvas.title,
+        /* the file wins (Law 1): `state.json` carries a copy of `canvas` for the cache's benefit, but
+           `layout` is canvas content, so `canvas.yaml` decides it. Absent key -> defaults, not hidden. */
+        layout: normalizeLayout(derived.layout ?? api.get().canvas.layout ?? DEFAULT_LAYOUT),
+      },
       memory,
       outputs: state?.outputs ?? {},
       chats: state?.chats ?? {},

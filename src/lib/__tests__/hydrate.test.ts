@@ -22,6 +22,7 @@ function makeApi(initial?: Partial<AppState>) {
       title: "default title", owner: "mahla", canvas_type: "agent-pipeline", tags: [],
       default_model: "deepseek-chat", template_id: "—", template_version: "—",
       created_at: "2026-09-01T10:00:00.000Z", updated_at: "2026-09-01T10:00:00.000Z",
+      layout: { leftWidth: 268, rightWidth: 292, leftOpen: true, rightOpen: true },
     },
     nodes: [], edges: [],
     memory: {
@@ -35,7 +36,7 @@ function makeApi(initial?: Partial<AppState>) {
     execution: emptyExecution(), events: [], toasts: [],
     settings: { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 1, backendUrl: "", workspaceRoot: null, theme: "botanical", snapToGrid: false },
     saveState: "saved", typing: {},
-    ui: { leftTab: "palette", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false },
+    ui: { leftTab: "palette", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
     ...initial,
   };
   return {

@@ -1,6 +1,14 @@
-# Living Canvas CI definition. This repository keeps its code in English and the agent account that maintains
-# the branch cannot write under .github/workflows/ (GitHub App permission), so the file lives here.
-# To activate:  cp ci/github-actions.yml .github/workflows/ci.yml && git add .github/workflows
+# Living Canvas CI definition — NOT the file that runs, and it cannot become one from this connection.
+#
+# To activate (needs a human with repository access, one commit):
+#     cp ci/github-actions.yml .github/workflows/ci.yml && git add .github && git commit
+#
+# This was re-attempted on 2026-09-02 and the remote refused it, verbatim:
+#     ! [remote rejected] arena/01a061ef-living-canvas (refusing to allow a GitHub App to create or
+#        update workflow `.github/workflows/ci.yml` without `workflows` permission)
+# Writing the file locally succeeds; the push does not. So the block is a real permission boundary and the
+# copy step above is genuinely someone else's. Until it lands, the eight commands below are the gate and
+# whoever merges runs them by hand.
 #
 # The commands the codebase is judged by (docs/ARCHITECTURE.md #11.3).
 # `npm run build` already runs `tsc --noEmit` first, so the type gate is not optional here.
@@ -33,3 +41,11 @@ jobs:
         run: node scripts/check-palette.mjs
       - name: Architecture doc anchors are current
         run: node scripts/doc-anchors.mjs --check
+      - name: Counts quoted in the prose are current
+        run: node scripts/check-facts.mjs --check
+      - name: the committed workflow is the twin of ci/github-actions.yml
+        run: |
+          if ! diff -u ci/github-actions.yml .github/workflows/ci.yml; then
+            echo "::error::ci/github-actions.yml and .github/workflows/ci.yml have drifted — copy one over the other"
+            exit 1
+          fi

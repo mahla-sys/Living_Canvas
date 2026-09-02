@@ -2,19 +2,18 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App.tsx";
-import { DEFAULT_THEME, isThemeId } from "./lib/core";
+import { DEFAULT_THEME, isThemeId, readSettingsLocal, clearSettingsLocal } from "./lib/core";
 
 /* The theme must be on <html> before the first paint: setting it in a component effect means the canvas
    flashes botanical for a frame under every other theme. An unknown id from an older build falls back to
-   the default rather than reaching `data-theme`, where it would silently select nothing. */
+   the default rather than reaching `data-theme`, where it would silently select nothing.
+
+   This reads through `readSettingsLocal` and not through its own `getItem` (ADR-007): the settings store is
+   a named seam, and a seam with a second reader is not a seam. `readSettingsLocal` never throws, so a broken
+   blob still costs one default instead of a blank page. */
 (() => {
-  let theme: string = DEFAULT_THEME;
-  try {
-    const raw = localStorage.getItem("lc-settings");
-    const parsed = raw ? (JSON.parse(raw) as { theme?: unknown }) : null;
-    if (parsed && isThemeId(parsed.theme)) theme = parsed.theme;
-  } catch { /* a broken settings blob is not worth a blank page */ }
-  document.documentElement.dataset.theme = theme;
+  const stored = readSettingsLocal();
+  document.documentElement.dataset.theme = stored && isThemeId(stored.theme) ? stored.theme : DEFAULT_THEME;
 })();
 
 /* ---------------- error surface: show the reason instead of a blank page ---------------- */
@@ -44,8 +43,8 @@ function renderErrorPanel(title: string, detail: string) {
   document.getElementById("lc-recover")?.addEventListener("click", () => {
     try {
       indexedDB.deleteDatabase("living-canvas");
-      localStorage.removeItem("lc-settings");
     } catch { /* ignore */ }
+    clearSettingsLocal();
     setTimeout(() => location.reload(), 250);
   });
   document.getElementById("lc-reload")?.addEventListener("click", () => location.reload());
@@ -85,7 +84,7 @@ class Boundary extends React.Component<{ children?: React.ReactNode }, { err: Er
                 onClick={() => {
                   try {
                     indexedDB.deleteDatabase("living-canvas");
-                    localStorage.removeItem("lc-settings");
+                    clearSettingsLocal();
                   } catch { /* ignore */ }
                   setTimeout(() => location.reload(), 250);
                 }}

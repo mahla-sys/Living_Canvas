@@ -113,11 +113,22 @@ for (const [i, line] of outside.split("\n").entries()) {
   if (/#[0-9a-fA-F]{3,8}\b/.test(line)) fail(`src/index.css: colour literal outside the token blocks — line ~${i + 1}: ${line.trim().slice(0, 60)}`);
 }
 
+/* ---- one place per colour, in the components too ----
+   The old rule only caught Tailwind arbitrary values (`bg-[#fff]`). That left every inline style free, which
+   is where the actual literals were: a status map, an event-tag map, a toast palette, two `boxShadow` glows —
+   ~40 hexes that a theme switch missed entirely, so "themable" was a claim about half the UI.
+
+   The rule now is: no hex anywhere in a component. One exception, and it is a *stated* one: a line ending in
+   `// lc-data-colour` is a colour that gets written into a canvas file (a node's colour, a stroke's), where
+   it is data the user drew rather than chrome we paint. Re-tinting those would rewrite somebody's graph. */
 const dir = join(ROOT, "src/components");
+let dataColours = 0;
 for (const f of readdirSync(dir).filter((n) => n.endsWith(".tsx"))) {
   const text = readFileSync(join(dir, f), "utf8");
   for (const [i, line] of text.split("\n").entries()) {
-    if (/\[#([0-9a-fA-F]{3,8})\]/.test(line)) fail(`src/components/${f}:${i + 1} Tailwind colour literal — use a token: ${line.trim().slice(0, 60)}`);
+    if (!/#[0-9a-fA-F]{3,8}\b/.test(line)) continue;
+    if (/\/\/\s*lc-data-colour\b/.test(line)) { dataColours++; continue; }
+    fail(`src/components/${f}:${i + 1} colour literal — use a role token (var(--color-…)) or mark the line \"// lc-data-colour\" if it is written into a canvas file: ${line.trim().slice(0, 70)}`);
   }
 }
 
@@ -125,4 +136,4 @@ if (problems.length) {
   console.error(`palette: ${problems.length} problem(s)\n` + problems.map((p) => `  - ${p}`).join("\n"));
   process.exit(1);
 }
-console.log(`palette check: ${THEME_IDS.length} theme(s) [${THEME_IDS.join(", ")}], ${ROLES.length} roles per theme measured, colour literals confined to the token blocks`);
+console.log(`palette check: ${THEME_IDS.length} theme(s) [${THEME_IDS.join(", ")}], ${ROLES.length} roles per theme measured, contrast >= ${ROLES[ROLES.length - 1].min}:1, no colour literals outside the token blocks (${dataColours} canvas-data line(s) marked)`);
