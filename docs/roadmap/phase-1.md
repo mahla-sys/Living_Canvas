@@ -8,7 +8,7 @@ sources: [docs/ARCHITECTURE.md#0.2, docs/decisions/README.md]
 # Phase 1 — closed
 
 Everything below is shipped and guarded; the citation in parentheses is what fails if it regresses. Verification
-is `npx vitest run` (193 tests in 15 files) plus the five repository gates (`scripts/check-english.mjs`,
+is `npx vitest run` (205 tests in 16 files) plus the five repository gates (`scripts/check-english.mjs`,
 `scripts/check-docs.mjs`, `scripts/check-palette.mjs`, `scripts/doc-anchors.mjs`, `scripts/check-facts.mjs`),
 which is exactly what `.github/workflows/ci.yml` runs.
 
@@ -37,7 +37,12 @@ which is exactly what `.github/workflows/ci.yml` runs.
 - [x] `agent.model` and `agent.max_tokens` reach the provider request (`model-route.test.ts`, `adr-008-agent-model-selects-the-model.md`)
 - [x] layout system: resizable panels in `canvas.yaml`, 22px status strip, focus mode in memory only (`layout.test.ts`, `layout-render.test.ts`, `docs/patterns/layout-system.md`)
 - [x] colour literals confined to the token blocks, including inline styles in components (`scripts/check-palette.mjs`)
-- [x] accent is a role token a theme can re-map, amber survives only as canvas data, `plum` is the default (`adr-010-accent-is-a-role-and-plum-is-default.md`)
+- [x] accent is a role token a theme can re-map, amber survives only as canvas data (`adr-010-accent-is-a-role-and-plum-is-default.md`)
+- [x] an accent must sit ≥60° from its own theme's ink hue, enforced by the palette gate; `botanical` is the default again (`adr-011-accent-must-differ-in-hue-from-ink.md`)
+- [x] the pre-React splash and the crash panel follow the theme and are under the palette gate — both were green and amber through a change that removed both from every component (`scripts/check-palette.mjs`)
+- [x] every scroller and all four modal shells carry `min-h-0`; the Settings modal had no scroll container at all (`interactive.test.tsx`)
+- [x] jsdom + @testing-library/react, per file, so mounted-component bugs are caught (`interactive.test.tsx`, `docs/ARCHITECTURE.md#7`)
+- [x] the deferred feature set is registered with its infrastructure impact before any of it is built (`docs/roadmap/infrastructure-horizon.md`)
 - [x] both side panels scroll, asserted on rendered HTML, without losing the resize handle (`layout-render.test.ts`)
 - [x] a four-agent pipeline with a conditional edge runs end to end through `engine` + the store: `outputs/`, `runs/<run-id>.md`, locks released, `agent.model` at the provider (`pipeline.test.ts`)
 - [x] boot measured rather than assumed: ~4 ms and 12 storage ops warm, under a 40-op budget; vendor chunks split so a returning reader re-downloads the app alone (`boot.test.ts`, `vite.config.js`)

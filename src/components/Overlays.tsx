@@ -19,8 +19,9 @@ import { isFsAccessSupported } from "../lib/fs-access";
 const RUN_TONE: Record<string, string> = {
   idle: "text-ink-500",
   running: "text-lc-accent",
-  paused: "text-lc-accent",
-  waiting_approval: "text-lc-accent",
+  // paused and waiting are "this needs you", not "this is live" — that is the warn role, not the accent
+  paused: "text-lc-warn",
+  waiting_approval: "text-lc-warn",
   completed: "text-sage",
   failed: "text-ember",
   stopped: "text-ember",
@@ -71,7 +72,7 @@ export function StatusBar() {
 
       {/* right — the moment */}
       <div className="flex items-center gap-2 shrink-0">
-        {chordDepth > 0 && <span className="text-[9.5px] font-mono text-lc-accent">Ctrl+K … press Z</span>}
+        {chordDepth > 0 && <span className="text-[9.5px] font-mono text-ink-300">Ctrl+K … press Z</span>}
         {focus && (
           <button
             onClick={actions.toggleFocusMode}
@@ -129,7 +130,7 @@ export function TopBar() {
           <p className="font-display text-[19px] text-ink-50 tracking-wide">Living Canvas</p>
           <p className="text-[9px] text-ink-400 mt-0.5 flex items-center gap-1.5">
             Living Canvas
-            <span className="font-mono text-lc-accent/90 px-1 py-px rounded bg-lc-accent/10 border border-lc-accent/25">v{APP_VERSION}</span>
+            <span className="font-mono text-ink-300 px-1 py-px rounded bg-ink-800 border border-ink-700">v{APP_VERSION}</span>
             <span className="w-1 h-1 rounded-full bg-ink-500" />
             doc <span className="font-mono">1.3</span>
             <span className="w-1 h-1 rounded-full bg-sage" title="phase 1 closed" />
@@ -231,7 +232,7 @@ export function ActivityConsole() {
         <IChevD size={13} className={`ms-auto transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="flex-1 overflow-y-auto px-3.5 pb-2 space-y-[3px]">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 pb-2 space-y-[3px]">
           {events.length === 0 && <p className="text-[10.5px] text-ink-500 py-2">No event yet — start working on the canvas.</p>}
           {events.map((e: BusEvent) => {
             // one lookup per row, because the two alpha tints are derived from the same role
@@ -326,7 +327,7 @@ export function ChatPanel() {
         </button>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3.5 space-y-2.5">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3.5 space-y-2.5">
         {msgs.length === 0 && (
           <div className="text-center py-8 anim-fade">
             <ISpark size={22} className="mx-auto text-lc-accent/60 mb-2" />
@@ -405,7 +406,7 @@ export function HistoryModal() {
           </button>
           <button onClick={() => actions.setHistoryOpen(false)} className="p-1 rounded-md text-ink-400 hover:text-ember transition-colors cursor-pointer"><IX size={15} /></button>
         </div>
-        <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-1.5">
           {snapshots.length === 0 && (
             <p className="text-center text-[11.5px] text-ink-400 py-10">
               No checkpoint yet.<br />One is saved automatically after every executed step.
@@ -442,13 +443,13 @@ export function SettingsModal() {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-950/75 backdrop-blur-[3px] anim-fade" onClick={() => actions.setSettingsOpen(false)}>
-      <div className="w-full max-w-[520px] rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] anim-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2.5 px-4 py-3 border-b border-ink-700 bg-ink-850">
+      <div data-lc-settings className="w-full max-w-[520px] max-h-[86vh] flex flex-col rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_30px_80px_-20px_rgba(0,0,0,0.8)] anim-pop overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 flex items-center gap-2.5 px-4 py-3 border-b border-ink-700 bg-ink-850">
           <IGear size={16} className="text-lc-accent" />
           <p className="text-[13px] font-extrabold text-ink-50 flex-1">Engine and model settings</p>
           <button onClick={() => actions.setSettingsOpen(false)} className="p-1 rounded-md text-ink-400 hover:text-ember transition-colors cursor-pointer"><IX size={15} /></button>
         </div>
-        <div className="p-4 space-y-4">
+        <div data-lc-modal-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
           <div>
             <p className="text-[11px] font-bold text-ink-300 mb-2">AI provider (§15)</p>
             <div className="grid grid-cols-2 gap-2">
@@ -520,12 +521,14 @@ export function SettingsModal() {
 
           <div>
             <span className="flex items-center gap-1.5 text-[11px] font-bold text-ink-300 mb-2">
-              <IGear size={11} className="text-lc-accent" /> Appearance — this device, not the canvas
+              <IGear size={11} className="text-ink-400" /> Appearance — this device, not the canvas
             </span>
             <div className="grid grid-cols-2 gap-2">
               {THEMES.map((t) => (
                 <button
                   key={t.id}
+                  data-lc-theme={t.id}
+                  aria-pressed={settings.theme === t.id}
                   onClick={() => actions.updateSettings({ theme: t.id })}
                   className={`text-start p-3 rounded-xl border transition-all cursor-pointer ${settings.theme === t.id ? "border-lc-accent/60 bg-lc-accent/10" : "border-ink-600 bg-ink-850 hover:border-ink-500"}`}
                 >
@@ -633,7 +636,7 @@ export function BootOverlay() {
           <div>
             <p className="font-display text-[26px] text-ink-50 leading-8">Living Canvas</p>
             <p className="text-[10.5px] text-ink-400">
-              file-first layout — architecture doc <span className="font-mono">1.3</span> · release <span className="font-mono text-lc-accent/80">v{APP_VERSION}</span>
+              file-first layout — architecture doc <span className="font-mono">1.3</span> · release <span className="font-mono text-ink-300">v{APP_VERSION}</span>
             </p>
           </div>
         </div>
@@ -772,7 +775,7 @@ export function PortModal() {
           <button onClick={close} className="ms-auto p-1.5 rounded-md text-ink-400 hover:text-ember transition-colors cursor-pointer"><IX size={15} /></button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
           {/* source of truth */}
           <div className="rounded-xl border border-ink-700 bg-ink-950/60 px-3.5 py-2">
             <ModeRow k="storage source" v={MODE_LABEL[mode] ?? mode} tone={mode === "memory" ? "warn" : "ok"} />

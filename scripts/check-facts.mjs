@@ -181,7 +181,7 @@ console.log(
   `${testFiles.length} test files / ${tests} tests — written into ${[...touched].join(", ")}`
 );
 if (existsSync(join(ROOT, "src/lib/__tests__"))) {
-  const names = readdirSync(join(ROOT, "src/lib/__tests__")).filter((f) => f.endsWith(".test.ts"));
+  const names = readdirSync(join(ROOT, "src/lib/__tests__")).filter((f) => /\.test\.tsx?$/.test(f)); // .tsx too: a jsdom test is still a test
   if (names.length !== testFiles.length) {
     console.error(`facts: the __tests__ folder holds ${names.length} files but git tracks ${testFiles.length} — is one untracked?`);
     process.exit(1);

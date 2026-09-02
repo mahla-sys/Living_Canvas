@@ -753,7 +753,7 @@ function CanvasInner() {
       {/* stats chip */}
       <div data-drawui className="absolute top-3 left-3 z-10 flex items-center gap-2 anim-fade">
         <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-ink-900/85 border border-ink-700 backdrop-blur-sm text-[11px] text-ink-300">
-          <span className="flex items-center gap-1.5"><IBrain size={13} className="text-lc-accent" /> {agentCount} agents</span>
+          <span className="flex items-center gap-1.5"><IBrain size={13} className="text-ink-300" /> {agentCount} agents</span>
           <span className="w-px h-3.5 bg-ink-700" />
           <span>{nodes.length} nodes</span>
           <span className="w-px h-3.5 bg-ink-700" />

@@ -107,7 +107,7 @@ function resolveCitation(raw) {
    are prose about the canvas file format — a data file the app writes, not a file in this repository — and the
    gate must not pretend to know where they live, or every honest sentence about `state.json` becomes a failure. */
 const CITATION =
-  /(?:src|docs|scripts|ci|tests|ci)\/[\w./#-]+\.(?:tsx|ts|mjs|md|json|ya?ml)(?:#[\w.][\w.#-]*)?|\b[\w.-]+\.test\.ts|\badr-\d{3}-[\w-]+\.md/g;
+  /(?:src|docs|scripts|ci|tests|ci)\/[\w./#-]+\.(?:tsx|ts|mjs|md|json|ya?ml)(?:#[\w.][\w.#-]*)?|\b[\w.-]+\.test\.tsx?(?!x?\w)|\badr-\d{3}-[\w-]+\.md/g;
 
 /** every citation in a body, minus the ones inside the frontmatter `sources:` line (checked separately) */
 function citationsIn(bodyText) {

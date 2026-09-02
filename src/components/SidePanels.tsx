@@ -456,10 +456,6 @@ export function LeftPanel() {
   if (focus || !open) return null;
   return (
     <>
-    /* min-h-0 on both the aside and the scroller: without it a flex item's `min-height: auto` keeps it at
-       its content height, `overflow-y: auto` never engages, and a long file tree is simply cut off by the
-       root's overflow-hidden. The resize handle is a sibling of the aside, so the width still comes from
-       `style` alone and dragging is unaffected. */
     <aside style={{ width }} className="shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full min-h-0 overflow-hidden">
       <div className="flex shrink-0 border-b border-ink-700">
         {([["palette", "Library", ISpark], ["files", "Files", IFolder]] as const).map(([key, label, Icon]) => (
@@ -533,9 +529,9 @@ function NodeInspector({ node }: { node: RFNode }) {
       </div>
 
       {runLocked && (
-        <div className="mx-3.5 mt-3 mb-0.5 flex items-center gap-2 px-3 py-2 rounded-lg bg-lc-accent/10 border border-lc-accent/45 anim-rise">
-          <ILock size={13} className="text-lc-accent shrink-0" />
-          <p className="text-[10.5px] leading-4 text-lc-accent font-bold">Locked while running — editing is disabled until this step ends (§12.5)</p>
+        <div className="mx-3.5 mt-3 mb-0.5 flex items-center gap-2 px-3 py-2 rounded-lg bg-lc-warn/10 border border-lc-warn/45 anim-rise">
+          <ILock size={13} className="text-lc-warn shrink-0" />
+          <p className="text-[10.5px] leading-4 text-lc-warn font-bold">Locked while running — editing is disabled until this step ends (§12.5)</p>
         </div>
       )}
 
@@ -749,7 +745,7 @@ function EdgeInspector({ edgeId }: { edgeId: string }) {
   return (
     <div className="anim-fade">
       <div className="px-3.5 py-3 border-b border-ink-700">
-        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><IPulse size={15} className="text-lc-accent" /> Edge</p>
+        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><IPulse size={15} className="text-ink-300" /> Edge</p>
         <p className="text-[10px] font-mono text-ink-500 mt-1">{edge.source} → {edge.target}</p>
       </div>
       <Section title="Connection">
@@ -805,7 +801,7 @@ function CanvasInspector() {
   return (
     <div className="anim-fade">
       <div className="px-3.5 py-3 border-b border-ink-700">
-        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><INode size={15} className="text-lc-accent" /> Canvas settings</p>
+        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><INode size={15} className="text-ink-300" /> Canvas settings</p>
         <p className="text-[10px] text-ink-400 mt-1 leading-5">Nothing selected — canvas-wide settings live here.</p>
       </div>
       <Section title="canvas.yaml">
@@ -901,7 +897,7 @@ export function FileViewer() {
             <button onClick={() => actions.openFile(null)} className="p-1 rounded-md text-ink-400 hover:text-ember transition-colors cursor-pointer"><IX size={15} /></button>
           </div>
         </div>
-        <pre className="flex-1 overflow-auto p-4 text-[11.5px] leading-5 font-mono text-ink-200 whitespace-pre-wrap" dir="auto">
+        <pre className="flex-1 min-h-0 overflow-auto overscroll-contain p-4 text-[11.5px] leading-5 font-mono text-ink-200 whitespace-pre-wrap" dir="auto">
           {viewer.content}
         </pre>
         <div className="px-4 py-2 border-t border-ink-700 bg-ink-850 flex items-center gap-2 text-[10px] text-ink-500">

@@ -65,10 +65,13 @@ function token(name, theme) {
   return base ? base[1] : null;
 }
 
-const luminance = (hex) => {
+const rgb = (hex) => {
   const h = hex.replace("#", "");
   const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h.slice(0, 6);
-  const lin = [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255)
+  return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16));
+};
+const luminance = (hex) => {
+  const lin = rgb(hex).map((v) => v / 255)
     .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
   return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
 };
@@ -107,11 +110,44 @@ for (const theme of THEME_IDS) {
     if (r < role.min) fail(`${theme}: ${role.label} is ${r.toFixed(2)}:1 on the canvas background, needs ${role.min}:1 (${fg} on ${bg})`);
   }
 }
+/* ---- an accent must be a different hue from the ink it sits on ----
+   This rule exists because of a bug report, not a theory: with `plum` as the default theme, the plum theme's
+   accent was also plum — hue 290 on an ink ramp of hue 265, 25 degrees apart. Every contrast floor passed,
+   because the accent was plenty bright; the interface was simply one undifferentiated purple, and the reader
+   said so in exactly those words. Contrast measures whether you *can* read something. Hue separation measures
+   whether you can tell it apart from everything next to it, and no WCAG number covers that.
+
+   60 degrees is the floor: it is well under the 106-117 degrees both shipped themes manage, and well over the
+   25 that broke. */
+const HUE_MIN = 60;
+function hueOf(hexColour) {
+  const [r, g, b] = rgb(hexColour).map((v) => v / 255);
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  if (!d) return 0; // a grey has no hue, and a grey accent on a coloured ramp is already separated
+  let x;
+  if (mx === r) x = ((g - b) / d) % 6; else if (mx === g) x = (b - r) / d + 2; else x = (r - g) / d + 4;
+  x *= 60;
+  return Math.round(x < 0 ? x + 360 : x);
+}
+const hueGap = (a, b) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+for (const theme of THEME_IDS) {
+  const accent = token("color-lc-accent", theme), ink = token("color-ink-950", theme);
+  if (!accent || !ink) continue;
+  const gap = hueGap(hueOf(accent), hueOf(ink));
+  if (gap < HUE_MIN)
+    fail(`${theme}: the accent ${accent} (hue ${hueOf(accent)}°) is only ${gap}° from this theme's ink ${ink} (hue ${hueOf(ink)}°) — under ${HUE_MIN}°, so the interface reads as one flat colour. Give this theme an accent from a different hue family`);
+}
+
 /* every theme is reported, so the numbers are in the log rather than only in a failure message */
-const report = THEME_IDS.map((t) => `${t}: ` + ROLES.map((r) => {
-  const r2 = ratios.get(`${t}/${r.token}`);
-  return `${r.label} ${r2 == null ? "—" : r2.toFixed(2) + ":1"}`;
-}).join(", ")).join("\n  ");
+const report = THEME_IDS.map((t) => {
+  const a = token("color-lc-accent", t), i = token("color-ink-950", t);
+  const gap = a && i ? `accent/ink hue gap ${hueGap(hueOf(a), hueOf(i))}°` : "";
+  const roles = ROLES.map((r) => {
+    const ratio = ratios.get(`${t}/${r.token}`);
+    return `${r.label} ${ratio == null ? "—" : ratio.toFixed(2) + ":1"}`;
+  }).join(", ");
+  return `${t} [${gap}]: ${roles}`;
+}).join("\n  ");
 
 /* ---- one place per colour ---- */
 /* Two fixes here. The theme-block strip was a single non-global replace, so the day a second theme block
@@ -139,6 +175,7 @@ const HEX = /#[0-9a-fA-F]{3,8}\b/;
 const stripComment = (line) => line.replace(/\/\/.*$/, "").replace(/\/\*[\s\S]*?\*\//g, "");
 const dir = join(ROOT, "src/components");
 let dataColours = 0;
+let fallbacks = 0;
 for (const f of readdirSync(dir).filter((n) => n.endsWith(".tsx"))) {
   const text = readFileSync(join(dir, f), "utf8");
   for (const [i, line] of text.split("\n").entries()) {
@@ -155,8 +192,22 @@ for (const f of readdirSync(dir).filter((n) => n.endsWith(".tsx"))) {
    because the stylesheet may be the thing that failed to load, and an invisible Recover button on the panel
    whose only job is to offer recovery is worse than a hardcoded colour. So here a hex is allowed in exactly
    one position: as the fallback of a token, `var(--color-…, #…)`. Anything else fails. */
+/* `index.html` is scanned under the same rule, and it needs one extra shape: the favicon is a data-URI, where
+   `#` is percent-encoded, so a colour there reads `%23b98bc2`. Both spellings are checked. This file was the
+   last surface no gate looked at, and it is the one every reader sees first. */
+const HTML_HEX = /(?:#|%23)[0-9a-fA-F]{3,8}\b/;
+const html = readFileSync(join(ROOT, "index.html"), "utf8");
+for (const [i, line] of html.split("\n").entries()) {
+  const bare = stripComment(line);
+  if (!HTML_HEX.test(bare)) continue;
+  const guarded = bare
+    .replace(/var\(--[a-z0-9-]+,\s*(?:#|%23)[0-9a-fA-F]{3,8}\)/g, () => { fallbacks++; return ""; })
+    .replace(/%23[0-9a-fA-F]{6}/g, () => { dataColours++; return ""; }); // the favicon data-URI
+  if (HTML_HEX.test(guarded))
+    fail(`index.html:${i + 1} colour literal outside a var() fallback — the pre-React splash follows the theme once the stylesheet loads, and falls back to a literal only when it does not: ${line.trim().slice(0, 70)}`);
+}
+
 const boot = readFileSync(join(ROOT, "src/main.tsx"), "utf8");
-let fallbacks = 0;
 for (const [i, line] of boot.split("\n").entries()) {
   if (!HEX.test(stripComment(line))) continue;
   const withFallbacksRemoved = line.replace(/var\(--[a-z0-9-]+,\s*#[0-9a-fA-F]{3,8}\)/g, (m) => { fallbacks++; return ""; });
@@ -186,4 +237,4 @@ if (problems.length) {
   console.error(`palette: ${problems.length} problem(s)\n` + problems.map((p) => `  - ${p}`).join("\n"));
   process.exit(1);
 }
-console.log(`palette check: ${THEME_IDS.length} theme(s) [${THEME_IDS.join(", ")}], ${ROLES.length} roles per theme, no colour literals outside the token blocks (${dataColours} canvas-data line(s) marked, ${fallbacks} guarded fallback(s) in main.tsx)\n  default theme: ${DEFAULT_THEME}\n  ${report}`);
+console.log(`palette check: ${THEME_IDS.length} theme(s) [${THEME_IDS.join(", ")}], ${ROLES.length} roles per theme, no colour literals outside the token blocks (${dataColours} canvas-data line(s) marked, ${fallbacks} guarded fallback(s) in main.tsx/index.html)\n  default theme: ${DEFAULT_THEME}\n  ${report}`);

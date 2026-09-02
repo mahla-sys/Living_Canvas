@@ -161,17 +161,19 @@ export interface Settings {
    A theme is a set of CSS custom properties, never a colour literal in a component: `src/index.css`
    defines the palette under `@theme` and re-maps it under `:root[data-theme="…"]`. Adding a theme is
    one id here + one block there; the test in `theme.test.ts` fails if the two drift apart. */
-/* the default comes first: `THEMES` drives the order in the Settings picker and `theme.test.ts` pins the two
-   lists to each other, so a reader sees the theme they are actually on at the top of the list */
-export const THEME_IDS = ["plum", "botanical"] as const;
+/* the default comes first: `THEMES` drives the Settings picker order and `theme.test.ts` pins the two lists to
+   each other, so the reader sees the theme they are actually on at the top of the list */
+export const THEME_IDS = ["botanical", "plum"] as const;
 export type ThemeId = (typeof THEME_IDS)[number];
-/* `plum` is the default: it is the theme with no warm accent anywhere, and it clears every contrast floor with
-   more margin than botanical (see `scripts/check-palette.mjs`, which prints both). A user who prefers the old
-   look picks Botanical in Settings; the choice is stored per reader in `lc-settings` (ADR-006). */
-export const DEFAULT_THEME: ThemeId = "plum";
+/* `botanical` is the default again, and the reason is a report from the reader rather than a preference: with
+   `plum` as the default the interface came back as "everything is purple". That was not the background alone —
+   the plum theme's accent was also plum, so ink and accent shared a hue and nothing could be told apart from
+   anything else. Botanical's green-black ramp with a violet accent keeps 117 degrees between them, and the
+   plum theme keeps 106 by taking a jade accent instead (ADR-010). The choice is per reader, in `lc-settings`. */
+export const DEFAULT_THEME: ThemeId = "botanical";
 export const THEMES: { id: ThemeId; label: string; hint: string }[] = [
-  { id: "plum", label: "Dark plum", hint: "violet ink, plum accent — the default; no warm colour anywhere" },
-  { id: "botanical", label: "Botanical", hint: "green-black ink, the original palette — accent is plum here too" },
+  { id: "botanical", label: "Botanical", hint: "green-black ink, violet accent — the default" },
+  { id: "plum", label: "Dark plum", hint: "violet ink, jade accent — no warm colour anywhere" },
 ];
 export function isThemeId(v: unknown): v is ThemeId {
   return (THEME_IDS as readonly unknown[]).includes(v);

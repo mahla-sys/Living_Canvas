@@ -65,10 +65,10 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, 
 | دستهٔ کشیدن | `5px`، `cursor-col-resize`، hover با `lc-accent/40` | — (کروم) | `src/components/SidePanels.tsx#ResizeHandle` |
 | debounce نوشتن چیدمان | `500ms` بعد از آخرین حرکت | — | `src/lib/engine.ts#touchLayout` |
 | ارتفاع نوار وضعیت | `22px`، متن `9.5px`، `border-t ink-700` | — (کروم) | `src/components/Overlays.tsx#StatusBar` |
-| اسکرولِ محتوای دو پنل | `flex-1 min-h-0 overflow-y-auto overscroll-contain` روی **هر دو** پنل؛ `min-h-0` نیمهٔ باربر است | — (کروم) | `src/components/SidePanels.tsx#LeftPanel`، `layout-render.test.ts` |
+| اسکرولِ محتوا | `flex-1 min-h-0 overflow-y-auto overscroll-contain`؛ `min-h-0` نیمهٔ باربر است. چهار مودال هم `max-h-[…vh] flex flex-col` دارند | — (کروم) | `SidePanels.tsx#LeftPanel`، `Overlays.tsx#SettingsModal`، `interactive.test.tsx` |
 | پنل گپ | جایش از `canvas.layout` و `ui.focusMode` و `ui.consoleOpen` **محاسبه** می‌شود (نه عددِ ثابت)، و دکمهٔ بستن `shrink-0 ms-auto` + `aria-label` + `data-lc-chat-close` دارد | `canvas.yaml` → `layout` | `src/components/Overlays.tsx#ChatPanel` |
 | نشانِ living-canvas | **بی‌حرکت**؛ هیچ `anim-breathe` یا `anim-spin-slow`؛ رنگ از `lc-accent` | — (کروم) | `src/components/Overlays.tsx#Logo` |
-| تمِ پیش‌فرض | `plum` (هر دو تم accent‌شان plum است) | `lc-settings` (ADR-006) | `src/lib/core.ts#DEFAULT_THEME`، `docs/decisions/adr-010-accent-is-a-role-and-plum-is-default.md` |
+| تمِ پیش‌فرض | `botanical`؛ تمِ `plum` accent یشمی دارد چون مرکبش بنفش است | `lc-settings` (ADR-006) | `src/lib/core.ts#DEFAULT_THEME`، `docs/decisions/adr-010-accent-is-a-role-and-plum-is-default.md` |
 | حالت تمرکز | بولین، فقط حافظه | **هیچ فایلی** | `docs/decisions/adr-009-layout-is-canvas-content-focus-mode-is-not.md` |
 | زمانِ مجاز بین دو کلیدِ `Ctrl+K` و `Z` | `1500ms` | — | `src/lib/core.ts#createChord` |
 | فاصلهٔ دو `Escape` | `400ms` | — | `src/lib/core.ts#createDoubleTap` |

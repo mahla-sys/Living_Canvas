@@ -36,6 +36,7 @@
      No chrome uses it any more. */
   --color-lc-accent: #b98bc2;
   --color-lc-warn: #d9c9a3;
+  --color-jade: #5ecfa8;
   --color-amber-lc: #e8b04b;
   --color-ember: #e06a4e;
   --color-sage: #8fbf7f;
@@ -67,7 +68,7 @@
   --lc-bg-top: #0d1716;
   --lc-bg-mid: #0b1312;
   --lc-bg-bottom: #0d1817;
-  --lc-glow-plum: rgba(185, 139, 194, 0.08);
+  --lc-glow-accent: rgba(185, 139, 194, 0.08);
   --lc-glow-sky: rgba(111, 179, 199, 0.08);
   --lc-glow-sage: rgba(143, 191, 127, 0.04);
   --lc-card-top: #182826;
@@ -92,6 +93,7 @@
    out once per theme, so "what is the accent under this theme" is a grep and not a chain of fallbacks, and
    `scripts/check-palette.mjs` can measure both themes instead of inferring one of them. */
 :root[data-theme="botanical"] {
+  /* violet accent on a green-black ink ramp: hue 290 against hue 173, 117 degrees apart */
   --color-lc-accent: #b98bc2;
 }
 
@@ -114,7 +116,7 @@
   --lc-bg-top: #1a1128;
   --lc-bg-mid: #120b1c;
   --lc-bg-bottom: #170f24;
-  --lc-glow-plum: rgba(207, 166, 218, 0.09);
+  --lc-glow-accent: rgba(94, 207, 168, 0.09);
   --lc-glow-sky: rgba(111, 179, 199, 0.07);
   --lc-glow-sage: rgba(185, 139, 194, 0.07);
   --lc-card-top: #241a38;
@@ -124,9 +126,11 @@
   --lc-minimap-mask: rgba(18, 11, 28, 0.82);
   --lc-fail-band: rgba(30, 12, 14, 0.95);
 
-  /* the accent is lifted one step: `#b98bc2` on this background clears AA, but it sits close to the theme's
-     own `ink-300`/`ink-400`, and an accent you cannot separate from muted text is not an accent */
-  --color-lc-accent: #cfa6da;
+  /* Not plum. This theme's ink ramp is violet (hue 265), and a plum accent is hue 290 — 25 degrees apart,
+     which is why the interface read as one undifferentiated purple: the accent could not be told from
+     `ink-400`. Jade is hue 159, 106 degrees away, and still clears 10:1 on this background. The rule this
+     obeys is enforced by `scripts/check-palette.mjs`, not left to taste. */
+  --color-lc-accent: #5ecfa8;
 }
 
 html,
@@ -163,7 +167,7 @@ body,
 /* ---------- layered workspace background ---------- */
 .lc-bg {
   background:
-    radial-gradient(900px 520px at 85% -10%, var(--lc-glow-plum), transparent 60%),
+    radial-gradient(900px 520px at 85% -10%, var(--lc-glow-accent), transparent 60%),
     radial-gradient(800px 600px at 8% 108%, var(--lc-glow-sky), transparent 62%),
     radial-gradient(600px 400px at 50% 50%, var(--lc-glow-sage), transparent 70%),
     linear-gradient(160deg, var(--lc-bg-top) 0%, var(--lc-bg-mid) 55%, var(--lc-bg-bottom) 100%);
