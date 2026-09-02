@@ -70,6 +70,7 @@ interface Actions {
   selectNode: (id: string | null) => void;
   selectEdge: (id: string | null) => void;
   setLeftTab: (t: AppState["ui"]["leftTab"]) => void;
+  setInspectorTab: (t: AppState["ui"]["inspectorTab"]) => void;
   openFile: (f: FileViewerState | null) => void;
   setHistoryOpen: (v: boolean) => void;
   setSettingsOpen: (v: boolean) => void;
@@ -165,6 +166,7 @@ function initialState(): AppState {
     typing: {} as AppState["typing"],
     ui: {
       leftTab: "palette" as const,
+      inspectorTab: "config" as const,
       fileViewer: null,
       historyOpen: false,
       settingsOpen: false,
@@ -269,6 +271,7 @@ function buildActions(a: EngineApi): Actions {
     selectNode: () => undefined,
     selectEdge: () => undefined,
     setLeftTab: (t) => useStore.setState((s) => ({ ui: { ...s.ui, leftTab: t } })),
+    setInspectorTab: (t) => useStore.setState((s) => ({ ui: { ...s.ui, inspectorTab: t } })),
     openFile: (f) => useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: f } })),
     setHistoryOpen: (v) => useStore.setState((s) => ({ ui: { ...s.ui, historyOpen: v } })),
     setSettingsOpen: (v) => useStore.setState((s) => ({ ui: { ...s.ui, settingsOpen: v } })),

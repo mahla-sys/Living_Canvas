@@ -171,8 +171,8 @@ instead of growing the exceptions.
 src/
 ├── main.tsx                    113  L   boot, global error surface, React error boundary
 ├── App.tsx                      93  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
-├── state.ts                    534  L   ★ constants, types re-exports, factories, role schemas, seed
-├── store.ts                    474  L   ★ zustand store + Actions façade (the only UI-facing API)
+├── state.ts                    541  L   ★ constants, types re-exports, factories, role schemas, seed
+├── store.ts                    477  L   ★ zustand store + Actions façade (the only UI-facing API)
 ├── index.css                   520  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
 │   ├── core.ts                1220  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
@@ -180,15 +180,15 @@ src/
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             3634  L   238 tests in 19 files (§7)
+│   └── __tests__/             4013  L   263 tests in 21 files (§7)
 └── components/
     ├── CanvasArea.tsx          827  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
-    ├── SidePanels.tsx          931  L   ★ library/files tabs, file tree, live folder tree, inspector
+    ├── SidePanels.tsx          1148  L   ★ library/files tabs, file tree, live folder tree, inspector
     ├── Overlays.tsx            970  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **12 547 lines** in 33 files (12 027 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **13 153 lines** in 35 files (12 633 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -402,7 +402,7 @@ problem kills a node (`engine.validateAgainstContract`, §5.8 does). A malformed
 reported as the *schema's* failure (`“a” declares an invalid pattern in the schema`), not swallowed. Full format
 and ownership in §4.9.1.
 
-## 3.2 `src/state.ts` (534 lines) — constants, factories, role schemas, seed
+## 3.2 `src/state.ts` (541 lines) — constants, factories, role schemas, seed
 
 Pure data + construction; no behaviour, no async, no I/O (one exception: `defaultSettings()` reads
 `localStorage["lc-settings"]`, see debt §9.5).
@@ -428,7 +428,7 @@ ship a five-node pipeline and register it as a template on first boot, which mea
 screenshot, and the "load a template" flow all pointed at fabricated data. `loadTemplates()` returns exactly
 what is in `library/templates/`, which for a new canvas is nothing.
 
-## 3.3 `src/store.ts` (474 lines) — zustand store and the `actions` façade
+## 3.3 `src/store.ts` (477 lines) — zustand store and the `actions` façade
 
 ```ts
 export const useStore = create<AppState & { actions: Actions }>()((set, get) => ({ ...initialState, actions }))
@@ -441,7 +441,7 @@ Two halves, and the discipline is the point:
    `touch(api)` afterwards refreshes the cache and the chips. Selection changes are the one class of change that
    touches no file. No other component may mutate a node/edge array — and this is why the two rows above exist:
    `touch` alone writes `state.json`, `canvas-overview.md` and `canvas.yaml`, never a node file.
-2. **The `actions` object** — the entire API the UI is allowed to call (65 members). Each is a two-line
+2. **The `actions` object** — the entire API the UI is allowed to call (66 members). Each is a two-line
    delegation: resolve `api = { get, set }`, forward to `engine`, done. Nothing in `actions` writes a file
    or builds a string itself.
 
@@ -543,13 +543,13 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 2 849 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 3 066 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
 | `CanvasArea.tsx` 827 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
-| `SidePanels.tsx` 931 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
+| `SidePanels.tsx` 1148 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
 | `Overlays.tsx` 970 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
 
@@ -1259,7 +1259,7 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **19 files, 238 tests**, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **21 files, 263 tests**, no config file (vitest reads `vite.config.js`).
 
 **On jsdom, a reversal worth stating plainly.** This section used to say the suite runs with no jsdom, and
 called that a principle. It was not one — it was a limitation dressed as a rule, and three bugs got through
@@ -1507,7 +1507,7 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 19 files / 238 tests
+npm test            vitest run            → 21 files / 263 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)

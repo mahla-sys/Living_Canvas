@@ -8,7 +8,7 @@ sources: [docs/ARCHITECTURE.md#0.2, docs/decisions/README.md]
 # Phase 1 — closed
 
 Everything below is shipped and guarded; the citation in parentheses is what fails if it regresses. Verification
-is `npx vitest run` (238 tests in 19 files) plus the five repository gates (`scripts/check-english.mjs`,
+is `npx vitest run` (263 tests in 21 files) plus the five repository gates (`scripts/check-english.mjs`,
 `scripts/check-docs.mjs`, `scripts/check-palette.mjs`, `scripts/doc-anchors.mjs`, `scripts/check-facts.mjs`),
 which is exactly what `.github/workflows/ci.yml` runs.
 

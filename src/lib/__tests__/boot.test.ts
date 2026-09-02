@@ -54,7 +54,7 @@ function makeApi(initial?: Partial<AppState>) {
     // which is the single most expensive thing boot can do and is off by default
     settings: { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 1, backendUrl: "", workspaceRoot: null, theme: "plum", snapToGrid: false },
     saveState: "saved", typing: {},
-    ui: { leftTab: "palette", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
+    ui: { leftTab: "palette", inspectorTab: "config", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
     ...initial,
   };
   return {

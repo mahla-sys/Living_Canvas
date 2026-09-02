@@ -36,14 +36,24 @@ is verified and mutation-tested; the rendered geometry is not.
 | # | Feature | ADR | Status |
 |---|---|---|---|
 | 2.1 | Run Scope — Selected / From / Until | `adr-012` | ✅ 12 tests |
-| 2.2 | Inspector tabs — Status / Diary / Logs | `adr-015` (to write) | ⬜ next |
+| 2.2 | Inspector tabs — Status / Diary / Logs | `adr-015` | ✅ 12 tests |
 | 2.3 | Run controls — Run / Pause / Step / Stop | `adr-013` | ✅ 11 tests |
-| 2.4 | Left-panel search + status icons | `adr-016` (to write) | ⬜ |
+| 2.4 | Left-panel search + status icons | `adr-016` | ✅ 13 tests |
 
 2.2's **Status** tab shows real execution data only. CPU/memory stays deferred — browsers expose no CPU
-figure, and `performance.memory` is Chrome-only and approximate. Registered as inbox item 1.
+figure, and `performance.memory` is Chrome-only and approximate. Registered as inbox item 1. It carries four
+tabs, not three: the editing surface that already existed stays as **Config**, because deleting it to honour
+a literal "three tabs" would have removed the only way to configure a node.
 
-2.4's status glyphs derive from `execution` and `agent.status` that already exist; nothing is invented.
+2.4's status glyphs derive from `execution` and `agent.status` that already exist; nothing is invented and no
+field was added to `NodeData`. A node that never ran shows **no** glyph — not a failure one. A mutation that
+gave every note a failure glyph was caught only after a test for the no-agent case was added, which is the
+second time this round that mutation-testing found a hole in a test rather than in the code.
+
+2.2 and 2.4 both shipped a bug of my own that the tests caught first: `useStore((s) => s.outputs[id] ?? [])`
+hands zustand a fresh array on every call and its equality is `Object.is`, so the component re-rendered
+forever; and an absence assertion written with `getByText` throws instead of returning null, so it failed for
+the wrong reason.
 
 ## 3. Test policy
 

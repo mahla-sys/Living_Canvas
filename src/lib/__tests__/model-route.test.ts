@@ -133,7 +133,7 @@ describe("the model a node names is the model that is called (the control is not
       execution: emptyExecution(), events: [], toasts: [],
       settings: { provider: "deepseek", apiKey: "test-key", model: "deepseek-chat", owner: "mahla", simDelay: 1, backendUrl: "", workspaceRoot: null, theme: "botanical", snapToGrid: false },
       saveState: "saved", typing: {},
-      ui: { leftTab: "palette", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
+      ui: { leftTab: "palette", inspectorTab: "config", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
     };
     return {
       get: () => s,

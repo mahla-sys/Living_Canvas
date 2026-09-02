@@ -42,7 +42,7 @@ function makeApi(initial?: Partial<AppState>) {
     // a non-trivial simDelay so a run is actually in flight long enough to be paused mid-flight
     settings: { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 40, backendUrl: "", workspaceRoot: null, theme: "botanical", snapToGrid: false },
     saveState: "saved", typing: {},
-    ui: { leftTab: "palette", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
+    ui: { leftTab: "palette", inspectorTab: "config", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
     ...initial,
   };
   return {

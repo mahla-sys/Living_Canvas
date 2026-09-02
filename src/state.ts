@@ -137,6 +137,13 @@ export interface AppState {
   typing: Record<string, boolean>;
   ui: {
     leftTab: "palette" | "files";
+    /**
+     * Which inspector tab is showing (ADR-015). Session-only: a tab that survived a reload would reopen
+     * somebody else's moment of reading, and it is a view of the node rather than a fact about it.
+     * `config` carries the editing surface that existed before tabs did — removing it to honour a literal
+     * "three tabs" would have deleted the only way to configure a node.
+     */
+    inspectorTab: "config" | "status" | "diary" | "logs";
     fileViewer: FileViewerState | null;
     historyOpen: boolean;
     settingsOpen: boolean;

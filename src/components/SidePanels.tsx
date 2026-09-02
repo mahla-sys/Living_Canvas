@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, buildFileContent } from "../store";
 import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT, NODE_COLORS } from "../state";
 import type { RFNode } from "../state";
 import { storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType } from "../lib/core";
 import {
   IBrain, IBox, IFile, IFolder, IChevD, IChevR, ITrash, IPlay, IChat, ILock,
-  ISpark, IDatabase, IHistory, IX, IEye, INode, IPulse, ICheck,
+  ISpark, IDatabase, IHistory, IX, IEye, INode, IPulse, ICheck, IStop, IWarn,
 } from "./icons";
 
 /* lc-data-colour: the picker writes the chosen value into the node file, so these are canvas data, not
@@ -122,8 +122,59 @@ function nodeColor(t: NodeType) {
   return NODE_COLORS[t] ?? "#8ba39d"; // lc-data-colour
 }
 
+/* ---------------------------------------------------------------- file-tree filter and status (ADR-016)
+   Neither the filter text nor the status is stored. The filter is local state, because a filter that
+   survived a reload would reopen a half-hidden tree and read as a bug. The glyph is derived from execution
+   and agent state that already exists, because a stored copy could drift from what it was derived from. */
+const TreeFilter = createContext("");
+
+/** Which node a path is about, so its status can be looked up. Returns null for files that are not per-node. */
+function nodeOfPath(path: string): string | null {
+  const m = /^(?:nodes|memory\/agents)\/([\w-]+)\./.exec(path) ?? /^outputs\/(?:shared\/)?([\w-]+)\//.exec(path) ?? /^logs\/([\w-]+)\//.exec(path);
+  return m ? m[1] : null;
+}
+
+type FileStatus = "running" | "paused" | "failed" | "done" | null;
+
+function StatusGlyph({ path }: { path: string }) {
+  const id = nodeOfPath(path);
+  const ex = useStore((s) => s.execution);
+  const nodes = useStore((s) => s.nodes);
+  if (!id) return null;
+  let st: FileStatus = null;
+  if (ex.current_node_id === id && ex.status === "running") st = "running";
+  else if (ex.status === "paused" && ex.queue.includes(id) && !ex.completed.includes(id)) st = "paused";
+  else {
+    const a = nodes.find((n) => n.id === id)?.data.agent;
+    // a node a gate kept from running stays "idle" — showing a failure glyph for it would be a lie
+    if (a?.status === "failed") st = "failed";
+    else if (a?.status === "done") st = "done";
+  }
+  if (!st) return null;
+  const map: Record<Exclude<FileStatus, null>, { Icon: typeof ICheck; cls: string; label: string }> = {
+    running: { Icon: IPulse, cls: "text-lc-accent", label: "running" },
+    paused: { Icon: IStop, cls: "text-lc-warn", label: "paused" },
+    failed: { Icon: IWarn, cls: "text-ember", label: "failed" },
+    done: { Icon: ICheck, cls: "text-lc-success", label: "done" },
+  };
+  const { Icon, cls, label } = map[st];
+  return <Icon size={11} className={`${cls} shrink-0`} aria-label={label} />;
+}
+
 function Folder({ name, children, badge, defaultOpen = false }: { name: string; children: React.ReactNode; badge?: number; defaultOpen?: boolean }) {
+  const q = useContext(TreeFilter);
   const [open, setOpen] = useState(defaultOpen);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const [empty, setEmpty] = useState(false);
+  /* A folder whose rows all filtered out must disappear, or a search leaves a tree of empty drawers. Children
+     are rendered first and then counted, because the rows themselves decide whether they match — the folder
+     has no list of its descendants' names and must not be given one to keep in sync. */
+  useEffect(() => {
+    if (!q) { setEmpty(false); return; }
+    setEmpty((bodyRef.current?.querySelectorAll("[data-lc-file]").length ?? 0) === 0);
+  }, [q, children]);
+  if (q && empty) return null;
+  const shown = q ? true : open;
   return (
     <div>
       <button
@@ -137,21 +188,30 @@ function Folder({ name, children, badge, defaultOpen = false }: { name: string; 
           <span className="ms-auto text-[9px] font-bold text-ink-400 bg-ink-800 border border-ink-700 rounded px-1">{badge}</span>
         )}
       </button>
-      {open && <div className="ms-[13px] border-s border-ink-700 ps-1.5 mt-0.5 space-y-px anim-fade">{children}</div>}
+      {shown && (
+        <div ref={bodyRef} className="ms-[13px] border-s border-ink-700 ps-1.5 mt-0.5 space-y-px anim-fade">{children}</div>
+      )}
     </div>
   );
 }
 
 function FileRow({ path, name }: { path: string; name?: string }) {
   const actions = useStore((s) => s.actions);
+  const q = useContext(TreeFilter);
+  const label = name ?? path;
+  // matched on the displayed name, case-insensitively — not on the full path, which nobody types
+  if (q && !label.toLowerCase().includes(q)) return null;
   return (
     <button
+      data-lc-file
+      data-lc-file-name={label}
       onClick={() => actions.openFile(buildFileContent(path))}
       className="w-full flex items-center gap-1.5 px-2 py-[4.5px] rounded-md text-ink-300 hover:text-lc-accent hover:bg-ink-800 transition-colors cursor-pointer group"
       title={path}
     >
       <IFile size={12} className="text-ink-500 group-hover:text-lc-accent/70 shrink-0" />
-      <span className="text-[11px] font-mono truncate">{name ?? path}</span>
+      <span className="text-[11px] font-mono truncate">{label}</span>
+      <span className="ms-auto flex items-center"><StatusGlyph path={path} /></span>
     </button>
   );
 }
@@ -240,6 +300,9 @@ function LiveFolderTree() {
 }
 
 function FileTree() {
+  // local state on purpose: see ADR-016 — a persisted filter would reopen a half-hidden tree
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
   const nodes = useStore((s) => s.nodes);
   const edges = useStore((s) => s.edges);
   const outputs = useStore((s) => s.outputs);
@@ -261,7 +324,28 @@ function FileTree() {
   if (liveRoot) return <LiveFolderTree />;
 
   return (
+    <TreeFilter.Provider value={q}>
     <div className="p-2 space-y-0.5">
+      <div className="relative px-0.5 pb-1.5">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Filter files…"
+          aria-label="Filter files"
+          data-lc-file-filter
+          className="w-full bg-ink-850 border border-ink-600 rounded-lg py-1.5 ps-7 pe-6 text-[11px] font-mono text-ink-100 placeholder:text-ink-500 focus:outline-none focus:border-lc-accent/60 transition-colors"
+        />
+        <IFile size={12} className="absolute start-2.5 top-1/2 -translate-y-1/2 text-ink-500 pointer-events-none" />
+        {query && (
+          <button
+            onClick={() => setQuery("")}
+            aria-label="Clear the filter"
+            className="absolute end-1.5 top-1/2 -translate-y-1/2 text-ink-500 hover:text-ink-200 cursor-pointer"
+          >
+            <IX size={12} />
+          </button>
+        )}
+      </div>
       <p className="text-[10.5px] text-ink-400 leading-5 px-2 pb-1.5">
         File-first layout of the document — every node, edge and memory is its own file. Click to inspect.
       </p>
@@ -348,6 +432,7 @@ function FileTree() {
         Global memory: confidence {Math.round(memory.global.confidence * 100) / 100}
       </p>
     </div>
+    </TreeFilter.Provider>
   );
 }
 
@@ -502,6 +587,113 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputCls = "w-full px-2.5 py-1.5 rounded-lg bg-ink-850 border border-ink-600 text-[12px] text-ink-100 focus:border-lc-accent/60 focus:outline-none transition-colors";
 const selectCls = inputCls + " cursor-pointer";
 
+/* ---------------------------------------------------------------- inspector tabs (ADR-015)
+   Each tab shows something with a real file behind it. Diary is `memory/agents/<id>.md`, Logs is
+   `logs/<id>/<date>.log`, Status is execution state that already exists. There is deliberately no
+   CPU/memory bar: browsers expose no CPU figure at all and `performance.memory` is Chrome-only and
+   approximate, and a number nobody can trust is worse than no number. */
+
+/** Colour comes out of the text itself, not a parallel field — two sources of truth drift apart (ADR-015). */
+function diaryTone(line: string): "error" | "warn" | "ok" {
+  const l = line.toLowerCase();
+  if (l.includes("✗") || l.includes("failed") || l.includes("error")) return "error";
+  if (l.includes("⚠") || l.includes("warn")) return "warn";
+  return "ok";
+}
+const TONE_CLS: Record<"error" | "warn" | "ok", string> = {
+  error: "text-ember", warn: "text-lc-warn", ok: "text-lc-success",
+};
+
+function EmptyTab({ what }: { what: string }) {
+  // honest about nothing having happened yet, rather than a placeholder that implies data
+  return <p className="px-3.5 py-6 text-[11px] leading-5 text-ink-500 text-center">{what}</p>;
+}
+
+/* Stable fallbacks, so a selector can return them without handing zustand a new reference (see StatusTab). */
+const NO_ENTRIES: never[] = [];
+const NO_LINES: string[] = [];
+
+function StatusTab({ node }: { node: RFNode }) {
+  const d = node.data;
+  const agent = d.agent;
+  const ex = useStore((s) => s.execution);
+  /* Select the record, not `record[id] ?? []`: a fallback array literal is a new reference on every call and
+     zustand compares with Object.is, so the component would re-render forever. */
+  const outputs = useStore((s) => s.outputs);
+  const logs = useStore((s) => s.logs);
+  const output = outputs[node.id] ?? NO_ENTRIES;
+  const log = logs[node.id] ?? NO_LINES;
+  const isCurrent = ex.current_node_id === node.id;
+  const st = agent?.status ?? "idle";
+  /* `AgentConfig` has no `last_error` field and deliberately does not get one: the failure already lives in
+     `logs/<node>/`, so a second copy in the node file could drift from it. The last error is therefore read
+     out of the log, with the same tone rule the Diary tab uses. */
+  const lastError = [...log].reverse().find((l) => diaryTone(l) === "error");
+  return (
+    <div className="px-3.5 py-3 space-y-2.5" data-lc-status-tab>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">Execution status</span>
+        {/* `waiting` is `lc-warn`, not the accent: the accent marks something actionable */}
+        <span className={`text-[11px] font-extrabold ${
+          st === "failed" ? "text-ember"
+            : st === "running" ? "text-lc-accent"
+            : st === "waiting" ? "text-lc-warn"
+            : "text-ink-300"
+        }`}>{st}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">In the current run</span>
+        <span className="text-[11px] font-bold text-ink-300">{isCurrent ? "yes — running now" : ex.queue.includes(node.id) ? "queued" : "no"}</span>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold text-ink-500 uppercase tracking-wider">Last output</span>
+        <span className="text-[11px] font-mono text-ink-300">{output.length ? output[output.length - 1].file.split("/").pop() : "none"}</span>
+      </div>
+      {lastError && (
+        <div className="px-2.5 py-2 rounded-lg bg-ember/10 border border-ember/40">
+          <p className="text-[10px] font-bold text-ember uppercase tracking-wider mb-1">Last error, from the log</p>
+          <p className="text-[10.5px] leading-4 text-ember/90 font-mono break-words">{lastError}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DiaryTab({ nodeId }: { nodeId: string }) {
+  const doc = useStore((s) => s.memory.agents[nodeId]);
+  const body = (doc?.body ?? "").trim();
+  if (!body) return <EmptyTab what="Nothing written to this agent's diary yet. It is written by the memory manager when the agent runs." />;
+  const lines = body.split("\n").filter((l) => l.trim());
+  return (
+    <div className="px-3.5 py-3 space-y-1" data-lc-diary-tab>
+      {lines.map((line, i) => {
+        const tone = diaryTone(line);
+        return (
+          <p key={i} className={`text-[10.5px] leading-[1.7] font-mono break-words ${TONE_CLS[tone]}`}>
+            {line}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function LogsTab({ nodeId }: { nodeId: string }) {
+  const all = useStore((s) => s.logs);
+  const lines = all[nodeId] ?? NO_LINES;
+  if (!lines.length) return <EmptyTab what="No log lines for this node yet. Running it writes logs/<node>/<date>.log." />;
+  return (
+    <pre
+      data-lc-logs-tab
+      className="mx-3.5 my-3 px-2.5 py-2 rounded-lg bg-ink-950/70 border border-ink-700 text-[10px] leading-[1.6] font-mono text-ink-300 whitespace-pre-wrap break-words max-h-[45vh] overflow-y-auto overscroll-contain"
+    >{lines.join("\n")}</pre>
+  );
+}
+
+const INSPECTOR_TABS = [
+  ["config", "Config"], ["status", "Status"], ["diary", "Diary"], ["logs", "Logs"],
+] as const;
+
 function NodeInspector({ node }: { node: RFNode }) {
   const actions = useStore((s) => s.actions);
   const d = node.data;
@@ -509,6 +701,9 @@ function NodeInspector({ node }: { node: RFNode }) {
   const locked = d.lock.status === "locked";
   const runLocked = locked && (d.lock.locked_by ?? "").startsWith("run-");
   const runDisabled = useStore((s) => s.execution.status === "running" || s.execution.status === "waiting_approval");
+  const tab = useStore((s) => s.ui.inspectorTab);
+  const setTab = useStore((s) => s.actions.setInspectorTab);
+  const isAgent = node.data.nodeType === "agent";
 
   return (
     <div className="anim-fade">
@@ -535,6 +730,27 @@ function NodeInspector({ node }: { node: RFNode }) {
         </div>
       )}
 
+      {/* Status / Diary / Logs only exist for an agent node: an output box has no diary and no run log */}
+      <div className="flex shrink-0 border-b border-ink-700" data-lc-inspector-tabs>
+        {INSPECTOR_TABS.filter(([k]) => isAgent || k === "config").map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            aria-pressed={tab === key}
+            className={`flex-1 py-2 text-[10.5px] font-bold transition-colors cursor-pointer border-b-2 ${
+              tab === key ? "text-lc-accent border-lc-accent bg-ink-850" : "text-ink-400 border-transparent hover:text-ink-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "status" && isAgent && <StatusTab node={node} />}
+      {tab === "diary" && isAgent && <DiaryTab nodeId={node.id} />}
+      {tab === "logs" && isAgent && <LogsTab nodeId={node.id} />}
+
+      {tab === "config" && (
       <div className={runLocked ? "lc-locked-panel" : ""}>
       <Section title="Display & shape" icon={<IEye size={12} />}>
         <Field label="Display mode (viewMode)">
@@ -754,6 +970,7 @@ function NodeInspector({ node }: { node: RFNode }) {
         </button>
       </Section>
       </div>
+      )}
     </div>
   );
 }
@@ -823,7 +1040,7 @@ function CanvasInspector() {
     <div className="anim-fade">
       <div className="px-3.5 py-3 border-b border-ink-700">
         <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><INode size={15} className="text-ink-300" /> Canvas settings</p>
-        <p className="text-[10px] text-ink-400 mt-1 leading-5">Nothing selected — canvas-wide settings live here.</p>
+        <p className="text-[10px] text-ink-400 mt-1 leading-5">Select a node to inspect it. With nothing selected, canvas-wide settings live here.</p>
       </div>
       <Section title="canvas.yaml">
         <Field label="Canvas title">
