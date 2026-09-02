@@ -90,7 +90,7 @@ Statuses: `done` (shipped + guarded) · `partial` (a piece exists, the row's cla
 | approval pause / resume / reject | done | `docs/ARCHITECTURE.md#5.8` |
 | hard output validation | done | `schema.test.ts`, `adr-003-hard-output-validation.md` |
 | refusal visible on the node card | done | `src/lib/engine.ts#setNodeError` |
-| function calling (model picks the tool) | idea | `docs/roadmap/phase-2.md` |
+| function calling (model picks the tool) | done | `docs/decisions/adr-022-function-calling-loop-and-canvas-tools.md` |
 | task priority per node | idea | — |
 
 ## 8. Templates and roles

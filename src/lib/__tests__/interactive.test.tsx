@@ -17,8 +17,10 @@ import { dirname, resolve } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+import { ReactFlowProvider } from "@xyflow/react";
 import { useStore } from "../../store";
 import { setStorage, MemoryStorageAdapter, DEFAULT_THEME, THEME_IDS } from "../core";
+import { CanvasInner } from "../../components/CanvasArea";
 import { LeftPanel, RightPanel } from "../../components/SidePanels";
 import { TopBar, ChatPanel, SettingsModal, StatusBar } from "../../components/Overlays";
 import { makeNodeData, makeAgentConfig } from "../../state";
@@ -66,6 +68,7 @@ describe("the panel scrollers carry the contract a flex child needs in order to 
     expect(aside).toBeInTheDocument();
     expect(aside.className).toContain("flex-col");
     expect(aside.className).toContain("h-full"); // bounded height, inherited from #root
+    expect(aside.className).toContain("max-h-full");
     expect(aside.className).toContain("min-h-0");
     expect(aside.className).toContain("overflow-hidden"); // the aside clips; the child scrolls
 
@@ -82,12 +85,22 @@ describe("the panel scrollers carry the contract a flex child needs in order to 
     const aside = container.querySelector("aside")!;
     expect(aside.className).toContain("flex-col");
     expect(aside.className).toContain("h-full");
+    expect(aside.className).toContain("max-h-full");
     expect(aside.className).toContain("min-h-0");
 
     const scroller = aside.querySelector<HTMLElement>('[class*="overflow-y-auto"]')!;
     expect(scroller).toBeTruthy();
     expect(scroller.className).toContain("flex-1");
     expect(scroller.className).toContain("min-h-0");
+  });
+
+  it("the root layout is pinned to the viewport bounds so laptop screens do not overflow", () => {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(resolve(here, "../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).toMatch(/body,\s*#root\s*\{[^}]*position:\s*fixed/);
+    expect(css).toMatch(/body,\s*#root\s*\{[^}]*inset:\s*0/);
+    expect(css).toMatch(/body,\s*#root\s*\{[^}]*max-height:\s*100dvh/);
+    expect(css).toMatch(/body,\s*#root\s*\{[^}]*max-width:\s*100vw/);
   });
 
   it("the height chain the scrollers depend on is declared, and `html` is not merged into it", () => {
@@ -258,3 +271,60 @@ describe("no component leaks its own comments into the page", () => {
     expect(within(left.container).getAllByRole("separator").length).toBeGreaterThan(0);
   });
 });
+
+/* ---------------------------------------------------------------- node shape badge layering (ADR-018) */
+describe("node shape rendering preserves badge overlays on geometric shapes", () => {
+  it("diamond and hexagon nodes separate clip-path backdrop so badges and handles remain unclipped", () => {
+    const lockedDiamondNode: RFNode = {
+      id: "node-diamond",
+      type: "lc",
+      position: { x: 50, y: 50 },
+      selected: false,
+      data: {
+        ...makeNodeData("shape", "Diamond decision", "user"),
+        shape: "diamond",
+        lock: { status: "locked", locked_by: "run-1", locked_at: "2026-09-02T00:00:00Z" },
+      },
+    } as RFNode;
+
+    const approvalHexagonNode: RFNode = {
+      id: "node-hex",
+      type: "lc",
+      position: { x: 300, y: 50 },
+      selected: false,
+      data: {
+        ...makeNodeData("agent", "Hex agent", "user", {
+          agent: { ...makeAgentConfig("node-hex", "risk-analyst"), require_approval: true },
+        }),
+        shape: "hexagon",
+      },
+    } as RFNode;
+
+    useStore.setState({ nodes: [lockedDiamondNode, approvalHexagonNode] });
+
+    const { container } = render(
+      <ReactFlowProvider>
+        <div style={{ width: 800, height: 600 }}>
+          <CanvasInner />
+        </div>
+      </ReactFlowProvider>
+    );
+
+    // The root node wrappers must NOT have clip-path directly clipping peripheral badges
+    const backdropSurfaces = container.querySelectorAll<HTMLElement>(".lc-card-surface, .lc-card-empty");
+    expect(backdropSurfaces.length).toBeGreaterThanOrEqual(2);
+
+    // One of the backdrop surfaces carries the diamond clip polygon
+    const clips = Array.from(backdropSurfaces).map((el) => el.style.clipPath);
+    expect(clips.some((c) => c.includes("polygon(50% 0%"))).toBe(true);
+    expect(clips.some((c) => c.includes("polygon(12% 0%"))).toBe(true);
+
+    // Badges must exist in DOM and not be trapped inside the clipped element
+    const lockTitle = container.querySelector('[title="Locked by a run (§12.5)"], [title*="Lock"], svg');
+    expect(lockTitle).toBeTruthy();
+
+    const approvalBadge = container.querySelector('[title="Needs human approval"]');
+    expect(approvalBadge).toBeTruthy();
+  });
+});
+

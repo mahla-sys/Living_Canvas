@@ -17,6 +17,8 @@ verified against its own acceptance criteria. Undecided items live in [`../inbox
 | 1a | left/right panels do not scroll | the bundler dropped `html` from `html, body, #root { height: 100% }`, leaving `,body,#root{…}` — an invalid list the browser discards whole, so nothing in the app had a bounded height | ✅ fixed, `adr-014` |
 | 1b | drawing produces nothing | `StrokesLayer` painted flow coordinates outside `.react-flow__viewport`, i.e. in screen space; `fitView()` 80 ms after boot means the viewport is never identity | ✅ fixed |
 | 1c | panel resize must not break layout | no defect found; close/dock deferred | ✅ verified |
+| 1d | page overflows laptop screen & internal scroll doesn't engage | middle container lacked overflow-hidden & min-w-0, root lacked viewport fixed pinning, expanding layout past screen height | ✅ fixed, `adr-020` |
+| 1e | mounted root height chain broken at data-lc-mounted | `<div data-lc-mounted>` lacked height/flex classes, turning App's height:100% into auto; status bar pushed off-screen | ✅ fixed, `adr-021` |
 
 **1a** is the one worth naming. The classes on every scroller were already correct, which is why adding
 `min-h-0` changed nothing — the missing height was three levels up and the *source* looked right. Verified
@@ -40,6 +42,7 @@ is verified and mutation-tested; the rendered geometry is not.
 | 2.3 | Run controls — Run / Pause / Step / Stop | `adr-013` | ✅ 11 tests |
 | 2.4 | Left-panel search + status icons | `adr-016` | ✅ 13 tests |
 | 2.5 | Status bar in words, not enums | `adr-017` | ✅ 7 tests |
+| 2.6 | Function Calling & Canvas Tools | `adr-022` | active |
 
 2.2's **Status** tab shows real execution data only. CPU/memory stays deferred — browsers expose no CPU
 figure, and `performance.memory` is Chrome-only and approximate. Registered as inbox item 1. It carries four

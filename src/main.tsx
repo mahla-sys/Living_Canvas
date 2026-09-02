@@ -106,7 +106,7 @@ class Boundary extends React.Component<{ children?: React.ReactNode }, { err: Er
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <Boundary>
-    <div data-lc-mounted>
+    <div data-lc-mounted className="h-full w-full max-h-full max-w-full overflow-hidden flex flex-col min-h-0 min-w-0">
       <App />
     </div>
   </Boundary>

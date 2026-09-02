@@ -173,22 +173,22 @@ src/
 ├── App.tsx                      93  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
 ├── state.ts                    541  L   ★ constants, types re-exports, factories, role schemas, seed
 ├── store.ts                    477  L   ★ zustand store + Actions façade (the only UI-facing API)
-├── index.css                   520  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
+├── index.css                   559  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
 │   ├── core.ts                1220  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
-│   ├── engine.ts              2257  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
+│   ├── engine.ts              2916  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             4120  L   270 tests in 22 files (§7)
+│   └── __tests__/             4807  L   283 tests in 24 files (§7)
 └── components/
-    ├── CanvasArea.tsx          827  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
-    ├── SidePanels.tsx          1148  L   ★ library/files tabs, file tree, live folder tree, inspector
+    ├── CanvasArea.tsx          833  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
+    ├── SidePanels.tsx          1178  L   ★ library/files tabs, file tree, live folder tree, inspector
     ├── Overlays.tsx            986  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **13 276 lines** in 36 files (12 756 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **14 697 lines** in 38 files (14 138 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -465,7 +465,7 @@ Notable behaviour living here (small but load-bearing):
   tree builds `runs/` from `state.runs` (a projection of the folder, refreshed by `hydrate` and by each ledger
   open, §4.13).
 
-## 3.4 `src/lib/engine.ts` (2257 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (2916 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
@@ -543,13 +543,13 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 3 082 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 3 118 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
-| `CanvasArea.tsx` 827 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
-| `SidePanels.tsx` 1148 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
+| `CanvasArea.tsx` 833 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
+| `SidePanels.tsx` 1178 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
 | `Overlays.tsx` 986 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
 
@@ -1259,7 +1259,7 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **22 files, 270 tests**, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **24 files, 283 tests**, no config file (vitest reads `vite.config.js`).
 
 **On jsdom, a reversal worth stating plainly.** This section used to say the suite runs with no jsdom, and
 called that a principle. It was not one — it was a limitation dressed as a rule, and three bugs got through
@@ -1451,17 +1451,17 @@ override any more. Geometry, title, body and prompt all come from `nodes/<id>.md
 deleted with the cache — a reader who arrives here looking for the precedence rule should not find one.
 
 Done since this document was written: ~~(1) gate every tool by the contract~~, ~~(2) `runs/<run-id>.md`~~,
-~~(3) hard schema validation (Q1)~~, ~~(4) delete `graph.json` (Q3)~~.
+~~(3) hard schema validation (Q1)~~, ~~(4) delete `graph.json` (Q3)~~, ~~(5) function calling (ADR-022)~~.
 Q2 (one canvas per folder, or a vault with many) is the only ⚑ left unanswered, and it is a 30-line change in
 `fs-access.ts` + the picker — deliberately not bundled with this pass, because it changes what "attach a folder"
 means to a user mid-flight.
-Still in order: (a) function calling — the executor hands `TOOL_NAMES` to the provider and
-loops on the model's tool calls, now that `hasTool` makes refusal cheap; (b) a "diff" view in FileViewer (what the
+Function calling landed in ADR-022 (`docs/decisions/adr-022-function-calling-loop-and-canvas-tools.md`): `askModel` provides JSON Schema tools to the model, loops on `tool_calls` up to `max_steps`, dispatches canvas tools (`create_node`, `update_node`, `delete_node`, `create_edge`, `update_edge`, `delete_edge`, `get_canvas_overview`, `read_memory`, `write_memory`, `write_output`), verifies permissions via `hasTool` and `isPathAllowed`, updates the graph and files, and records each execution in the Run Ledger.
+Security note: API keys are stored client-side for personal and local use. For production multi-user deployments, a backend proxy service must be added to keep API credentials secure and handle provider rate limits.
+Still in order: (a) a "diff" view in FileViewer (what the
 last run changed in this file), because a canvas whose files can be edited outside the app is a canvas that needs
-`git diff` in the UI; (c) delta snapshots + keep-last-N (§9.3); (d) providers beyond DeepSeek, reusing
+`git diff` in the UI; (b) delta snapshots + keep-last-N (§9.3); (c) providers beyond DeepSeek, reusing
 `settings.provider`/`MODELS` (`deepseek-chat`, `glm-4-flash`, `ollama:qwen2.5`) rather than inventing a second key
-setting. A full `Tool` interface (`{name, description, execute}`) is deliberately *not* in yet: until the model
-picks the tool, the only caller is the executor and a dispatch table would be decoration — it arrives with (a).
+setting.
 
 ---
 
@@ -1507,7 +1507,7 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 22 files / 270 tests
+npm test            vitest run            → 24 files / 283 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)

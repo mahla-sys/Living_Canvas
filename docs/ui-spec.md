@@ -54,7 +54,8 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, 
 | شناورها | ChatPanel · FileViewer · HistoryModal · SettingsModal · PortModal · Toasts · BootOverlay | `implemented`؛ SettingsModal یک بخش **Appearance** دارد: تم + «snap به گریدِ ۲۶» (`src/components/Overlays.tsx#SettingsModal`) |
 | ذخیرهٔ تنظیمات ظاهری | `lc-settings` در localStorage، فقط از راه `src/lib/core.ts#writeSettingsLocal` | `implemented` طبق `docs/decisions/adr-006-theme-is-device-scoped.md` و `adr-007-settings-live-behind-two-functions.md` — و **هیچ** کلید ظاهری در `canvas.yaml` نیست، عمداً |
 | نوار وضعیت پایین | `22px` (`src/lib/core.ts#STATUS_BAR_HEIGHT`)، چپ: عنوان + شمارش + حالت ذخیره؛ راست: وضعیت اجرا + ذخیره + پنل‌ها | `implemented` — §۲.۱ |
-| حالت تمرکز | `Ctrl+K Z` روشن، `Escape` دو بار خاموش؛ هر دو پنل و کنسول پنهان | `implemented`؛ **در هیچ فایلی ذخیره نمی‌شود** |
+| حالت تمرکز | `Ctrl+K Z` روشن، `Escape` دو بار خاموش؛ هر دو پنل و کنسول پنهان | `implemented`؛ بدون ذخیره فایلی |
+| چرخه ابزار مدل | فراخوانی ابزارهای ده‌گانه بوم توسط مدل، ثبت در Run Ledger و نمایش زنده در گراف | `implemented` طبق `docs/decisions/adr-022-function-calling-loop-and-canvas-tools.md` |
 
 ### ۲.۱ اعداد چیدمان (هر کدام یک ادعا، هر ادعا یک محل ذخیره)
 
@@ -196,9 +197,7 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, 
 
 ## ۹. بدهی‌های ظاهری که همین‌جا ثبت می‌شوند (نه در چت)
 
-1. ~~هگزهای سرگردان~~ **بسته شد** (۲۰۲۶-۰۹-۰۲): روِ برنامه کامل به `var()`/کلاس رفت و
-   `scripts/check-palette.mjs` اجازه نمی‌ده هگزِ جدیدی بیرونِ بلوکِ توکن‌ها متولد شود. چیزی که باقی مانده، جدول‌های
-   نقش→رنگ در `src/components/` است که به تصمیمِ «accent‌ها با تم عوض شوند؟» بند است (`docs/inbox.md`).
+1. ~~هگزهای سرگردان~~ **بسته شد** (۲۰۲۶-۰۹-۰۲): رویه به `var()` رفت و `scripts/check-palette.mjs` هگز بیرون توکن‌ها را منع می‌کند؛ جدول‌های نقش→رنگ در `src/components/` به تصمیم accent در تم بند است (`docs/inbox.md`).
 2. **`React.memo` هیچ‌جا نیست** (برخلاف ادعای پیش‌نویس بیرونی). با سلکتورهای فعلی قابل‌دفاع است، ولی اولین
    بهینه‌سازیِ واقعی همین است، نه quadtree.
 3. **کیبورد هنوز تقریباً صفر است**: `Backspace/Delete` برای حذف، Enter در کامپوزر چت، و حالا `Enter/Escape`

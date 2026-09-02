@@ -55,7 +55,7 @@ export function StatusBar() {
   return (
     <div
       data-lc-statusbar
-      className="h-[22px] shrink-0 flex items-center justify-between gap-3 px-2.5 border-t border-ink-700 bg-ink-900 text-ink-400 select-none"
+      className="h-[22px] w-full max-w-full shrink-0 flex items-center justify-between gap-3 px-2.5 border-t border-ink-700 bg-ink-900 text-ink-400 select-none min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller"
       style={{ height: STATUS_BAR_HEIGHT }}
     >
       {/* left — the document */}
@@ -144,8 +144,8 @@ export function TopBar() {
   const selectedCount = useStore((s) => s.nodes.filter((n) => n.selected).length);
 
   return (
-    <header className="h-[54px] shrink-0 flex items-center gap-3 px-4 border-b border-ink-700 bg-ink-900/90 backdrop-blur-sm">
-      <div className="flex items-center gap-2.5">
+    <header className="h-[54px] w-full max-w-full shrink-0 flex items-center gap-3 px-4 border-b border-ink-700 bg-ink-900/90 backdrop-blur-sm min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller">
+      <div className="flex items-center gap-2.5 shrink-0">
         <Logo />
         <div className="leading-none">
           <p className="font-display text-[19px] text-ink-50 tracking-wide">Living Canvas</p>

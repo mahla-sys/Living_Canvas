@@ -53,7 +53,7 @@ function Palette() {
   const actions = useStore((s) => s.actions);
   const templates = useStore((s) => s.templates);
   return (
-    <div className="p-3 space-y-2">
+    <div className="p-3 pb-24 space-y-2">
       <p className="text-[10.5px] text-ink-400 leading-5 px-1">
         Drag elements <strong className="text-ink-200">into the canvas</strong>, or click to add one.
       </p>
@@ -283,7 +283,7 @@ function LiveFolderTree() {
   const actions = useStore((s) => s.actions);
   const rootName = useStore((s) => s.settings.workspaceRoot);
   return (
-    <div className="p-2 space-y-0.5">
+    <div className="p-2 pb-24 space-y-0.5">
       <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-sage/10 border border-sage/35">
         <IDatabase size={12} className="text-sage shrink-0" />
         <p className="text-[10.5px] leading-5 text-sage font-bold min-w-0">
@@ -325,7 +325,7 @@ function FileTree() {
 
   return (
     <TreeFilter.Provider value={q}>
-    <div className="p-2 space-y-0.5">
+    <div className="p-2 pb-24 space-y-0.5">
       <div className="relative px-0.5 pb-1.5">
         <input
           value={query}
@@ -537,12 +537,22 @@ export function LeftPanel() {
   const open = useStore((s) => s.canvas.layout.leftOpen);
   const width = useStore((s) => s.canvas.layout.leftWidth);
   const focus = useStore((s) => s.ui.focusMode);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
   // focus mode is a moment of work, not a setting: nothing here is written to a file (ADR-009)
   if (focus || !open) return null;
   return (
     <>
-    <aside style={{ width }} className="shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full min-h-0 overflow-hidden">
-      <div className="flex shrink-0 border-b border-ink-700">
+    <aside
+      style={{ width }}
+      onWheel={(e) => {
+        if (scrollerRef.current && !scrollerRef.current.contains(e.target as Node)) {
+          scrollerRef.current.scrollTop += e.deltaY;
+        }
+      }}
+      className="shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full max-h-full min-h-0 overflow-hidden"
+    >
+      <div className="flex shrink-0 border-b border-ink-700 bg-ink-900">
         {([["palette", "Library", ISpark], ["files", "Files", IFolder]] as const).map(([key, label, Icon]) => (
           <button
             key={key}
@@ -555,7 +565,13 @@ export function LeftPanel() {
           </button>
         ))}
       </div>
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">{tab === "palette" ? <Palette /> : <FileTree />}</div>
+      <div
+        ref={scrollerRef}
+        data-lc-panel-scroller="left"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain lc-panel-scroller"
+      >
+        {tab === "palette" ? <Palette /> : <FileTree />}
+      </div>
     </aside>
     <ResizeHandle side="left" />
     </>
@@ -706,7 +722,7 @@ function NodeInspector({ node }: { node: RFNode }) {
   const isAgent = node.data.nodeType === "agent";
 
   return (
-    <div className="anim-fade">
+    <div className="anim-fade pb-24">
       <div className="px-3.5 py-3 border-b border-ink-700 flex items-start gap-2.5">
         <span className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0" style={{ background: `${d.color}1a`, color: d.color, border: `1px solid ${d.color}40` }}>
           {d.nodeType === "agent" ? <IBrain size={17} /> : d.nodeType === "output-box" ? <IBox size={17} /> : <IFile size={17} />}
@@ -981,7 +997,7 @@ function EdgeInspector({ edgeId }: { edgeId: string }) {
   if (!edge?.data) return null;
   const d = edge.data;
   return (
-    <div className="anim-fade">
+    <div className="anim-fade pb-24">
       <div className="px-3.5 py-3 border-b border-ink-700">
         <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><IPulse size={15} className="text-ink-300" /> Edge</p>
         <p className="text-[10px] font-mono text-ink-500 mt-1">{edge.source} → {edge.target}</p>
@@ -1037,7 +1053,7 @@ function CanvasInspector() {
   const snapshots = useStore((s) => s.snapshots);
   const actions = useStore((s) => s.actions);
   return (
-    <div className="anim-fade">
+    <div className="anim-fade pb-24">
       <div className="px-3.5 py-3 border-b border-ink-700">
         <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><INode size={15} className="text-ink-300" /> Canvas settings</p>
         <p className="text-[10px] text-ink-400 mt-1 leading-5">Select a node to inspect it. With nothing selected, canvas-wide settings live here.</p>
@@ -1097,12 +1113,26 @@ export function RightPanel() {
   const open = useStore((s) => s.canvas.layout.rightOpen);
   const width = useStore((s) => s.canvas.layout.rightWidth);
   const focus = useStore((s) => s.ui.focusMode);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
   if (focus || !open) return null;
   return (
     <>
     <ResizeHandle side="right" />
-    <aside style={{ width }} className="shrink-0 border-s border-ink-700 bg-ink-900/80 flex flex-col h-full min-h-0 overflow-hidden">
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
+    <aside
+      style={{ width }}
+      onWheel={(e) => {
+        if (scrollerRef.current && !scrollerRef.current.contains(e.target as Node)) {
+          scrollerRef.current.scrollTop += e.deltaY;
+        }
+      }}
+      className="shrink-0 border-s border-ink-700 bg-ink-900/80 flex flex-col h-full max-h-full min-h-0 overflow-hidden"
+    >
+      <div
+        ref={scrollerRef}
+        data-lc-panel-scroller="right"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain lc-panel-scroller"
+      >
         {selectedNode ? <NodeInspector node={selectedNode} /> : selectedEdge ? <EdgeInspector edgeId={selectedEdge.id} /> : <CanvasInspector />}
       </div>
     </aside>

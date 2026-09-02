@@ -10,10 +10,10 @@ sources: [docs/ARCHITECTURE.md#9, docs/patterns/human-in-the-loop.md, docs/patte
 Nothing here is `accepted`; `docs/decisions/` is where a candidate becomes a commitment. Rows are ordered by
 "what does this make possible", not by size.
 
-- [ ] **Function calling.** Hand `TOOL_NAMES` to the provider as JSON-schema tools and loop on the calls the
+- [x] **Function calling.** Hand `TOOL_NAMES` to the provider as JSON-schema tools and loop on the calls the
   model returns, instead of walking a fixed six-step script. Additive rather than a rewrite because the gate
   (`src/lib/engine.ts#hasTool`) and the refusal paths already exist — the model gets to choose *which* permitted
-  step runs, never whether the checks apply. Source: `docs/ARCHITECTURE.md#9` (wound 1).
+  step runs, never whether the checks apply. Guard: `docs/decisions/adr-022-function-calling-loop-and-canvas-tools.md`. Source: `docs/ARCHITECTURE.md#9` (wound 1).
 - [ ] **Conditional-edge aggregation.** Decide multi-input semantics before anyone asks for `and`/`or`: today the
   first matching edge decides and the second is invisible. Source: `docs/patterns/conditional-edges.md`.
 - [ ] **Ledger gains model-side numbers** — model name, tokens, latency in the `detail` column. *Blocked by

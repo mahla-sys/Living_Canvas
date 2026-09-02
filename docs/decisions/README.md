@@ -26,6 +26,11 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
 | 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted (clause 3 superseded by 011) | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data |
 | 011 | `adr-011-accent-must-differ-in-hue-from-ink.md` | accepted | an accent must sit at least 60° from its own theme's ink hue (or, on an achromatic ramp, carry enough chroma), enforced by the palette gate; `botanical` is the default again |
+| 022 | `adr-022-function-calling-loop-and-canvas-tools.md` | accepted | model-driven function calling loop in askModel with 10 canvas tools, strict contract gating, and ledger logging |
+| 021 | `adr-021-mounted-root-height-boundary-playwright.md` | accepted | closes height chain breakage at data-lc-mounted so laptop viewports don't push status bar off-screen |
+| 020 | `adr-020-laptop-viewport-fit-and-scrolling.md` | accepted | viewport fit contract (fixed inset-0, dvh), middle container overflow clamping so panels scroll on laptops |
+| 019 | `adr-019-side-panel-scroll-ergonomics.md` | accepted | adds bottom padding and high-contrast scrollbar hover to left and right side panels |
+| 018 | `adr-018-node-shape-badge-layering.md` | accepted | separates clip-path from the badge overlay container so badges and handles remain unclipped on geometric shapes |
 | 017 | `adr-017-status-bar-speaks-in-words.md` | accepted | the status bar prints a sentence per execution state from a total `Record`, so a new enum value breaks the build instead of leaking to the reader |
 | 016 | `adr-016-search-filters-and-status-is-derived.md` | accepted | the left panel's filter is local state and its status glyph is derived from execution and agent status — neither is stored, so neither can drift from its source |
 | 015 | `adr-015-inspector-tabs-show-only-what-has-a-file.md` | accepted | Diary and Logs read real files; Status shows real execution state; no CPU/memory bar, because no source for it exists |

@@ -1,0 +1,6 @@
+{
+  "name": "Living Canvas",
+  "description": "The living whiteboard and visual workspace for agent workflows and interactive nodes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -82,8 +82,10 @@ describe("the panels take their geometry from the store, not from a hardcoded cl
    together with the half that must not regress: the resize handle still sits on the inner edge.
    ============================================================ */
 describe("both panels scroll, and scrolling did not cost the resize handle", () => {
-  it("the left panel has a real scroller: min-h-0 with overflow-y-auto", () => {
+  it("the left panel has a real scroller: min-h-0 with overflow-y-auto and lc-panel-scroller", () => {
     expect(left).toContain("flex-1 min-h-0 overflow-y-auto");
+    expect(left).toContain('data-lc-panel-scroller="left"');
+    expect(left).toContain("lc-panel-scroller");
     // `min-h-0` is the load-bearing half. `overflow-y-auto` alone is the shape of the bug, so asserting only
     // the overflow would pass on the broken markup too.
     expect(left).toMatch(/class="[^"]*\bmin-h-0\b[^"]*overflow-y-auto/);
@@ -91,6 +93,8 @@ describe("both panels scroll, and scrolling did not cost the resize handle", () 
 
   it("the right panel scrolls the same way, from its own inner scroller", () => {
     expect(right).toContain("flex-1 min-h-0 overflow-y-auto");
+    expect(right).toContain('data-lc-panel-scroller="right"');
+    expect(right).toContain("lc-panel-scroller");
     expect(right).toMatch(/<aside[^>]*class="[^"]*flex flex-col[^"]*min-h-0[^"]*overflow-hidden/);
   });
 

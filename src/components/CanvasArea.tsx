@@ -105,10 +105,16 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
 
   const shell = (inner: React.ReactNode, w?: string) => (
     <div
-      className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""} ${data.style.fillStyle === "empty" ? "lc-card-empty" : "lc-card-surface"}`}
-      style={{ ...shapeStyle(data), ...(breathe ? breatheDur : {}) }}
+      className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""}`}
+      style={breathe ? breatheDur : undefined}
     >
-      <div className={breathe ? "anim-breathe" : ""} style={breathe ? breatheDur : undefined}>
+      {/* Background shape backdrop with clip-path, border, boxShadow, fill */}
+      <div
+        className={`absolute inset-0 pointer-events-none transition-shadow duration-200 ${data.style.fillStyle === "empty" ? "lc-card-empty" : "lc-card-surface"}`}
+        style={shapeStyle(data)}
+      />
+
+      <div className={`relative z-[2] ${breathe ? "anim-breathe" : ""}`} style={breathe ? breatheDur : undefined}>
         {inner}
       </div>
       {locked && (

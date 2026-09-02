@@ -6,7 +6,7 @@ import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
   validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout,
-  type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType,
+  type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType, type EdgeType, type LCEdgeData,
   type ModelRoute,
 } from "./core";
 import {
@@ -473,26 +473,640 @@ export async function writeOutputs(api: EngineApi, nodeId: string, entries: Outp
   emit(api, "output.written", `${entries.length} output files saved in outputs/${shared ? `shared/${nodeId}` : nodeId}/`);
 }
 
-/* ---------------- LLM provider (§15) ---------------- */
+/* ---------------- LLM provider & Function Calling loop (§15) ---------------- */
 
-interface LlmMsg { role: "system" | "user" | "assistant"; content: string }
+export interface LlmToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string | Record<string, unknown>;
+  };
+}
+
+export interface LlmMsg {
+  role: "system" | "user" | "assistant" | "tool";
+  content?: string | null;
+  tool_calls?: LlmToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+
+export interface CanvasToolFunction {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+export interface CanvasToolDefinition {
+  type: "function";
+  function: CanvasToolFunction;
+}
+
+export const CANVAS_TOOL_DEFINITIONS: Record<string, CanvasToolDefinition> = {
+  create_node: {
+    type: "function",
+    function: {
+      name: "create_node",
+      description: "Create a new node on the canvas (agent, note, or output-box).",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Optional unique node ID (e.g. node-003, note-002)" },
+          title: { type: "string", description: "Node title" },
+          nodeType: { type: "string", enum: ["agent", "note", "output-box"], description: "Type of node" },
+          roleId: { type: "string", description: "Agent role ID if nodeType is agent (understander, risk-analyst, solution-designer, decision-maker)" },
+          position: {
+            type: "object",
+            properties: {
+              x: { type: "number", description: "X coordinate" },
+              y: { type: "number", description: "Y coordinate" },
+            },
+            description: "Canvas coordinates",
+          },
+          description: { type: "string", description: "Optional description or content" },
+        },
+        required: ["title"],
+      },
+    },
+  },
+  update_node: {
+    type: "function",
+    function: {
+      name: "update_node",
+      description: "Update an existing node's title, description, or content.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "ID of the node to update" },
+          title: { type: "string", description: "New title" },
+          description: { type: "string", description: "New description" },
+          content: { type: "string", description: "New markdown body content" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  delete_node: {
+    type: "function",
+    function: {
+      name: "delete_node",
+      description: "Delete an existing node and its connected edges from the canvas.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "ID of the node to delete" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  create_edge: {
+    type: "function",
+    function: {
+      name: "create_edge",
+      description: "Create a connection edge between two nodes on the canvas.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Optional edge ID" },
+          source: { type: "string", description: "Source node ID" },
+          target: { type: "string", description: "Target node ID" },
+          edgeType: { type: "string", enum: ["flow", "relation", "event-flow", "blackboard"], description: "Type of edge" },
+          label: { type: "string", description: "Optional label" },
+          condition: { type: "string", description: "Optional conditional expression" },
+        },
+        required: ["source", "target"],
+      },
+    },
+  },
+  update_edge: {
+    type: "function",
+    function: {
+      name: "update_edge",
+      description: "Update an existing edge's type, condition, or label.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Edge ID to update" },
+          edgeType: { type: "string", enum: ["flow", "relation", "event-flow", "blackboard"], description: "Type of edge" },
+          condition: { type: "string", description: "Conditional expression e.g. {{ risk_score < 7 }}" },
+          label: { type: "string", description: "Label text" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  delete_edge: {
+    type: "function",
+    function: {
+      name: "delete_edge",
+      description: "Delete an edge from the canvas.",
+      parameters: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Edge ID to delete" },
+        },
+        required: ["id"],
+      },
+    },
+  },
+  get_canvas_overview: {
+    type: "function",
+    function: {
+      name: "get_canvas_overview",
+      description: "Read the overview of the canvas, including existing nodes, edges, and state.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  read_memory: {
+    type: "function",
+    function: {
+      name: "read_memory",
+      description: "Read memory documents allowed by the agent contract.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Memory path e.g. memory/agents/<nodeId>.md or memory/global.md" },
+        },
+      },
+    },
+  },
+  write_memory: {
+    type: "function",
+    function: {
+      name: "write_memory",
+      description: "Write content to the agent or shared memory within allowed write paths.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", description: "Target memory path e.g. memory/agents/<nodeId>.md" },
+          content: { type: "string", description: "Memory markdown text" },
+          confidence: { type: "number", description: "Confidence value between 0.0 and 1.0" },
+        },
+        required: ["content"],
+      },
+    },
+  },
+  write_output: {
+    type: "function",
+    function: {
+      name: "write_output",
+      description: "Deliver output fields according to the node output contract.",
+      parameters: {
+        type: "object",
+        properties: {
+          fields: {
+            type: "object",
+            description: "Map of field names to string values (e.g. summary, decision, risks, risk_score)",
+          },
+        },
+        required: ["fields"],
+      },
+    },
+  },
+};
+
+export type ToolCallResult =
+  | { status: "ok"; [key: string]: unknown }
+  | { status: "denied"; reason: string }
+  | { status: "rejected"; reason: string }
+  | { status: "error"; reason: string };
+
+export interface ToolContext {
+  api: EngineApi;
+  nodeId: string;
+  agent?: AgentConfig | null;
+  outputDelivered?: boolean;
+}
+
+export interface AskModelOptions {
+  maxTokens?: number;
+  maxSteps?: number;
+  tools?: CanvasToolDefinition[];
+  toolContext?: ToolContext;
+  onToolExecute?: (name: string, args: Record<string, unknown>, result: ToolCallResult) => Promise<void> | void;
+}
+
+export async function executeTool(
+  api: EngineApi,
+  nodeId: string,
+  agent: AgentConfig | null | undefined,
+  toolName: string,
+  args: Record<string, unknown>,
+  context?: { outputDelivered?: boolean }
+): Promise<ToolCallResult> {
+  const tName = toolName as ToolName;
+
+  if (agent && !hasTool(agent, tName)) {
+    const why = `${toolName} is not in agent.tools (§9)`;
+    await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+    await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: "not in agent.tools" });
+    return { status: "denied", reason: why };
+  }
+
+  switch (toolName) {
+    case "get_canvas_overview": {
+      const readPath = "canvas-overview.md";
+      if (agent && !isPathAllowed(agent.context_contract.allowed_read_paths, readPath)) {
+        const why = `path "${readPath}" not in allowed_read_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+      const s = api.get();
+      const overview = {
+        canvas_title: s.canvas.title,
+        owner: s.canvas.owner,
+        nodes: s.nodes.map((n) => ({
+          id: n.id,
+          title: n.data.title,
+          type: n.data.nodeType,
+          role: n.data.agent?.role_id,
+          status: n.data.agent?.status,
+        })),
+        edges: s.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          edgeType: e.data?.edgeType ?? "flow",
+          condition: e.data?.condition ?? "",
+        })),
+      };
+      await appendLog(api, nodeId, "tool get_canvas_overview → read canvas summary");
+      await ledgerRow(api, {
+        node: nodeId,
+        tool: "get_canvas_overview",
+        status: "ok",
+        detail: `${s.nodes.length} nodes, ${s.edges.length} edges`,
+      });
+      return { status: "ok", overview };
+    }
+
+    case "create_node": {
+      const title = typeof args.title === "string" ? args.title : "New node";
+      const nodeType = (["agent", "note", "output-box"].includes(args.nodeType as string)
+        ? args.nodeType
+        : "agent") as NodeType;
+      const targetId =
+        typeof args.id === "string" && args.id.trim()
+          ? args.id.trim()
+          : uid(nodeType === "agent" ? "node" : nodeType === "output-box" ? "box" : "note");
+      const targetPath = `nodes/${targetId}.md`;
+
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      const pos =
+        args.position && typeof args.position === "object" && typeof (args.position as { x?: number; y?: number }).x === "number"
+          ? (args.position as { x: number; y: number })
+          : { x: 120 + Math.floor(Math.random() * 200), y: 120 + Math.floor(Math.random() * 200) };
+
+      const roleId = typeof args.roleId === "string" ? args.roleId : "understander";
+      const desc = typeof args.description === "string" ? args.description : "";
+
+      await createNode(api, nodeType, pos, {
+        id: targetId,
+        title,
+        content: desc,
+        ...(nodeType === "agent" ? { agent: makeAgentConfig(targetId, roleId) } : {}),
+      });
+
+      await appendLog(api, nodeId, `tool create_node → node “${title}” (${targetId}) created`);
+      await ledgerRow(api, {
+        node: nodeId,
+        tool: "create_node",
+        status: "ok",
+        detail: `created ${targetId} (${title})`,
+      });
+      return { status: "ok", id: targetId, title, nodeType };
+    }
+
+    case "update_node": {
+      const targetId = typeof args.id === "string" ? args.id.trim() : "";
+      if (!targetId || !getNode(api.get(), targetId)) {
+        return { status: "error", reason: `node "${targetId}" not found` };
+      }
+      const targetPath = `nodes/${targetId}.md`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      const patch: Partial<RFNode["data"]> = {};
+      if (typeof args.title === "string") patch.title = args.title;
+      if (typeof args.description === "string") patch.content = args.description;
+      if (typeof args.content === "string") patch.content = args.content;
+
+      patchNode(api, targetId, patch, true);
+      await writeNodeArtifact(api, targetId, true);
+      emit(api, "node.updated", `node “${targetId}” updated by tool`);
+      touch(api);
+
+      await appendLog(api, nodeId, `tool update_node → node “${targetId}” updated`);
+      await ledgerRow(api, { node: nodeId, tool: "update_node", status: "ok", detail: `updated ${targetId}` });
+      return { status: "ok", id: targetId };
+    }
+
+    case "delete_node": {
+      const targetId = typeof args.id === "string" ? args.id.trim() : "";
+      if (!targetId || !getNode(api.get(), targetId)) {
+        return { status: "error", reason: `node "${targetId}" not found` };
+      }
+      const targetPath = `nodes/${targetId}.md`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      await deleteNode(api, targetId);
+      await appendLog(api, nodeId, `tool delete_node → node “${targetId}” deleted`);
+      await ledgerRow(api, { node: nodeId, tool: "delete_node", status: "ok", detail: `deleted ${targetId}` });
+      return { status: "ok", id: targetId };
+    }
+
+    case "create_edge": {
+      const src = typeof args.source === "string" ? args.source.trim() : "";
+      const tgt = typeof args.target === "string" ? args.target.trim() : "";
+      if (!src || !tgt || !getNode(api.get(), src) || !getNode(api.get(), tgt)) {
+        return { status: "error", reason: `source or target node not found: ${src} -> ${tgt}` };
+      }
+      const edgeId = typeof args.id === "string" && args.id.trim() ? args.id.trim() : uid("edge");
+      const targetPath = `edges/${edgeId}.yaml`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      const edgeType = (["flow", "relation", "event-flow", "blackboard"].includes(args.edgeType as string)
+        ? args.edgeType
+        : "flow") as EdgeType;
+      const label = typeof args.label === "string" ? args.label : "";
+      const condition = typeof args.condition === "string" ? args.condition : "";
+
+      await createEdge(api, src, tgt, { id: edgeId, edgeType, label, condition });
+      await appendLog(api, nodeId, `tool create_edge → edge ${src} → ${tgt} (${edgeId}) created`);
+      await ledgerRow(api, {
+        node: nodeId,
+        tool: "create_edge",
+        status: "ok",
+        detail: `edge ${src} → ${tgt} (${edgeId})`,
+      });
+      return { status: "ok", id: edgeId, source: src, target: tgt };
+    }
+
+    case "update_edge": {
+      const edgeId = typeof args.id === "string" ? args.id.trim() : "";
+      const edge = api.get().edges.find((e) => e.id === edgeId);
+      if (!edgeId || !edge) {
+        return { status: "error", reason: `edge "${edgeId}" not found` };
+      }
+      const targetPath = `edges/${edgeId}.yaml`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      const patch: Partial<NonNullable<RFEdge["data"]>> = {};
+      if (typeof args.edgeType === "string") patch.edgeType = args.edgeType as EdgeType;
+      if (typeof args.condition === "string") patch.condition = args.condition;
+      if (typeof args.label === "string") patch.label = args.label;
+
+      await patchEdge(api, edgeId, patch);
+      await appendLog(api, nodeId, `tool update_edge → edge ${edgeId} updated`);
+      await ledgerRow(api, { node: nodeId, tool: "update_edge", status: "ok", detail: `updated edge ${edgeId}` });
+      return { status: "ok", id: edgeId };
+    }
+
+    case "delete_edge": {
+      const edgeId = typeof args.id === "string" ? args.id.trim() : "";
+      if (!edgeId || !api.get().edges.some((e) => e.id === edgeId)) {
+        return { status: "error", reason: `edge "${edgeId}" not found` };
+      }
+      const targetPath = `edges/${edgeId}.yaml`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      await deleteEdge(api, edgeId);
+      await appendLog(api, nodeId, `tool delete_edge → edge ${edgeId} deleted`);
+      await ledgerRow(api, { node: nodeId, tool: "delete_edge", status: "ok", detail: `deleted edge ${edgeId}` });
+      return { status: "ok", id: edgeId };
+    }
+
+    case "read_memory": {
+      const targetPath = typeof args.path === "string" && args.path.trim() ? args.path.trim() : `memory/agents/${nodeId}.md`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_read_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_read_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      let content = "";
+      try {
+        content = await storage.readFile(`${ROOT}/${targetPath}`);
+      } catch {
+        const doc = memDocAt(api.get(), targetPath, nodeId);
+        content = doc ? memoryToMd(doc) : "";
+      }
+      await appendLog(api, nodeId, `tool read_memory → read ${targetPath}`);
+      await ledgerRow(api, { node: nodeId, tool: "read_memory", status: "ok", detail: targetPath });
+      return { status: "ok", path: targetPath, content };
+    }
+
+    case "write_memory": {
+      const targetPath = typeof args.path === "string" && args.path.trim() ? args.path.trim() : `memory/agents/${nodeId}.md`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, targetPath)) {
+        const why = `path "${targetPath}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      const content = typeof args.content === "string" ? args.content : "";
+      const confidence = typeof args.confidence === "number" ? args.confidence : 0.8;
+      const ok = await MemoryManager.write(api, nodeId, content, confidence, targetPath);
+      if (!ok) {
+        return { status: "error", reason: "Memory write conflict or node locked" };
+      }
+      await appendLog(api, nodeId, `tool write_memory → wrote ${targetPath}`);
+      await ledgerRow(api, { node: nodeId, tool: "write_memory", status: "ok", detail: targetPath });
+      return { status: "ok", path: targetPath };
+    }
+
+    case "write_output": {
+      const saveTo = agent?.context_contract.output_contract.save_to ?? `outputs/${nodeId}/`;
+      if (agent && !isPathAllowed(agent.context_contract.allowed_write_paths, saveTo)) {
+        const why = `path "${saveTo}" not in allowed_write_paths`;
+        await appendLog(api, nodeId, `tool ${toolName} denied — ${why}`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: why });
+        return { status: "denied", reason: why };
+      }
+
+      const fields = (args.fields && typeof args.fields === "object" ? args.fields : {}) as Record<string, string>;
+      const required = agent?.context_contract.output_contract.required_fields ?? ["summary"];
+      const problems = await validateAgainstContract(api, agent ?? null, required, fields);
+      if (problems.length) {
+        const refused = problems.slice(0, 4).join("; ");
+        emit(api, "validation.failed", `output of ${nodeId} rejected by contract: ${refused}`);
+        await appendLog(api, nodeId, `tool write_output rejected: ${refused}`);
+        await ledgerRow(api, { node: nodeId, tool: "write_output", status: "rejected", detail: refused });
+        setNodeError(api, nodeId, `output rejected — ${refused}`);
+        return { status: "rejected", reason: refused };
+      }
+
+      const entries = buildEntries(nodeId, required, fields);
+      await writeOutputs(api, nodeId, entries);
+      if (context) context.outputDelivered = true;
+      await appendLog(api, nodeId, `tool write_output → ${required.length} fields delivered`);
+      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "ok", detail: `${required.length} fields` });
+      return { status: "ok", delivered: required };
+    }
+
+    default: {
+      const why = `unknown tool "${toolName}"`;
+      await appendLog(api, nodeId, why);
+      await ledgerRow(api, { node: nodeId, tool: toolName, status: "error", detail: why });
+      return { status: "error", reason: why };
+    }
+  }
+}
 
 /**
- * One provider call. The endpoint comes from `resolveModelRoute` (ADR-008) — the model a node names decides
- * where the request goes — and `max_tokens` comes from that node's own `AgentConfig`, which used to be
- * pinned at 900 here while the UI offered 4000. Both were controls that did not control anything.
+ * Provider call with autonomous tool_calls loop.
+ * Passes JSON Schema tools to the model, executes tool calls with permission checks and ledger logging,
+ * returns tool outputs back to the model, and loops until the model stops calling tools or max_steps is hit.
  */
-async function askModel(route: ModelRoute, apiKey: string, messages: LlmMsg[], maxTokens: number): Promise<string> {
-  const res = await fetch(route.endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: route.model, messages, max_tokens: maxTokens, temperature: 0.7 }),
-  });
-  if (!res.ok) throw new Error(`${route.provider} API ${res.status}`);
-  const j = await res.json();
-  const text = j?.choices?.[0]?.message?.content;
-  if (!text) throw new Error("empty response from the model");
-  return String(text);
+export async function askModel(
+  route: ModelRoute,
+  apiKey: string,
+  messages: LlmMsg[],
+  maxTokensOrOpts?: number | AskModelOptions
+): Promise<string> {
+  const opts: AskModelOptions =
+    typeof maxTokensOrOpts === "number"
+      ? { maxTokens: maxTokensOrOpts }
+      : maxTokensOrOpts ?? {};
+
+  const maxTokens = opts.maxTokens ?? 900;
+  const maxSteps = opts.maxSteps ?? 6;
+  const toolContext = opts.toolContext;
+
+  let toolsToSend = opts.tools;
+  if (!toolsToSend && toolContext) {
+    toolsToSend = Object.values(CANVAS_TOOL_DEFINITIONS);
+  }
+
+  const currentMessages: LlmMsg[] = [...messages];
+  let steps = 0;
+  let finalContent = "";
+
+  while (steps < maxSteps) {
+    const payload: Record<string, unknown> = {
+      model: route.model,
+      messages: currentMessages,
+      max_tokens: maxTokens,
+      temperature: 0.7,
+    };
+
+    if (toolsToSend && toolsToSend.length > 0) {
+      payload.tools = toolsToSend;
+      payload.tool_choice = "auto";
+    }
+
+    const res = await fetch(route.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`${route.provider} API ${res.status}`);
+    const j = await res.json();
+    const choice = j?.choices?.[0];
+    const msg = choice?.message;
+    if (!msg) throw new Error("empty response from the model");
+
+    if (msg.content) {
+      finalContent = String(msg.content);
+    }
+
+    const toolCalls: LlmToolCall[] = msg.tool_calls;
+    if (!toolCalls || toolCalls.length === 0) {
+      return finalContent;
+    }
+
+    currentMessages.push({
+      role: "assistant",
+      content: msg.content ?? null,
+      tool_calls: toolCalls,
+    });
+
+    for (const call of toolCalls) {
+      steps++;
+      let parsedArgs: Record<string, unknown> = {};
+      try {
+        parsedArgs =
+          typeof call.function?.arguments === "string"
+            ? JSON.parse(call.function.arguments)
+            : (call.function?.arguments as Record<string, unknown>) ?? {};
+      } catch {
+        parsedArgs = {};
+      }
+
+      let result: ToolCallResult;
+      if (toolContext) {
+        result = await executeTool(
+          toolContext.api,
+          toolContext.nodeId,
+          toolContext.agent,
+          call.function.name,
+          parsedArgs,
+          toolContext
+        );
+      } else {
+        result = { status: "error", reason: "no tool context available" };
+      }
+
+      if (opts.onToolExecute) {
+        await opts.onToolExecute(call.function.name, parsedArgs, result);
+      }
+
+      currentMessages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        name: call.function.name,
+        content: JSON.stringify(result),
+      });
+
+      if (steps >= maxSteps) {
+        break;
+      }
+    }
+  }
+
+  return finalContent;
 }
 
 /* ---------------- simulated generation ---------------- */
@@ -562,7 +1176,20 @@ function buildEntries(nodeId: string, required: string[], fields: Record<string,
  * dispatch table (name → execute(args)) arrives with function calling, where the model picks the
  * tool; until then the executor is the only caller and a `Tool` interface would be decoration.
  */
-export const TOOL_NAMES = ["get_canvas_overview", "get_agent_brief", "read_memory", "write_memory", "chat_with_user", "write_output"] as const;
+export const TOOL_NAMES = [
+  "get_canvas_overview",
+  "get_agent_brief",
+  "read_memory",
+  "write_memory",
+  "chat_with_user",
+  "write_output",
+  "create_node",
+  "update_node",
+  "delete_node",
+  "create_edge",
+  "update_edge",
+  "delete_edge",
+] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 const HARNESS_TOOLS: string[] = ["get_canvas_overview", "get_agent_brief"];
 
@@ -881,12 +1508,22 @@ async function executeNode(api: EngineApi, nodeId: string) {
       : "generating a response in the phase 1 simulator…");
     let fields: Record<string, string>;
     const required = agent?.context_contract.output_contract.required_fields ?? ["summary"];
+    const toolCtx: { api: EngineApi; nodeId: string; agent?: AgentConfig | null; outputDelivered?: boolean } = {
+      api,
+      nodeId,
+      agent,
+      outputDelivered: false,
+    };
     if (agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey) {
       try {
         const text = await askModel(route, api.get().settings.apiKey, [
           { role: "system", content: agent.system_prompt },
           { role: "user", content: `Canvas summary and memory:\n${memoryTxt.slice(0, 1200)}\n\nOutput of the previous node:\n${upstream.slice(0, 800)}\n\nWrite the output with these fields: ${required.join(", ")}.` },
-        ], agent.max_tokens);
+        ], {
+          maxTokens: agent.max_tokens,
+          maxSteps: agent.max_steps,
+          toolContext: toolCtx,
+        });
         fields = { summary: text, ...simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner) };
       } catch (err) {
         await appendLog(api, nodeId, `API error: ${String(err)} — falling back to the simulator (§12.6 fallback)`);
@@ -902,25 +1539,27 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // step 5 — write_output + validation §3.6. Delivering output is a capability: an agent that is
     // not allowed to write cannot "succeed" by quietly producing nothing.
-    if (agent && !hasTool(agent, "write_output")) {
-      await appendLog(api, nodeId, "write_output is not in tools → the output contract cannot be delivered (§9)");
-      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "denied", detail: "not in agent.tools" });
-      throw new Error(`write_output is not permitted for ${nodeId}`);
+    if (!toolCtx.outputDelivered) {
+      if (agent && !hasTool(agent, "write_output")) {
+        await appendLog(api, nodeId, "write_output is not in tools → the output contract cannot be delivered (§9)");
+        await ledgerRow(api, { node: nodeId, tool: "write_output", status: "denied", detail: "not in agent.tools" });
+        throw new Error(`write_output is not permitted for ${nodeId}`);
+      }
+      const contractProblems = await validateAgainstContract(api, agent, required, fields);
+      if (contractProblems.length) {
+        refused = contractProblems.slice(0, 4).join("; ");
+        emit(api, "validation.failed", `output of ${nodeId} was rejected by its own contract: ${refused}`);
+        await appendLog(api, nodeId, `validation rejected the output: ${refused}`);
+        await ledgerRow(api, { node: nodeId, tool: "write_output", status: "rejected", detail: refused });
+        setNodeError(api, nodeId, `output rejected — ${refused}`);
+        throw new Error(`invalid output: ${contractProblems[0]}`);
+      }
+      const entries = buildEntries(nodeId, required, fields);
+      await writeOutputs(api, nodeId, entries);
+      await appendLog(api, nodeId, `tool write_output → validation passed (${required.length}/${required.length} fields)`);
+      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "ok", detail: `${required.length}/${required.length} fields → ${agent?.context_contract.output_contract.save_to ?? "outputs/"}` });
+      steps++;
     }
-    const contractProblems = await validateAgainstContract(api, agent, required, fields);
-    if (contractProblems.length) {
-      refused = contractProblems.slice(0, 4).join("; ");
-      emit(api, "validation.failed", `output of ${nodeId} was rejected by its own contract: ${refused}`);
-      await appendLog(api, nodeId, `validation rejected the output: ${refused}`);
-      await ledgerRow(api, { node: nodeId, tool: "write_output", status: "rejected", detail: refused });
-      setNodeError(api, nodeId, `output rejected — ${refused}`);
-      throw new Error(`invalid output: ${contractProblems[0]}`);
-    }
-    const entries = buildEntries(nodeId, required, fields);
-    await writeOutputs(api, nodeId, entries);
-    await appendLog(api, nodeId, `tool write_output → validation passed (${required.length}/${required.length} fields)`);
-    await ledgerRow(api, { node: nodeId, tool: "write_output", status: "ok", detail: `${required.length}/${required.length} fields → ${agent?.context_contract.output_contract.save_to ?? "outputs/"}` });
-    steps++;
 
     // step 6 — write_memory §6
     const memLines = [
@@ -1481,10 +2120,10 @@ export async function createNode(
   api: EngineApi,
   nodeType: RFNode["data"]["nodeType"],
   position: { x: number; y: number },
-  opts?: Partial<RFNode["data"]> & { title?: string }
+  opts?: Partial<RFNode["data"]> & { title?: string; id?: string }
 ): Promise<string> {
   const prefix = nodeType === "agent" ? "node" : nodeType === "output-box" ? "box" : nodeType === "note" ? "note" : nodeType;
-  const id = uid(prefix);
+  const id = opts?.id ? opts.id : uid(prefix);
   const title = opts?.title ?? (nodeType === "agent" ? "New agent" : nodeType === "output-box" ? "Output box" : nodeType === "note" ? "Note" : "New node");
   const data = makeNodeData(nodeType, title, api.get().canvas.owner, {
     ...(nodeType === "agent" ? { agent: makeAgentConfig(id, "understander") } : {}),
@@ -1530,16 +2169,36 @@ export async function deleteNode(api: EngineApi, id: string) {
   touch(api);
 }
 
-export async function createEdge(api: EngineApi, source: string, target: string): Promise<string | null> {
+export async function createEdge(
+  api: EngineApi,
+  source: string,
+  target: string,
+  opts?: { id?: string; edgeType?: EdgeType; label?: string; condition?: string }
+): Promise<string | null> {
   if (source === target) return null;
-  const id = uid("edge");
+  const id = opts?.id ? opts.id : uid("edge");
   const data = makeEdgeData();
+  if (opts?.edgeType) data.edgeType = opts.edgeType;
+  if (opts?.label) data.label = opts.label;
+  if (opts?.condition) data.condition = opts.condition;
   const edge: RFEdge = { id, source, target, type: "lc", data };
   api.set((st) => ({ edges: [...st.edges, edge] }));
   await writeEdgeArtifact(api, id, true);
   emit(api, "edge.created", `edge ${source} ← ${target} created`);
   touch(api);
   return id;
+}
+
+export async function patchEdge(api: EngineApi, id: string, patch: Partial<LCEdgeData>) {
+  const edge = api.get().edges.find((e) => e.id === id);
+  if (!edge || !edge.data) return;
+  const nextData: LCEdgeData = { ...edge.data, ...patch };
+  api.set((st) => ({
+    edges: st.edges.map((e) => (e.id === id ? { ...e, data: nextData } : e)),
+  }));
+  await writeEdgeArtifact(api, id, true);
+  emit(api, "edge.updated", `edge ${id} updated`);
+  touch(api);
 }
 
 export async function deleteEdge(api: EngineApi, id: string) {
