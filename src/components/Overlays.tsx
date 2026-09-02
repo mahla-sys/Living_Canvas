@@ -120,6 +120,8 @@ export function TopBar() {
   const actions = useStore((s) => s.actions);
   const running = execution.status === "running";
   const waiting = execution.status === "waiting_approval";
+  const paused = execution.status === "paused";
+  const idle = execution.status === "idle" || execution.status === "completed" || execution.status === "stopped";
   const progress = execution.queue.length ? execution.completed.length / execution.queue.length : 0;
   // the scoped-run affordance only appears once there is a selection to run (ADR-012)
   const selectedCount = useStore((s) => s.nodes.filter((n) => n.selected).length);
@@ -194,6 +196,38 @@ export function TopBar() {
         ) : (
           <button onClick={actions.runAll} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-lc-accent text-ink-950 text-[12px] font-black hover:brightness-110 hover:shadow-[0_6px_24px_-6px_var(--lc-accent-glow)] transition-all cursor-pointer active:scale-[0.98]">
             <IPlay size={14} /> Run pipeline
+          </button>
+        )}
+        {/* Pause and Step only exist while there is something to pause or step (ADR-013). Pause is
+            cooperative, so the label says what is actually happening: the current node finishes first. */}
+        {(running || paused) && (
+          <button
+            onClick={actions.pause}
+            disabled={!running}
+            data-lc-pause
+            title="Finish the current node, then stop the queue"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-ink-200 text-[11.5px] font-extrabold hover:border-lc-warn/60 hover:text-lc-warn transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {paused ? "Paused" : "Pause"}
+          </button>
+        )}
+        {(paused || idle) && (
+          <button
+            onClick={actions.step}
+            data-lc-step
+            title="Run exactly one node, then pause"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-ink-200 text-[11.5px] font-extrabold hover:border-lc-accent/60 hover:text-lc-accent transition-colors cursor-pointer"
+          >
+            Step
+          </button>
+        )}
+        {paused && (
+          <button
+            onClick={actions.resume}
+            data-lc-resume
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-lc-accent/15 border border-lc-accent/50 text-lc-accent text-[11.5px] font-extrabold hover:bg-lc-accent/25 transition-colors cursor-pointer"
+          >
+            <IPlay size={13} /> Resume
           </button>
         )}
         {selectedCount > 0 && (

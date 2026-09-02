@@ -26,6 +26,7 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
 | 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted (clause 3 superseded by 011) | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data |
 | 011 | `adr-011-accent-must-differ-in-hue-from-ink.md` | accepted | an accent must sit at least 60° from its own theme's ink hue (or, on an achromatic ramp, carry enough chroma), enforced by the palette gate; `botanical` is the default again |
+| 013 | `adr-013-pause-is-cooperative.md` | accepted | pause stops the queue at the next node boundary with `run_id` intact, so the in-flight node keeps its output; step is one node then pause |
 | 012 | `adr-012-run-scope-is-runtime.md` | accepted | a run scope is a moment of work: `computeOrder` takes a subset, dependencies are counted only inside it, and nothing about the choice is written to the canvas |
 
 ## House rules

@@ -20,7 +20,7 @@ import {
   emit, toast, touch, writeNodeArtifact, writeEdgeArtifact, patchNode,
   createNode as engCreateNode, deleteNode as engDeleteNode,
   createEdge as engCreateEdge, deleteEdge as engDeleteEdge,
-  runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution, flowClosure,
+  runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution, flowClosure, pauseRun, stepRun,
   sendChat, takeSnapshot, restoreSnapshot, initWorkspace, resetWorkspace,
   saveTemplate, loadTemplate, saveRoleFromNode, contractSelfTest, testFallback,
   addStroke as engAddStroke, removeStroke as engRemoveStroke, undoStroke as engUndoStroke,
@@ -86,6 +86,8 @@ interface Actions {
   resume: () => void;
   reject: () => void;
   stop: () => void;
+  pause: () => void;
+  step: () => void;
   resetRun: () => void;
   chat: (id: string, text: string) => void;
   snapshot: () => void;
@@ -341,6 +343,8 @@ function buildActions(a: EngineApi): Actions {
     resume: () => void resumeRun(a),
     reject: () => rejectRun(a),
     stop: () => stopRun(a),
+    pause: () => pauseRun(a),
+    step: () => void stepRun(a),
     resetRun: () => resetExecution(a),
     chat: (id, text) => void sendChat(a, id, text),
     snapshot: () => void takeSnapshot(a, "Manual checkpoint"),

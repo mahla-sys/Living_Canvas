@@ -1013,6 +1013,11 @@ async function collectToBox(api: EngineApi, boxId: string) {
   await takeSnapshot(api, "final output collection", true);
 }
 
+/* Step mode. Module-scoped rather than a field on `execution`, because "run exactly one more" is a moment of
+   work (Law 3, ADR-009) and must not reach `state.json` — a flag that survived a reload would silently make
+   the next run stop after one node. */
+let stepOnce = false;
+
 async function processQueue(api: EngineApi) {
   while (true) {
     const ex = api.get().execution;
@@ -1055,6 +1060,16 @@ async function processQueue(api: EngineApi) {
     else if (node.data.nodeType === "output-box") await collectToBox(api, nextId);
     else api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nextId] } }));
     touch(api);
+    /* Step mode stops here, at the node boundary, with that node's own output already written — which is the
+       whole point of pausing cooperatively (ADR-013). */
+    if (stepOnce) {
+      stepOnce = false;
+      api.set((st) => ({ execution: { ...st.execution, status: "paused" } }));
+      await ledgerRow(api, { node: nextId, tool: "step", status: "ok", detail: "one step — the run is now paused" });
+      emit(api, "run.paused", `one step executed (${nextId}) — the run is paused`);
+      toast(api, "info", "One step done — the run is paused.");
+      return;
+    }
   }
 }
 
@@ -1114,12 +1129,56 @@ export async function runSingle(api: EngineApi, nodeId: string) {
   touch(api);
 }
 
+/**
+ * Pause (ADR-013). Cooperative: this sets the status and returns, and the queue stops at the *next node
+ * boundary*. The node already running finishes and its output is written, because `run_id` is left alone —
+ * that is exactly how it differs from `stopRun`, which invalidates `run_id` and drops the in-flight node at
+ * its next guard. Both are needed: "finish this step" and "let go right now" are different asks.
+ */
+export function pauseRun(api: EngineApi) {
+  const ex = api.get().execution;
+  if (ex.status !== "running") { toast(api, "warn", "Nothing is running to pause."); return; }
+  stepOnce = false; // a queued step must not fire after the pause and stop the run one node early
+  api.set((st) => ({ execution: { ...st.execution, status: "paused" } }));
+  void ledgerRow(api, { node: ex.current_node_id ?? "—", tool: "pause", status: "ok", detail: "the user paused; the current node was allowed to finish" });
+  emit(api, "run.paused", "the run was paused — the current node finishes, then the queue stops");
+  toast(api, "info", "Pausing after the current node finishes…");
+}
+
+/**
+ * Step (ADR-013): run exactly one more node, then pause. From idle it starts the queue; from paused it
+ * continues it. Both end in `paused`, so repeated presses walk the pipeline one node at a time.
+ */
+export async function stepRun(api: EngineApi) {
+  const ex = api.get().execution;
+  if (ex.status === "running") { toast(api, "warn", "A run is already in progress."); return; }
+  if (ex.status === "waiting_approval") { toast(api, "warn", "A step is waiting for approval."); return; }
+  stepOnce = true;
+  if (ex.status === "paused" && ex.queue.length) {
+    api.set((st) => ({ execution: { ...st.execution, status: "running" } }));
+    await processQueue(api);
+    return;
+  }
+  // from idle or stopped: start a run that will stop after its first node
+  const s = api.get();
+  const start = findStart(s);
+  if (!start) { stepOnce = false; toast(api, "error", "No agent node to run."); return; }
+  const { order, cyclic } = computeOrder(s, start.id);
+  api.set({ execution: { ...emptyExecution(), run_id: uid("run"), status: "running", queue: order, started_at: nowIso() } });
+  await startLedger(api, `Stepping through the pipeline from “${start.data.title}”.`);
+  if (cyclic.length) emit(api, "validation.failed", `flow edges form a cycle through ${cyclic.join(", ")} — queued last`);
+  emit(api, "run.started", `stepping from “${start.data.title}” — ${order.length} nodes queued`);
+  await processQueue(api);
+}
+
 export async function resumeRun(api: EngineApi) {
   const ex = api.get().execution;
-  if (ex.status !== "waiting_approval") return;
+  // two ways to reach a stopped queue — a pause and an approval — and one way back out of it
+  if (ex.status !== "waiting_approval" && ex.status !== "paused") return;
+  const wasPaused = ex.status === "paused";
   api.set((st) => ({ execution: { ...st.execution, status: "running" } }));
-  emit(api, "run.resumed", "human approval recorded — the run continued");
-  toast(api, "success", "Approved — resuming the run…");
+  emit(api, "run.resumed", wasPaused ? "the paused run continued" : "human approval recorded — the run continued");
+  toast(api, "success", wasPaused ? "Resuming the run…" : "Approved — resuming the run…");
   await processQueue(api);
 }
 

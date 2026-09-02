@@ -172,23 +172,23 @@ src/
 ├── main.tsx                    113  L   boot, global error surface, React error boundary
 ├── App.tsx                      93  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
 ├── state.ts                    534  L   ★ constants, types re-exports, factories, role schemas, seed
-├── store.ts                    470  L   ★ zustand store + Actions façade (the only UI-facing API)
+├── store.ts                    474  L   ★ zustand store + Actions façade (the only UI-facing API)
 ├── index.css                   511  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
 │   ├── core.ts                1220  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
-│   ├── engine.ts              2198  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
+│   ├── engine.ts              2257  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             3184  L   217 tests in 17 files (§7)
+│   └── __tests__/             3395  L   228 tests in 18 files (§7)
 └── components/
     ├── CanvasArea.tsx          808  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
     ├── SidePanels.tsx          931  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx            936  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    ├── Overlays.tsx            970  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **11 972 lines** in 31 files (11 461 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **12 280 lines** in 32 files (11 769 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -428,7 +428,7 @@ ship a five-node pipeline and register it as a template on first boot, which mea
 screenshot, and the "load a template" flow all pointed at fabricated data. `loadTemplates()` returns exactly
 what is in `library/templates/`, which for a new canvas is nothing.
 
-## 3.3 `src/store.ts` (470 lines) — zustand store and the `actions` façade
+## 3.3 `src/store.ts` (474 lines) — zustand store and the `actions` façade
 
 ```ts
 export const useStore = create<AppState & { actions: Actions }>()((set, get) => ({ ...initialState, actions }))
@@ -441,7 +441,7 @@ Two halves, and the discipline is the point:
    `touch(api)` afterwards refreshes the cache and the chips. Selection changes are the one class of change that
    touches no file. No other component may mutate a node/edge array — and this is why the two rows above exist:
    `touch` alone writes `state.json`, `canvas-overview.md` and `canvas.yaml`, never a node file.
-2. **The `actions` object** — the entire API the UI is allowed to call (63 members). Each is a two-line
+2. **The `actions` object** — the entire API the UI is allowed to call (65 members). Each is a two-line
    delegation: resolve `api = { get, set }`, forward to `engine`, done. Nothing in `actions` writes a file
    or builds a string itself.
 
@@ -465,7 +465,7 @@ Notable behaviour living here (small but load-bearing):
   tree builds `runs/` from `state.runs` (a projection of the folder, refreshed by `hydrate` and by each ledger
   open, §4.13).
 
-## 3.4 `src/lib/engine.ts` (2198 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (2257 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
@@ -486,16 +486,16 @@ a write |
 | **LLM** | `askModel` (private) 485, `simFields` (private) 500, `buildEntries` 532 | `buildEntries` turns validated fields into output files (it filters to what is present; it no longer *decides* validity — that is the row above). provider `sim` returns templated, plausible phase-1 answers; `deepseek` POSTs to the configured endpoint and falls back to `sim` on any error (§12.6). `throw` on an empty response |
 | **tools** | `TOOL_NAMES` 565, `hasTool` 569, `unknownTools` 576 | the vocabulary an agent may act through. `get_canvas_overview`/`get_agent_brief` are the harness (always on); every other name must be in `agent.tools`, or the step is skipped (`read_memory`, `write_memory`), the node fails (`write_output`), or the chat is refused (`chat_with_user`). `unknownTools` names what this app cannot run, so the log says so instead of pretending |
 | **run ledger** | `startLedger` 592, `ledgerRow` 608, `endLedger` 629 | `runs/<run-id>.md`, one row per step: read-modify-write so a reload extends the same file, capped at 300 rows, closed with `**run completed/stopped/rejected**`. Format: §4.13 |
-| **execution** | `findStart` 787, `executeNode` 794, `runPipeline` 1065, `runSingle` 1101, `resumeRun` 1117, `rejectRun` 1126, `stopRun` 1134, `resetExecution` 1150 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node. `execution.errors` is written only by `setNodeError` — cleared at `node.started`, set by a contract refusal or by the generic catch |
+| **execution** | `findStart` 787, `executeNode` 794, `runPipeline` 1080, `runSingle` 1116, `resumeRun` 1174, `rejectRun` 1185, `stopRun` 1193, `resetExecution` 1209 | `computeOrder` is Kahn over every runnable node — diamond-safe, disconnected nodes still queued, flow cycles reported. a lightweight state machine: `queue` + `completed` in `execution`, per-node lock with `run_id` as owner, `guard()` aborts on stop/reject, `require_approval` pauses with `status:"waiting_approval"`. Edge `trigger.type==="condition"` can skip a node. `max_steps` is enforced (§12.3). A snapshot is taken after each node. `execution.errors` is written only by `setNodeError` — cleared at `node.started`, set by a contract refusal or by the generic catch |
 | **contract matching** | `isPathAllowed` 676, `numericScope` 687, `evalCondition` 705 | one matcher for `allowed_read_paths` and `allowed_write_paths`: a directory entry (trailing `/`), an exact path, or a glob over **one** segment (`outputs/*/summary.md`). `evalCondition` is fail-closed and returns `{ ok, reason }` — see §5.8. `numericScope` lifts a node's numeric output fields into `execution.context`, so a condition reads data, not prose |
-| **chat** | `sendChat(api,nodeId,text)` 1194 | appends to `chats/chat-<id>.md`; the simulated replies are per-role. A node without `chat_with_user` in `tools` still gets the user's message recorded, followed by an explicit refusal line — the gate stops the *reply*, never the record |
-| **snapshots** | `takeSnapshot(api,label,quiet)` 1260, `restoreSnapshot(api,id)` 1281 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
-| **strokes** | `clusterStrokes(strokes,gap=80)` 1325, `addStroke` 1362, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1394 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
-| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1421, `deleteNode` 1454, `createEdge` 1474, `deleteEdge` 1486 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
-| **loaders** | `loadStrokes` 1496, `loadTemplates` 1515, `pickMemory` (private) 1545 (the memory reads), `loadRunIds` 1535, **`hydrate(api)`** 1565 | `hydrate` is the heart — see §5.2. It has one branch now: files first, `state.json` for the slices the tree does not carry, and `loadRunIds` to project `runs/` into `state.runs` for the file tree. `loadTemplates` starts from `[]` — there is no built-in template to prepend, in this file or anywhere |
-| **workspace** | `seedWorkspace(api)` 1628, `initWorkspace(api)` 1696, `reloadFromStorage` 1712, `resetWorkspace` 1726 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds. The seed writes the four role files, the two shapes and the four `library/schemas/*.json`, and nothing else: one note, no edges, no template, no `graph.json` (§5.3) |
-| **templates/roles** | `saveTemplate(api,name)` 1745, `loadTemplate(api,id)` 1801, `saveRoleFromNode(api,nodeId)` 1860 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
-| **portability** | `applyRootHandle` 1947, `attachWorkspaceFolder` 1961, `detachWorkspaceFolder` 1978, `pickCanvasFolder` 1989, `exportBundleText` 2011, `exportToJsonFile` 2026, `exportToFolder` 2042, `ImportPreview` 2063, `previewImportText` 2096, `applyImport` 2103, `importFromText` 2133, `importFromFolder` 2142, `importFromFile` 2172, `maybeResumeWorkspace` 2183 | see §5.5-§5.8. `applyImport` deletes a legacy `graph.json` from the incoming file map before installing anything, emits why, and lets `hydrate` rebuild from the files — the bundle's cache never becomes the canvas |
+| **chat** | `sendChat(api,nodeId,text)` 1253 | appends to `chats/chat-<id>.md`; the simulated replies are per-role. A node without `chat_with_user` in `tools` still gets the user's message recorded, followed by an explicit refusal line — the gate stops the *reply*, never the record |
+| **snapshots** | `takeSnapshot(api,label,quiet)` 1319, `restoreSnapshot(api,id)` 1340 | full graph JSON in `history/snapshot-<stamp>.json` + a `history/index.json`; the *body* of snapshots lives in IndexedDB, and `history/index.json` carries a pointer note |
+| **strokes** | `clusterStrokes(strokes,gap=80)` 1384, `addStroke` 1421, `removeStroke`, `undoStroke`, `clearStrokes`, `convertStrokesToGraph(api,{nodeType,connect})` 1453 | union-find over bounding boxes; each cluster → one node, optionally chained in drawing order. Strokes are stored as one file per stroke (`strokes/<id>.json`) so the drawing layer is a document, not a bitmap |
+| **graph CRUD** | `createNode(api,nodeType,pos,opts)` 1480, `deleteNode` 1513, `createEdge` 1533, `deleteEdge` 1545 | creating an agent node also creates its private memory file; deleting a node deletes its files and connected edges |
+| **loaders** | `loadStrokes` 1555, `loadTemplates` 1574, `pickMemory` (private) 1604 (the memory reads), `loadRunIds` 1594, **`hydrate(api)`** 1624 | `hydrate` is the heart — see §5.2. It has one branch now: files first, `state.json` for the slices the tree does not carry, and `loadRunIds` to project `runs/` into `state.runs` for the file tree. `loadTemplates` starts from `[]` — there is no built-in template to prepend, in this file or anywhere |
+| **workspace** | `seedWorkspace(api)` 1687, `initWorkspace(api)` 1755, `reloadFromStorage` 1771, `resetWorkspace` 1785 | `initWorkspace` order is fixed: switch adapter for `backendUrl` → `maybeResumeWorkspace` → `hydrate`; if hydrate says "nothing here", it seeds. The seed writes the four role files, the two shapes and the four `library/schemas/*.json`, and nothing else: one note, no edges, no template, no `graph.json` (§5.3) |
+| **templates/roles** | `saveTemplate(api,name)` 1804, `loadTemplate(api,id)` 1860, `saveRoleFromNode(api,nodeId)` 1919 | the `save_pipeline_template` / `load_pipeline_template` / `save_role` tools of §8 legacy anchor; refused mid-run |
+| **portability** | `applyRootHandle` 2006, `attachWorkspaceFolder` 2020, `detachWorkspaceFolder` 2037, `pickCanvasFolder` 2048, `exportBundleText` 2070, `exportToJsonFile` 2085, `exportToFolder` 2101, `ImportPreview` 2122, `previewImportText` 2155, `applyImport` 2162, `importFromText` 2192, `importFromFolder` 2201, `importFromFile` 2231, `maybeResumeWorkspace` 2242 | see §5.5-§5.8. `applyImport` deletes a legacy `graph.json` from the incoming file map before installing anything, emits why, and lets `hydrate` rebuild from the files — the bundle's cache never becomes the canvas |
 
 ## 3.5 `src/lib/portable.ts` (444 lines) — the bundle and the file-first rebuild
 
@@ -543,14 +543,14 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 2 796 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 2 830 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
 | `CanvasArea.tsx` 808 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
 | `SidePanels.tsx` 931 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
-| `Overlays.tsx` 936 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
+| `Overlays.tsx` 970 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
 
 ---
@@ -1259,7 +1259,7 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **17 files, 217 tests**, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **18 files, 228 tests**, no config file (vitest reads `vite.config.js`).
 
 **On jsdom, a reversal worth stating plainly.** This section used to say the suite runs with no jsdom, and
 called that a principle. It was not one — it was a limitation dressed as a rule, and three bugs got through
@@ -1507,7 +1507,7 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 17 files / 217 tests
+npm test            vitest run            → 18 files / 228 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)
