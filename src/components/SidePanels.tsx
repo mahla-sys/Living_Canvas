@@ -531,7 +531,7 @@ function NodeInspector({ node }: { node: RFNode }) {
           <input
             type="range" min={20} max={100} value={d.style.opacity}
             onChange={(e) => actions.updateNodeData(node.id, { style: { ...d.style, opacity: Number(e.target.value) } })}
-            className="w-full accent-[#e8b04b]"
+            className="w-full accent-amber-lc"
           />
         </Field>
       </Section>
@@ -575,7 +575,7 @@ function NodeInspector({ node }: { node: RFNode }) {
               <textarea value={agent.system_prompt} onChange={(e) => actions.updateAgentField(node.id, { system_prompt: e.target.value })} rows={4} className={inputCls + " resize-y leading-5"} />
             </Field>
             <Field label={`max steps (max_steps): ${agent.max_steps}`}>
-              <input type="range" min={2} max={12} value={agent.max_steps} onChange={(e) => actions.updateAgentField(node.id, { max_steps: Number(e.target.value) })} className="w-full accent-[#e8b04b]" />
+              <input type="range" min={2} max={12} value={agent.max_steps} onChange={(e) => actions.updateAgentField(node.id, { max_steps: Number(e.target.value) })} className="w-full accent-amber-lc" />
             </Field>
             <Field label="Allowed tools">
               <div className="flex flex-wrap gap-1">

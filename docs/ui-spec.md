@@ -1,9 +1,9 @@
 ---
 title: مشخصات ظاهر — نقشه‌ای که قبل از آجرچینی کشیده می‌شود
 status: draft
-updated: 2026-09-01
-sources: [docs/ARCHITECTURE.md#6, src/index.css, docs/patterns/node-inspector.md, docs/inbox.md]
-related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md]
+updated: 2026-09-02
+sources: [docs/ARCHITECTURE.md#6, src/index.css, docs/patterns/node-inspector.md, docs/inbox.md, scripts/check-palette.mjs, src/lib/__tests__/theme.test.ts, docs/decisions/adr-006-theme-is-device-scoped.md]
+related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md, docs/decisions/adr-006-theme-is-device-scoped.md]
 ---
 
 # مشخصات ظاهر (UI Spec)
@@ -51,7 +51,8 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md]
 | پنل چپ | `w-[268px]` ثابت، دو تب Library/Files | **قابل جمع‌شدن نیست**؛ ادعای «با دکمه toggle می‌شود» در پیش‌نویس گپ بعدی نادرست بود |
 | بوم | React Flow؛ `minZoom 0.15 / maxZoom 2.2`؛ `Background` نقطه‌ای: `gap 26`، `size 1.4`، رنگ `#22383440`؛ MiniMap بالا-راست (pannable+zoomable)؛ Controls پایین-چپ | `implemented` |
 | پنل راست | `w-[292px]` ثابت، بازرس نود/یال/بوم | `implemented`؛ نوار وضعیت پایین **وجود ندارد** (کنسولِ جمع‌شدنی جای آن است) |
-| شناورها | ChatPanel · FileViewer · HistoryModal · SettingsModal · PortModal · Toasts · BootOverlay | `implemented` |
+| شناورها | ChatPanel · FileViewer · HistoryModal · SettingsModal · PortModal · Toasts · BootOverlay | `implemented`؛ SettingsModal یک بخش **Appearance** دارد: تم + «snap به گریدِ ۲۶» (`src/components/Overlays.tsx#SettingsModal`) |
+| ذخیرهٔ تنظیمات ظاهری | `lc-settings` در localStorage، نوشته‌شده توسط `src/store.ts#updateSettings` | `implemented` طبق `docs/decisions/adr-006-theme-is-device-scoped.md` — و **هیچ** کلید ظاهری در `canvas.yaml` نیست، عمداً |
 
 **تصمیم‌های بازِ همین بخش** (در `docs/inbox.md` با اولویت): docking/collapse پنل‌ها، نوار وضعیت واقعی، و
 «Focus Mode» که هر سه پنل کناری را مخفی می‌کند.
@@ -71,8 +72,23 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md]
 | فونت‌ها | Inter (متن) · Space Grotesk (عنوان) · IBM Plex Mono (مسیر، id، عدد) | از Google Fonts در `index.html` بارگذاری می‌شوند |
 | انیمیشن‌های ورود | `anim-rise 0.28s` · `anim-pop 0.22s` · `anim-fade 0.3s` · `anim-toast 0.3s` · `anim-boot 0.25s` | همه با `cubic-bezier(0.2,0.7,0.3,1)` |
 
-هر پیشنهاد تم جدید (بنفش الکتریکی، شیشه‌ای، ستاره) باید بگوید **کدام** از این توکن‌ها عوض می‌شوند؛ اگر فقط
-یک رنگ جدید لازم دارد، یک توکن جدید در `@theme` است، نه هگز داخل JSX.
+هر پیشنهاد تم جدید باید بگوید **کدام** از این توکن‌ها عوض می‌شوند؛ اگر فقط یک رنگ جدید لازم دارد، یک توکن جدید
+در `@theme` است، نه هگز داخل JSX.
+
+سه قاعده که از «سلیقه» بیرون آمده‌اند و `scripts/check-palette.mjs` اجرایشان می‌کند:
+
+1. **کامپوننت نقش می‌نامد، رنگ نه.** رنگِ literal فقط در سه جور بلوکِ `src/index.css` مجاز است: `@theme`،
+   بلوک نگاشت نقش‌ها (`:root`)، و یک بلوک به‌ازای هر تمِ غیرپیش‌فرض. هر جای دیگر یا `var()` است یا کلاس
+   (`.lc-card-surface` · `.lc-card-empty` · `.lc-fail-band`).
+2. **React Flow از متغیرهای CSS خودش تم می‌گیرد** (`--xy-background-pattern-color`, `--xy-minimap-background-color`,
+   `--xy-minimap-mask-background-color`) — پراپ‌های `color`/`maskColor`/`style` حذف شدند، چون به inline style
+   تبدیل می‌شوند و inline style بر هر تمی غلبه می‌کند.
+3. **کنتراست عدد است، نه حس.** شش نقش (متن، عنوان، متن کم‌رنگ، کنش، خطا، موفقیت) روی `ink-950` *همان تم*
+   با luminance استاندارد سنجیده می‌شوند و تمِ جدید اجازه ندارد کم‌رنگ‌تر از پیش‌فرض باشد.
+
+تم‌پذیریِ شفافیت‌ها هم شرط دارد: Tailwind برای `bg-ink-950/80` یک literalِ زمان build و یک نسخهٔ
+`color-mix(… var(…))` پشت `@supports` می‌نویسد؛ مرورگرِ بدون `color-mix` تم دوم را نصفه می‌بیند — پذیرفته‌شده،
+چون هدف مرورگرِ مدرن است نه قدیمی.
 
 ## ۴. نود
 
@@ -96,6 +112,15 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md]
 - **سِلکت**: `.lc-node-selected` = `brightness(1.15) saturate(1.1)`؛ هیچ اوت‌لاینی اضافه نمی‌شود.
 - **عرض کارت ثابت است** (`w-[264px]`)؛ resize در دسترس نیست (هیچ `NodeResizer` نیست). هر طرحِ «تغییر اندازه»
   یعنی `width/height` در frontmatter نود → تغییر فرمت فایل → ADR، نه CSS.
+- **ویرایش متن روی خودِ بوم**: `implemented` برای `viewMode: markdown` — دابل‌کلیک بلاکِ رندرشده را با یک
+  `<textarea>` عوض می‌کند؛ `Escape` لغو، `⌘/Ctrl+Enter` و blur ثبت؛ ذخیره از همان `updateNodeData` می‌رود پس
+  فایلِ نود بلافاصله نوشته می‌شود (قانون ۱) و `mdInline` تنها درِ رندر می‌ماند (قانون ۲).
+  `contentEditable` **رد شد**: یعنی HTMLِ خام حالتِ برنامه. حالت‌های `card`/`name` هنوز ویرایش درجا ندارند
+  (`proposed`)، چون اول باید جای «عنوان» و «بدنه» روی کارت تعیین شود.
+- **حالت‌های رنگ**: رنگِ خودِ نود/یال/stroke داده است و تم عوضش نمی‌کند؛ فقط روِ برنامه (پنل‌ها، کارت،
+  scrollbars، کنترل‌ها، نقطه‌ها) تم‌پذیر است. اگر یک تمِ آینده رنگ‌های تأکید را هم عوض کند، جدول‌های
+  `STATUS_COLOR`/`EDGE_COLOR`/`EVENT_COLOR` در `src/components/` باید به توکن تبدیل شوند — سؤالش در
+  `docs/inbox.md` است، نه یک کارِ تعویق‌افتاده.
 
 ## ۵. یال
 
@@ -107,6 +132,12 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md]
   اگر شرط ۸۰ نویسه شد چه می‌شود (کِریپ؟ تولتیپ؟).
 - «ضخامت بر اساس حجم داده» و «نمای عملکرد» هنوز هیچ داده‌ای پشتشان نیست؛ تا وقتی خروجی عددیِ غیر از
   `numericScope` نداریم، `rejected for now` (ببین `docs/research/summaries/feature-pool.md` §۲).
+
+**گرید و اسنپ** (بوم): `GRID_GAP = 26` تنها عددِ این بحث است و هم فاصلهٔ نقطه‌هاست هم `snapGrid`؛ عدد ۲۰ که در
+ماتریس Excalidraw بود رد شد، چون با نقطه‌های ما هم‌خط نیست و «اسنپِ کج» بدتر از نبودنِ اسنپ است. اسنپ
+**خاموش** است و از تنظیمات روشن می‌شود، چون `position` را در فایل هر نود بازنویسی می‌کند — یعنی تغییرِ سند، نه
+تغییرِ نما. خط‌راهنماهای point/gap snaps هنوز `proposed` است (هزینه‌اش محاسبهٔ هندسه در هر فریم است) و تا قبل از
+اندازه‌گیری روی ~۲۰۰ نود تعریف نمی‌شود.
 
 ## ۶. بازرس (پنل راست)
 
@@ -146,16 +177,22 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md]
 
 ## ۹. بدهی‌های ظاهری که همین‌جا ثبت می‌شوند (نه در چت)
 
-1. **هگزهای سرگردان.** `src/index.css` بیرون از `@theme` رنگ تکرار می‌کند (`#2a423f` برای اسکرول‌بار،
-   `#162624/#1e3230/#b4c6c0` برای کنترل‌های React Flow، `#5f7b76` برای attribution). تا این‌ها به `var()` تبدیل
-   نشوند، هر تم‌سازِ واقعی نصف صفحه را عوض نمی‌کند.
+1. ~~هگزهای سرگردان~~ **بسته شد** (۲۰۲۶-۰۹-۰۲): روِ برنامه کامل به `var()`/کلاس رفت و
+   `scripts/check-palette.mjs` اجازه نمی‌ده هگزِ جدیدی بیرونِ بلوکِ توکن‌ها متولد شود. چیزی که باقی مانده، جدول‌های
+   نقش→رنگ در `src/components/` است که به تصمیمِ «accent‌ها با تم عوض شوند؟» بند است (`docs/inbox.md`).
 2. **`React.memo` هیچ‌جا نیست** (برخلاف ادعای پیش‌نویس بیرونی). با سلکتورهای فعلی قابل‌دفاع است، ولی اولین
    بهینه‌سازیِ واقعی همین است، نه quadtree.
-3. **کیبورد تقریباً صفر است**: فقط `Backspace/Delete` برای حذف و Enter در کامپوزر چت. focus-ring روی نودها،
-   traverse با تب، `aria-live` برای toasts — همه در `docs/ARCHITECTURE.md#9` (زخم ۹).
+3. **کیبورد هنوز تقریباً صفر است**: `Backspace/Delete` برای حذف، Enter در کامپوزر چت، و حالا `Enter/Escape`
+   داخل ویرایشِ متنِ نود. ولی `Tab` به بوم نمی‌رسد، focus-ring روی نودها نیست، toats با `aria-live` اعلام
+   نمی‌شوند — همان زخم ۹ در `docs/ARCHITECTURE.md#9`.
 4. **دکمهٔ اجرای بصریاً مثل بقیه است**؛ «Primary» بودن باید از توکن بیاید نه از شانس.
-5. **متن‌های UI هنوز جای‌جای size‌های سلیقه‌ای دارند** (`text-[11.5px]`, `text-[9.5px]`, `leading-[13px]`).
-   قبل از اینکه «typography scale» ادعا کنیم، باید به ۴ اندازهٔ تعریف‌شده جمع شوند.
+5. **متن‌های UI هنوز sizeهای سلیقه‌ای دارند** (`text-[11.5px]`, `text-[9.5px]`, `leading-[13px]`); تا به یک
+   مقیاس ۴تایی جمع نشوند، «typography scale» ادعاست نه واقعیت.
+6. **حذف چند نود با یک کلیکِ Delete، چند toast می‌سازد** — `deleteNode` برای هر نود پیام خودش را می‌فرستد.
+   درستش یک پیامِ گروهی است («۳ نود و یال‌هایشان حذف شد»)، ولی `deleteNode` پارامتر quiet ندارد و افزودنش
+   یعنی تغییرِ امضای engine: کارِ کوچک، با یک خطِ ADR-نخواهد، فقط یک تصمیمِ کوچک.
+7. **`elevateNodesOnSelect` روشن است**؛ اگر روزی `position.z` را در بازرس دستی کنیم، باید گفته شود کدام برنده
+   است — امروز سِلکت فقط بصری بالا می‌آورد و فایل را تغییر نمی‌دهد.
 
 ## ۱۰. تعریف «ظاهر تمام‌شده» برای یک فاز
 
@@ -164,7 +201,8 @@ related: [docs/ARCHITECTURE.md, docs/patterns/node-inspector.md, docs/inbox.md]
 - هر ردیفِ §۲ تا §۸ یا `implemented` است یا به یک ردیف در `docs/roadmap/` وصل شده؛
 - هر عدد جدید از یک توکن/فرمت فایل می‌آید، نه از JSX (قانون ۱ و ۲ هم‌زمان);
 - `npx vitest run` سبز است و اگر رفتار حالت عوض شده، یک تست برای همان حالت نوشته شده (نه فقط اسکرین‌شات);
-- `node scripts/check-docs.mjs` و `node scripts/check-english.mjs` سبزند (ادعاهای این سند به کد ارجاع می‌دهند);
+- `node scripts/check-docs.mjs`، `node scripts/check-english.mjs` و `node scripts/check-palette.mjs` سبزند
+  (ادعاهای این سند به کد ارجاع می‌دهند، و ادعاهای رنگی‌اش به عدد);
 - و کاربر خودش یک بار بدون خواندن مستندات: نود بسازد، وصل کند، ران کند، و بداند چرا چیزی رد شده. تا این
   پنج‌تا سبز نباشند، «زیبا شد» معنای فنی ندارد.
 

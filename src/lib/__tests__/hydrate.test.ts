@@ -33,7 +33,7 @@ function makeApi(initial?: Partial<AppState>) {
     },
     outputs: {}, chats: {}, logs: {}, runs: [], snapshots: [], templates: [], strokes: [],
     execution: emptyExecution(), events: [], toasts: [],
-    settings: { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 1, backendUrl: "", workspaceRoot: null },
+    settings: { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 1, backendUrl: "", workspaceRoot: null, theme: "botanical", snapToGrid: false },
     saveState: "saved", typing: {},
     ui: { leftTab: "palette", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false },
     ...initial,

@@ -2,6 +2,20 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App.tsx";
+import { DEFAULT_THEME, isThemeId } from "./lib/core";
+
+/* The theme must be on <html> before the first paint: setting it in a component effect means the canvas
+   flashes botanical for a frame under every other theme. An unknown id from an older build falls back to
+   the default rather than reaching `data-theme`, where it would silently select nothing. */
+(() => {
+  let theme: string = DEFAULT_THEME;
+  try {
+    const raw = localStorage.getItem("lc-settings");
+    const parsed = raw ? (JSON.parse(raw) as { theme?: unknown }) : null;
+    if (parsed && isThemeId(parsed.theme)) theme = parsed.theme;
+  } catch { /* a broken settings blob is not worth a blank page */ }
+  document.documentElement.dataset.theme = theme;
+})();
 
 /* ---------------- error surface: show the reason instead of a blank page ---------------- */
 

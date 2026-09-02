@@ -20,6 +20,7 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 003 | `adr-003-hard-output-validation.md` | accepted | structure 1.4 |
 | 004 | `adr-004-run-ledger.md` | accepted | structure 1.3 |
 | 005 | `adr-005-single-canvas-per-folder.md` | **proposed** | documents current behaviour and asks for a ruling; `ARCHITECTURE.md#10` Q2 is still open |
+| 006 | `adr-006-theme-is-device-scoped.md` | accepted | theme lives in `lc-settings`, never in a canvas file; the owner's ruling of 2026-09-02 is quoted in the ADR |
 
 ## House rules
 

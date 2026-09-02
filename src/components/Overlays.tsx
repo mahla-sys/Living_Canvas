@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
 import { roleById, APP_VERSION, type RFNode } from "../state";
-import { fmtClock, fmtDate, EMPTY_ARR, type BusEvent, type ChatMsg } from "../lib/core";
+import { fmtClock, fmtDate, EMPTY_ARR, THEMES, GRID_GAP, type BusEvent, type ChatMsg } from "../lib/core";
 import {
   IPlay, IStop, ICamera, IHistory, IGear, IChat, IX, ISend, ICheck, IWarn,
   ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD, IFolder, IFile,
@@ -388,8 +388,47 @@ export function SettingsModal() {
 
           <label className="block">
             <span className="block text-[11px] font-bold text-ink-300 mb-1">Simulation speed: {Math.round((1650 - settings.simDelay) / 14)}%</span>
-            <input type="range" min={250} max={1400} step={50} value={1650 - settings.simDelay} onChange={(e) => actions.updateSettings({ simDelay: 1650 - Number(e.target.value) })} className="w-full accent-[#e8b04b]" />
+            <input type="range" min={250} max={1400} step={50} value={1650 - settings.simDelay} onChange={(e) => actions.updateSettings({ simDelay: 1650 - Number(e.target.value) })} className="w-full accent-amber-lc" />
           </label>
+
+          <div>
+            <span className="flex items-center gap-1.5 text-[11px] font-bold text-ink-300 mb-2">
+              <IGear size={11} className="text-amber-lc" /> Appearance — this device, not the canvas
+            </span>
+            <div className="grid grid-cols-2 gap-2">
+              {THEMES.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => actions.updateSettings({ theme: t.id })}
+                  className={`text-start p-3 rounded-xl border transition-all cursor-pointer ${settings.theme === t.id ? "border-amber-lc/60 bg-amber-lc/10" : "border-ink-600 bg-ink-850 hover:border-ink-500"}`}
+                >
+                  <p className={`text-[12px] font-extrabold flex items-center gap-1.5 ${settings.theme === t.id ? "text-amber-lc" : "text-ink-100"}`}>
+                    {settings.theme === t.id && <ICheck size={12} />}{t.label}
+                  </p>
+                  <p className="text-[9.5px] text-ink-400 mt-1 leading-4">{t.hint}</p>
+                </button>
+              ))}
+            </div>
+            <label className="flex items-start gap-2 mt-3 cursor-pointer">
+              <input
+                type="checkbox" checked={settings.snapToGrid}
+                onChange={(e) => actions.updateSettings({ snapToGrid: e.target.checked })}
+                className="accent-amber-lc w-3.5 h-3.5 mt-0.5"
+              />
+              <span>
+                <span className="block text-[11px] font-bold text-ink-300">Snap nodes to the {GRID_GAP}px grid</span>
+                <span className="block text-[9.5px] text-ink-500 leading-4 mt-0.5">
+                  The grid is the dot pattern, so a snapped node lands on visible dots. Off by default: snapping
+                  rewrites <span className="font-mono">position</span> inside every node file it touches.
+                </span>
+              </span>
+            </label>
+            <p className="text-[9.5px] text-ink-500 leading-4 flex gap-1.5 mt-2">
+              <IWarn size={11} className="shrink-0 mt-0.5 text-sky-lc" />
+              Theme and grid are stored in this browser (<span className="font-mono">lc-settings</span>), never in the canvas
+              folder: how you like your editor is not what you drew. Node colours stay yours — they are data.
+            </p>
+          </div>
 
           <div className="flex items-center gap-2 pt-1">
             <button onClick={actions.saveSettingsLocal} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-amber-lc text-ink-950 text-[12px] font-black hover:brightness-110 transition-all cursor-pointer">
@@ -688,7 +727,7 @@ export function PortModal() {
               }}
             />
             <label className="flex items-center gap-2 text-[10.5px] text-ink-300 cursor-pointer select-none">
-              <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} className="accent-[#e8b04b] w-3.5 h-3.5" />
+              <input type="checkbox" checked={replace} onChange={(e) => setReplace(e.target.checked)} className="accent-amber-lc w-3.5 h-3.5" />
               Replace the whole current canvas (if unchecked, files are added/updated and the current canvas stays)
             </label>
 

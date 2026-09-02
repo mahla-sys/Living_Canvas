@@ -27,31 +27,103 @@
   --color-sand: #d9c9a3;
 }
 
+/* ---------- appearance: roles, not colours (docs/ui-spec.md §3) ----------
+   The rule this file enforces: a component may name a *role*, never a hex. Every literal colour in
+   `src/index.css` lives in exactly one of the two blocks below, so a theme is a re-mapping and not a
+   hunt through JSX. The aliases on the left of `:` are what components consume; the right side is what
+   the botanical palette happens to mean today. `theme.test.ts` checks both theme blocks for contrast. */
+:root {
+  --lc-canvas-bg: var(--color-ink-950);
+  --lc-panel: var(--color-ink-900);
+  --lc-panel-2: var(--color-ink-850);
+  --lc-line: var(--color-ink-700);
+  --lc-line-2: var(--color-ink-600);
+  --lc-text: var(--color-ink-100);
+  --lc-text-bright: var(--color-ink-50);
+  --lc-text-muted: var(--color-ink-300);
+  --lc-text-dim: var(--color-ink-400);
+  --lc-accent: var(--color-amber-lc);
+  --lc-danger: var(--color-ember);
+
+  /* surfaces that are deliberately between two palette steps, so they are not derivable */
+  --lc-bg-top: #0d1716;
+  --lc-bg-mid: #0b1312;
+  --lc-bg-bottom: #0d1817;
+  --lc-glow-amber: rgba(232, 176, 75, 0.07);
+  --lc-glow-sky: rgba(111, 179, 199, 0.08);
+  --lc-glow-sage: rgba(143, 191, 127, 0.04);
+  --lc-card-top: #182826;
+  --lc-card-bottom: #121d1c;
+  --lc-card-empty: rgba(15, 26, 25, 0.55);
+  --lc-dot: rgba(34, 56, 52, 0.25);
+  --lc-minimap-mask: rgba(11, 19, 18, 0.82);
+  --lc-fail-band: rgba(23, 13, 11, 0.95);
+  --lc-selection: rgba(232, 176, 75, 0.35);
+  --lc-ring-running: rgba(232, 176, 75, 0.5);
+  --lc-ring-waiting: rgba(224, 106, 78, 0.45);
+  --lc-code-bg: rgba(111, 179, 199, 0.12);
+  --lc-code-line: rgba(111, 179, 199, 0.24);
+  --lc-warn-line: rgba(232, 176, 75, 0.42);
+  --lc-warn-bg: rgba(232, 176, 75, 0.08);
+  --lc-danger-line: rgba(224, 106, 78, 0.45);
+  --lc-danger-bg: rgba(224, 106, 78, 0.08);
+}
+
+/* Dark plum: the ink ramp re-tinted toward violet, every accent left alone — node colours are canvas
+   *data* (they are written into the node file), and a theme must not rewrite somebody's graph. */
+:root[data-theme="plum"] {
+  --color-ink-950: #120b1c;
+  --color-ink-900: #171025;
+  --color-ink-850: #1c142d;
+  --color-ink-800: #241a38;
+  --color-ink-700: #2f2347;
+  --color-ink-600: #3d2f58;
+  --color-ink-500: #6b5a88;
+  --color-ink-400: #8d7cae;
+  --color-ink-300: #b5a8cf;
+  --color-ink-200: #cfc5e2;
+  --color-ink-100: #e9e3f4;
+  --color-ink-50: #f5f1fb;
+
+  --lc-bg-top: #1a1128;
+  --lc-bg-mid: #120b1c;
+  --lc-bg-bottom: #170f24;
+  --lc-glow-amber: rgba(232, 176, 75, 0.08);
+  --lc-glow-sky: rgba(111, 179, 199, 0.07);
+  --lc-glow-sage: rgba(185, 139, 194, 0.07);
+  --lc-card-top: #241a38;
+  --lc-card-bottom: #1a1229;
+  --lc-card-empty: rgba(23, 16, 37, 0.55);
+  --lc-dot: rgba(61, 47, 88, 0.3);
+  --lc-minimap-mask: rgba(18, 11, 28, 0.82);
+  --lc-fail-band: rgba(30, 12, 14, 0.95);
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
-  background: var(--color-ink-950);
-  color: var(--color-ink-100);
+  background: var(--lc-canvas-bg);
+  color: var(--lc-text);
   font-family: var(--font-body);
   overflow: hidden;
 }
 
 ::selection {
-  background: rgba(232, 176, 75, 0.35);
+  background: var(--lc-selection);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #2a423f transparent;
+  scrollbar-color: var(--lc-line-2) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: #2a423f;
+  background: var(--lc-line-2);
   border-radius: 8px;
 }
 *::-webkit-scrollbar-track {
@@ -61,10 +133,10 @@ body,
 /* ---------- layered workspace background ---------- */
 .lc-bg {
   background:
-    radial-gradient(900px 520px at 85% -10%, rgba(232, 176, 75, 0.07), transparent 60%),
-    radial-gradient(800px 600px at 8% 108%, rgba(111, 179, 199, 0.08), transparent 62%),
-    radial-gradient(600px 400px at 50% 50%, rgba(143, 191, 127, 0.04), transparent 70%),
-    linear-gradient(160deg, #0d1716 0%, #0b1312 55%, #0d1817 100%);
+    radial-gradient(900px 520px at 85% -10%, var(--lc-glow-amber), transparent 60%),
+    radial-gradient(800px 600px at 8% 108%, var(--lc-glow-sky), transparent 62%),
+    radial-gradient(600px 400px at 50% 50%, var(--lc-glow-sage), transparent 70%),
+    linear-gradient(160deg, var(--lc-bg-top) 0%, var(--lc-bg-mid) 55%, var(--lc-bg-bottom) 100%);
 }
 
 /* ---------- animations ---------- */
@@ -78,7 +150,7 @@ body,
 }
 
 @keyframes lc-pulse-ring {
-  0% { box-shadow: 0 0 0 0 rgba(232, 176, 75, 0.5); }
+  0% { box-shadow: 0 0 0 0 var(--lc-ring-running); }
   70% { box-shadow: 0 0 0 14px rgba(232, 176, 75, 0); }
   100% { box-shadow: 0 0 0 0 rgba(232, 176, 75, 0); }
 }
@@ -87,7 +159,7 @@ body,
 }
 
 @keyframes lc-waiting {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(224, 106, 78, 0.45); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--lc-ring-waiting); }
   50% { box-shadow: 0 0 0 9px rgba(224, 106, 78, 0); }
 }
 .anim-waiting {
@@ -192,27 +264,27 @@ body,
   background: transparent !important;
 }
 .react-flow__attribution a {
-  color: #5f7b76 !important;
+  color: var(--lc-text-dim) !important;
 }
 .react-flow__controls button {
-  background: #162624 !important;
-  border-bottom: 1px solid #1e3230 !important;
-  color: #b4c6c0 !important;
-  fill: #b4c6c0 !important;
+  background: var(--lc-panel-2) !important;
+  border-bottom: 1px solid var(--lc-line) !important;
+  color: var(--color-ink-200) !important;
+  fill: var(--color-ink-200) !important;
 }
 .react-flow__controls button:hover {
-  background: #1e3230 !important;
+  background: var(--lc-line) !important;
 }
 .react-flow__minimap {
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid #2a423f;
+  border: 1px solid var(--lc-line-2);
 }
 .react-flow__handle {
   width: 9px !important;
   height: 9px !important;
-  background: #0f1a19 !important;
-  border: 2px solid #e8b04b !important;
+  background: var(--lc-panel) !important;
+  border: 2px solid var(--lc-accent) !important;
   opacity: 0;
   transition: opacity 0.15s ease;
 }
@@ -221,7 +293,7 @@ body,
   opacity: 1;
 }
 .react-flow__edge.selected path.react-flow__edge-path {
-  stroke: #e8b04b !important;
+  stroke: var(--lc-accent) !important;
 }
 
 /* ---------- markdown inside a node (output of mdInline) ---------- */
@@ -236,8 +308,8 @@ body,
   font-size: 0.92em;
   padding: 0 4px;
   border-radius: 5px;
-  background: rgba(111, 179, 199, 0.12);
-  border: 1px solid rgba(111, 179, 199, 0.24);
+  background: var(--lc-code-bg);
+  border: 1px solid var(--lc-code-line);
   color: var(--color-sky-lc);
 }
 
@@ -292,6 +364,20 @@ body,
   color: var(--color-ink-500);
 }
 
+/* ---------- surfaces React Flow cannot reach (docs/ui-spec.md §4, §9.1) ----------
+   The node card and the failure band used to spell these colours inside `CanvasArea.tsx`, where a
+   theme override could not reach them. They are classes now, so JSX carries structure and CSS carries
+   appearance — and the same `var()` resolves for both themes. */
+.lc-card-surface {
+  background: linear-gradient(150deg, var(--lc-card-top) 0%, var(--lc-card-bottom) 100%);
+}
+.lc-card-empty {
+  background: var(--lc-card-empty);
+}
+.lc-fail-band {
+  background: var(--lc-fail-band);
+}
+
 /* ---------- storage mode chip ---------- */
 .lc-storage-chip {
   display: inline-flex;
@@ -320,8 +406,8 @@ body,
   text-align: left;
 }
 .lc-import-warn {
-  border: 1px solid rgba(232, 176, 75, 0.42);
-  background: rgba(232, 176, 75, 0.08);
+  border: 1px solid var(--lc-warn-line);
+  background: var(--lc-warn-bg);
   color: var(--color-amber-lc);
   border-radius: 10px;
   padding: 8px 10px;
@@ -329,8 +415,8 @@ body,
   line-height: 1.9;
 }
 .lc-import-danger {
-  border: 1px solid rgba(224, 106, 78, 0.45);
-  background: rgba(224, 106, 78, 0.08);
+  border: 1px solid var(--lc-danger-line);
+  background: var(--lc-danger-bg);
   color: var(--color-ember);
   border-radius: 10px;
   padding: 8px 10px;
@@ -339,4 +425,15 @@ body,
 }
 .lc-import-ok {
   color: var(--color-sage);
+}
+
+/* ---------- React Flow colours, through the vars it already reads ----------
+   `Background color`, `MiniMap maskColor` and friends were props in JSX; a prop compiles to an inline
+   style and wins over any theme, which is exactly why an appearance prop cannot be a theming API.
+   React Flow's own stylesheet resolves `--xy-*` first, so setting them here keeps one source of truth. */
+.react-flow {
+  --xy-background-pattern-color: var(--lc-dot);
+  --xy-minimap-background-color: var(--lc-panel);
+  --xy-minimap-mask-background-color: var(--lc-minimap-mask);
+  --xy-background-color: transparent;
 }

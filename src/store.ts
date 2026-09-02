@@ -148,24 +148,37 @@ function buildActions(a: EngineApi): Actions {
     reset: () => resetWorkspace(a),
 
     onNodesChange: (changes) => {
-      // nodes locked by a run are neither deleted nor moved (§12.5)
+      // Nodes locked by a run are not movable (§12.5) — their *deletion* is guarded in `deleteNode`, and
+      // it has to be: the keyboard path used to land here, drop the node from state and never touch
+      // `nodes/<id>.md`. Since the files are the canvas (§1.1), `hydrate` rebuilt the "deleted" node on the
+      // next reload. One owner for deletion (the engine: state + edge cascade + files + log), and both
+      // entry points — inspector button and Delete key — go through it.
       const locked = new Set(
         a.get().nodes
           .filter((n) => n.data.lock.status === "locked" && (n.data.lock.locked_by ?? "").startsWith("run-"))
           .map((n) => n.id)
       );
+      const removals = changes.filter((c) => c.type === "remove" && "id" in c).map((c) => c.id);
+      const rest = changes.filter((c) => c.type !== "remove");
       let blocked = false;
-      const filtered = changes.filter((c) => {
-        if ((c.type === "remove" || c.type === "position") && "id" in c && locked.has(c.id)) {
+      const filtered = rest.filter((c) => {
+        if (c.type === "position" && "id" in c && locked.has(c.id)) {
           blocked = true;
           return false;
         }
         return true;
       });
-      const moved = filtered.some((c) => c.type === "position" && "dragging" in c && c.dragging === false);
+      const dragged = filtered.flatMap((c) =>
+        c.type === "position" && "dragging" in c && c.dragging === false ? [c.id] : []
+      );
       useStore.setState((s) => ({ nodes: applyNodeChanges(filtered, s.nodes) }));
-      if (moved) touch(a);
-      if (blocked) toast(a, "warn", "This node is locked by a running step — moving or deleting it is not allowed (§12.5).");
+      /* A drag end is a document edit, not a view change: `position` lives in the node file (§1.1) and
+         in nothing else — `state.json` carries no nodes on purpose. Before this line the layout of a
+         canvas evaporated on reload, because only `updateNodeData` wrote files and dragging does not. */
+      for (const id of dragged) void writeNodeArtifact(a, id, true);
+      if (dragged.length) touch(a);
+      for (const id of removals) void engDeleteNode(a, id);
+      if (blocked) toast(a, "warn", "This node is locked by a running step — moving it is not allowed (§12.5).");
     },
 
     onEdgesChange: (changes) => {

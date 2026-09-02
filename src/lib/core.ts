@@ -149,7 +149,35 @@ export interface Settings {
   backendUrl: string;
   /** Name of the folder opened in "live folder" mode; null means local IndexedDB. */
   workspaceRoot?: string | null;
+  /** Appearance, app-wide. Deliberately not in `canvas.yaml`: how the editor looks is a reader
+   *  preference, not canvas content — a shared folder must not carry somebody's theme (docs/ui-spec.md §3). */
+  theme: ThemeId;
+  /** Snap node positions to `GRID_GAP` on drag end. Off by default: it rewrites `position` in every
+   *  node file it touches, so it has to be a choice, not a surprise. */
+  snapToGrid: boolean;
 }
+
+/* ---------------- appearance tokens ----------------
+   A theme is a set of CSS custom properties, never a colour literal in a component: `src/index.css`
+   defines the palette under `@theme` and re-maps it under `:root[data-theme="…"]`. Adding a theme is
+   one id here + one block there; the test in `theme.test.ts` fails if the two drift apart. */
+export const THEME_IDS = ["botanical", "plum"] as const;
+export type ThemeId = (typeof THEME_IDS)[number];
+export const DEFAULT_THEME: ThemeId = "botanical";
+export const THEMES: { id: ThemeId; label: string; hint: string }[] = [
+  { id: "botanical", label: "Botanical", hint: "green-black ink, amber accent — the shipped palette" },
+  { id: "plum", label: "Dark plum", hint: "violet background, ink ramp re-tinted so muted text stays readable" },
+];
+export function isThemeId(v: unknown): v is ThemeId {
+  return (THEME_IDS as readonly unknown[]).includes(v);
+}
+
+/**
+ * Canvas grid pitch in px — one number with two jobs: the visible dot pattern and the snap grid.
+ * They must stay equal, because a snap that lands between two dots reads as broken alignment.
+ * 26 is what the dots already used; Excalidraw's 20 is only "compatible" with its own grid.
+ */
+export const GRID_GAP = 26;
 
 export interface ExecutionState {
   run_id: string | null;

@@ -27,9 +27,11 @@ npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
 npm run build       # tsc --noEmit && vite build — types are part of the build
 node scripts/check-english.mjs   # the language rule above, as CI runs it
 node scripts/check-docs.mjs      # docs/ gate: frontmatter, legal statuses, every citation resolving
+node scripts/check-palette.mjs   # appearance gate: theme registry, contrast per theme, one place per colour
 node scripts/doc-anchors.mjs     # regenerate the line anchors in ARCHITECTURE.md §3.4 (--check to gate)
 ```
-CI is committed as `ci/github-actions.yml` (typecheck → test → build → language gate → docs gate). Activating it is one command:
+CI is committed as `ci/github-actions.yml` (typecheck → test → build → language gate → docs gate → palette gate).
+Activating it is one command:
 `cp ci/github-actions.yml .github/workflows/ci.yml`. The agent account on this branch is not allowed to create files
 under `.github/workflows/` (a GitHub App permission), so that copy needs someone with repository access. Until it
 lands, the five commands above are the gate.
@@ -42,6 +44,11 @@ every control flow, the test strategy, the debt list, and the open design questi
 tree — trunk (what and why) → branches (modules) → twigs (formats and flows) — so you can stop reading at
 whichever level you need.
 
+[`docs/ui-spec.md`](docs/ui-spec.md) is the sibling that answers a different question — not *how it renders* but
+*what it must look like*, one row per claim, each with its number, its storage location and its status. The palette
+gate (`scripts/check-palette.mjs`) is what keeps that document from drifting back into taste: theme ids must exist
+in CSS, and six text/accent roles must clear WCAG contrast against each theme's own background.
+
 ```
 src/
 ├── main.tsx · App.tsx           boot, error surface, layout
@@ -51,7 +58,7 @@ src/
 ├── lib/engine.ts                behaviour: events · files · memory · execution · strokes · portability
 ├── lib/portable.ts              the export bundle + rebuilding a canvas from its files
 ├── lib/fs-access.ts             the File System Access adapter (a real folder on disk)
-├── lib/__tests__/               118 tests, production code only (no fixtures that reimplement a serialiser)
+├── lib/__tests__/               126 tests, production code only (no fixtures that reimplement a serialiser)
 └── components/                  CanvasArea · SidePanels · Overlays · icons
 ```
 

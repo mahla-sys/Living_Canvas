@@ -189,9 +189,13 @@ for (const file of docs) {
 
   /* shipped claims need a guard */
   if (dir === "roadmap") {
+    // a row is its bullet *plus* the wrapped lines under it: a citation on line two still guards the claim,
+    // and refusing that would teach people to write ugly one-line rows instead of to cite
     lines.forEach((l, i) => {
       if (!/^\s*-\s*\[x\]/.test(l)) return;
-      const cited = citationsIn(l).some((c) => resolveCitation(c).ok);
+      let row = l;
+      for (let j = i + 1; j < lines.length && /^\s+\S/.test(lines[j]); j++) row += " " + lines[j].trim();
+      const cited = citationsIn(row).some((c) => resolveCitation(c).ok);
       if (!cited) fail(file, `line ${i + 1}: a \`[x]\` row must cite its guard (a \`*.test.ts\`, a doc, or a script)`);
     });
   }

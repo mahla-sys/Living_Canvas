@@ -8,7 +8,7 @@ import "@xyflow/react/dist/style.css";
 import { useStore } from "../store";
 import { roleById, NODE_TYPE_LABEL, CANVAS_ID } from "../state";
 import type { RFNode, RFEdge } from "../state";
-import { uid, nowIso, mdInline, EMPTY_ARR, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
+import { uid, nowIso, mdInline, EMPTY_ARR, GRID_GAP, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
 import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash } from "./icons";
 
 /* ---------------- mini markdown ---------------- */
@@ -68,7 +68,9 @@ function shapeStyle(d: LCNodeData): React.CSSProperties {
     clipPath: clip,
     borderRadius: d.shape === "circle" ? "9999px" : d.shape === "card" ? "14px" : "8px",
     border: d.shape === "rectangle" || d.shape === "card" || d.shape === "empty" ? `${Math.max(1, d.style.strokeWidth / 2)}px solid ${d.style.strokeColor}4d` : "none",
-    background: d.style.fillStyle === "empty" ? "rgba(15,26,25,0.55)" : `linear-gradient(150deg, #182826 0%, #121d1c 100%)`,
+    // the surface itself is a class (`lc-card-surface` / `lc-card-empty`) so a theme can reach it;
+    // `d.color` stays inline on purpose — a node's colour is canvas data, written into the node file,
+    // and re-tinting it per theme would rewrite what somebody drew (§1.1, docs/ui-spec.md §3)
     boxShadow: `0 0 0 1px ${c}33, 0 10px 30px -12px ${c}40, inset 3px 0 0 0 ${c}`,
     opacity: d.style.opacity / 100,
   };
@@ -84,6 +86,9 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   // non-deterministic pipeline, so it belongs on the card, not only in a console the user has to open
   const failReason = useStore((s) => s.execution.errors[id] ?? "");
   const actions = useStore((s) => s.actions);
+  /* double-click editing, markdown mode only — see the note at the render site */
+  const [draft, setDraft] = useState<string | null>(null);
+  const cancelled = useRef(false);
   const agent = data.agent;
   const status: AgentStatus = agent?.status ?? "idle";
   const running = status === "running";
@@ -97,7 +102,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
 
   const shell = (inner: React.ReactNode, w?: string) => (
     <div
-      className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""}`}
+      className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""} ${data.style.fillStyle === "empty" ? "lc-card-empty" : "lc-card-surface"}`}
       style={{ ...shapeStyle(data), ...(breathe ? breatheDur : {}) }}
     >
       <div className={breathe ? "anim-breathe" : ""} style={breathe ? breatheDur : undefined}>
@@ -118,7 +123,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
       {selected && <span className="sr-only">selected</span>}
       {failReason && (wide ? (
         <div
-          className="absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 px-2.5 py-1.5 rounded-b-[inherit] border-t border-ember/45 bg-[#170d0b]/95"
+          className="lc-fail-band absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 px-2.5 py-1.5 rounded-b-[inherit] border-t border-ember/45"
           title={failReason}
         >
           <IWarn size={10} className="shrink-0 mt-[2px] text-ember" />
@@ -159,15 +164,51 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
     );
   }
 
-  /* markdown mode */
+  /* markdown mode.
+     Double-click writes here instead of in the inspector — the habit Excalidraw has and we did not.
+     Deliberately a `<textarea>` overlay rather than `contentEditable` (Law 2: raw HTML must never become
+     node state), and deliberately **not** a separate text record (no `boundElements`/`containerId`): the
+     text already lives in the node file's body, which is the split Excalidraw needs and we do not. */
   if (data.viewMode === "markdown") {
+    const commit = () => {
+      const next = draft;
+      setDraft(null);
+      if (next !== null && !cancelled.current && next !== data.content) actions.updateNodeData(id, { content: next });
+      cancelled.current = false;
+    };
     return shell(
-      <div className="p-3.5 w-[280px]">
+      <div
+        className="p-3.5 w-[280px]"
+        onDoubleClick={(e) => {
+          if (locked) return;
+          e.stopPropagation();
+          setDraft(data.content);
+        }}
+        title={locked ? "Locked by a run (§12.5)" : "Double-click to write on the canvas"}
+      >
         <div className="flex items-center gap-2 mb-2">
           <span style={{ color: data.color }}><TypeIcon type={data.nodeType} /></span>
           <h3 className="text-[13px] font-extrabold text-ink-50 leading-5">{data.title}</h3>
         </div>
-        {data.content ? <Md text={data.content} compact /> : <p className="text-[11px] text-ink-400">No content — write it in the inspector.</p>}
+        {draft !== null ? (
+          <textarea
+            autoFocus
+            value={draft}
+            dir="auto"
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { e.preventDefault(); cancelled.current = true; setDraft(null); }
+              else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+            }}
+            className="nodrag nowheel w-full min-h-[110px] resize-y rounded-lg bg-ink-950/70 border border-amber-lc/50 px-2 py-1.5 text-[11.5px] leading-5 text-ink-100 font-mono focus:outline-none focus:border-amber-lc"
+          />
+        ) : data.content ? (
+          <Md text={data.content} compact />
+        ) : (
+          <p className="text-[11px] text-ink-400">No content — double-click here, or write it in the inspector.</p>
+        )}
       </div>
     );
   }
@@ -524,6 +565,7 @@ function CanvasInner() {
   const { screenToFlowPosition, fitView, getZoom } = useReactFlow();
   const didFit = useRef(false);
 
+  const snapToGrid = useStore((s) => s.settings.snapToGrid);
   const [drawMode, setDrawMode] = useState(false);
   const [live, setLive] = useState<StrokePoint[] | null>(null);
   const drawingRef = useRef(false);
@@ -653,12 +695,17 @@ function CanvasInner() {
         deleteKeyCode={drawMode ? null : ["Backspace", "Delete"]}
         proOptions={{ hideAttribution: false }}
         defaultEdgeOptions={{ type: "lc" }}
+        /* §11.3 of the spec: the grid and the dots are one number, and a snap that falls between two
+           visible dots reads as broken alignment. Opt-in, because it rewrites `position` in node files. */
+        elevateNodesOnSelect
+        snapToGrid={snapToGrid}
+        snapGrid={[GRID_GAP, GRID_GAP]}
         panOnDrag={drawMode ? [1, 2] : true}
         nodesDraggable={!drawMode}
         nodesConnectable={!drawMode}
         elementsSelectable={!drawMode}
       >
-        <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#22383440" />
+        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.4} />
         <StrokesLayer
           strokes={strokes}
           live={live}
@@ -670,8 +717,6 @@ function CanvasInner() {
           position="top-right"
           pannable zoomable
           nodeColor={(n) => (n.data as LCNodeData).color}
-          maskColor="rgba(11,19,18,0.82)"
-          style={{ background: "#0f1a19" }}
         />
         <Controls position="bottom-left" showInteractive={false} />
       </ReactFlow>

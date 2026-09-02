@@ -1,8 +1,8 @@
 ---
 title: Phase 2 — the model chooses, the UI explains
 status: active
-updated: 2026-09-01
-sources: [docs/ARCHITECTURE.md#9, docs/patterns/human-in-the-loop.md, docs/patterns/conditional-edges.md]
+updated: 2026-09-02
+sources: [docs/ARCHITECTURE.md#9, docs/patterns/human-in-the-loop.md, docs/patterns/conditional-edges.md, scripts/check-palette.mjs, src/lib/__tests__/store-write.test.ts]
 ---
 
 # Phase 2 — candidates, ordered by what they unblock
@@ -31,7 +31,26 @@ Nothing here is `accepted`; `docs/decisions/` is where a candidate becomes a com
   trustworthy for a reader without code access if a machine checks its references. If nobody uses the gate in a
   month, delete the gate rather than let it rot into a warning.
 - [ ] **Delta snapshots + keep-last-N** — shared by runs/, history/ and undo; `docs/ARCHITECTURE.md#9` (wound 3)
-  is the argument, and doing undo separately from it would be two mechanisms for one problem.
+  is the argument, and doing undo separately from it would be two mechanisms for one problem. Any undo here must
+  carry tldraw's one good idea (`docs/inbox.md`): only `source: "user"` mutations enter the stack, or Ctrl+Z starts
+  erasing what the executor wrote.
+
+## Shipped while this phase was open
+
+These were not candidates here — they were found by reading two behaviour matrices (Excalidraw, tldraw) against
+this code, and each was small enough that holding it for a phase would have meant shipping a known hole. `- [x]`
+means guarded, so every row names its test.
+
+- [x] `Delete` on a node deletes `nodes/<id>.md` and cascades its edges, instead of resurrecting itself on reload
+  (`store-write.test.ts`)
+- [x] a drag end writes `position` into the node file; a drag in progress writes nothing (`store-write.test.ts`)
+- [x] a save is flushed when the tab hides, so the 700 ms window cannot swallow the last edit
+  (`docs/ARCHITECTURE.md#11.3` and the listener in `src/App.tsx`)
+- [x] appearance is themeable at all: `data-theme` before first paint, colour literals confined to the token
+  blocks, contrast measured per theme (`scripts/check-palette.mjs`, `theme.test.ts`)
+- [x] dark-plum theme shipped as a token re-mapping, on the owner's ruling (`docs/decisions/adr-006-theme-is-device-scoped.md`)
+- [x] grid snapping as an opt-in setting, tied to the dot pitch (`src/lib/core.ts#GRID_GAP`)
+- [x] node text edited on the canvas, with `mdInline` still the only render door (`LcNode` in `src/components/CanvasArea.tsx`)
 
 ## Not in this phase, on purpose
 

@@ -1,6 +1,6 @@
 # Living Canvas — Architecture
 
-**Version 1.5 (handoff edition) · 2026-09-01 · language: English in code, UI, tests and this file —
+**Version 1.6 (handoff edition) · 2026-09-02 · language: English in code, UI, tests and this file —
 `docs/` may be Persian (§8); invisible bidi characters are banned in every path**
 
 This document is written for a reader who **does not have the repository open**. It is meant to be
@@ -136,6 +136,11 @@ back from disk would freeze the UI forever after a crash. Likewise `agent.status
 All I/O goes through `StorageAdapter` (9 methods, §3.1.4). No component or engine function calls
 `indexedDB`, `fetch`, `localStorage` or `showDirectoryPicker` directly — except `lib/fs-access.ts` (the
 adapter itself) and `engine`'s root-handle persistence, which are the two sanctioned seams.
+The third, since themes arrived, is `localStorage["lc-settings"]`: written only by `store.ts#saveSettingsLocal`
+and read by `defaultSettings()`. It is sanctioned because settings are **not canvas content** — an API key, an
+owner name and a theme belong to the person at the keyboard, so they must not be exported with a bundle, must not
+appear in a folder diff, and must not be resurrected by `hydrate` (ADR-006). A seam that is named is auditable;
+a fourth one is not, and if a third kind of browser storage appears, it belongs behind the adapter instead.
 The contract detail that bit us once and is now law: **`listDirectory` returns files with their names and
 directories with a trailing `/`** (`listChildren()` in core is the single implementation of that rule).
 `hydrate()` strips the trailing `/` to get a folder name. The previous filter (`!p.includes("/")`)
@@ -159,22 +164,22 @@ instead of growing the exceptions.
 
 ```
 src/
-├── main.tsx                    100  L   boot, global error surface, React error boundary
-├── App.tsx                      38  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
-├── state.ts                    494  L   ★ constants, types re-exports, factories, role schemas, seed
-├── store.ts                    382  L   ★ zustand store + Actions façade (the only UI-facing API)
-├── index.css                   342  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
+├── main.tsx                    114  L   boot, global error surface, React error boundary
+├── App.tsx                      59  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
+├── state.ts                    510  L   ★ constants, types re-exports, factories, role schemas, seed
+├── store.ts                    395  L   ★ zustand store + Actions façade (the only UI-facing API)
+├── index.css                   439  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
-│   ├── core.ts                 998  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
+│   ├── core.ts                1026  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
 │   ├── engine.ts              2096  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             439  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             1541  L   118 tests in 7 files (§7)
+│   └── __tests__/             1712  L   126 tests in 9 files (§7)
 └── components/
-    ├── CanvasArea.tsx           749  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
+    ├── CanvasArea.tsx          794  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
     ├── SidePanels.tsx          847  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx             754  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    ├── Overlays.tsx            793  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
@@ -197,7 +202,7 @@ decision that must not change behaviour (§10 Q3).
 
 # 3. Branches — one section per module
 
-## 3.1 `src/lib/core.ts` (998 lines) — types, serialisers, storage, HTML safety, schemas
+## 3.1 `src/lib/core.ts` (1026 lines) — types, serialisers, storage, HTML safety, schemas
 
 No imports from inside the project. This is the only file allowed to know how a file looks on disk and how
 a folder is listed. Seven sections, in this order:
@@ -390,7 +395,7 @@ problem kills a node (`engine.validateAgainstContract`, §5.8 does). A malformed
 reported as the *schema's* failure (`“a” declares an invalid pattern in the schema`), not swallowed. Full format
 and ownership in §4.9.1.
 
-## 3.2 `src/state.ts` (494 lines) — constants, factories, role schemas, seed
+## 3.2 `src/state.ts` (510 lines) — constants, factories, role schemas, seed
 
 Pure data + construction; no behaviour, no async, no I/O (one exception: `defaultSettings()` reads
 `localStorage["lc-settings"]`, see debt §9.5).
@@ -416,16 +421,19 @@ ship a five-node pipeline and register it as a template on first boot, which mea
 screenshot, and the "load a template" flow all pointed at fabricated data. `loadTemplates()` returns exactly
 what is in `library/templates/`, which for a new canvas is nothing.
 
-## 3.3 `src/store.ts` (382 lines) — zustand store and the `actions` façade
+## 3.3 `src/store.ts` (395 lines) — zustand store and the `actions` façade
 
 ```ts
 export const useStore = create<AppState & { actions: Actions }>()((set, get) => ({ ...initialState, actions }))
 ```
 Two halves, and the discipline is the point:
 
-1. **The store slice** — React Flow writes go through `onNodesChange` / `onEdgesChange` (position,
-   selection) and then call `touch(api)` so the debounced file save happens. No other component may mutate
-   a node/edge array.
+1. **The store slice** — React Flow writes go through `onNodesChange` / `onEdgesChange`, and *those are the
+   only two places where a gesture becomes a document edit*: a drag end hands the moved ids to `writeNodeArtifact`,
+   a Delete hands the ids to `engine.deleteNode` (state + edge cascade + files, in the engine, once), and
+   `touch(api)` afterwards refreshes the cache and the chips. Selection changes are the one class of change that
+   touches no file. No other component may mutate a node/edge array — and this is why the two rows above exist:
+   `touch` alone writes `state.json`, `canvas-overview.md` and `canvas.yaml`, never a node file.
 2. **The `actions` object** — the entire API the UI is allowed to call (58 members). Each is a two-line
    delegation: resolve `api = { get, set }`, forward to `engine`, done. Nothing in `actions` writes a file
    or builds a string itself.
@@ -455,7 +463,10 @@ engine functions so engine never imports zustand. Sections, in file order:
 | **events** | `emit(api,type,msg)` 33, `toast(api,kind,text)` 38 | `emit` builds a `BusEvent` through `bus` and prepends it to `state.events` (cap 250). `bus.on` currently has **zero subscribers** — it is the seam for SSE/plugins later (§10 ideas) |
 | **patching** | `getNode` 49, `patchNode(api,id,data,internal=false)` 56 | user edits are refused when `lock.status==="locked"` (§12.5); `internal=true` is how the executor itself writes |
 | **artifacts** | `writeNodeArtifact(api,id,quiet)` 76, `writeEdgeArtifact` 83, `appendLog` 92, `writeCanvasOverview` → `overviewMd` (private) 104 | one node = one file; `quiet` suppresses the event (used in bulk loops). `nodePath`/`edgePath` are the only path builders |
-| **saving** | `touch(api)` 168 (debounced 700 ms, flips `saveState`), `flushPending()` 174, `saveNow` (private) | every write sits on one promise chain so `flushPending` can await them all. **Export, reload and shutdown call it first** |
+| **saving** | `touch(api)` 168 (debounced 700 ms, flips `saveState`), `flushPending()` 174, `saveNow` (private) | every write sits on one promise chain so `flushPending` can await them all. Export calls it; `App.tsx` calls it
+on `visibilitychange:hidden` and `pagehide`, because a tab closed inside the 700 ms window used to swallow the last
+edit. `reloadFromDisk` does **not** flush — it refuses while `saveState === "saving"`, so a reload is never racing
+a write |
 | **memory** | `MemoryManager.read/write/list` 231 | conflict rule: incoming `confidence` must strictly exceed the stored one, else the old entry is kept and a `memory.updated` event explains it; equal weight → replaced + "ask the user later". A write into a locked node is refused. Writes are checked against `allowed_write_paths`; reads resolve **any** allowed path against the real tree |
 | **self-checks** | `testFallback` 301, `contractSelfTest` 323 | `contractSelfTest` = one allowed write + two attempted intrusions (global memory, another agent's memory) and reports in the console. This is the executable form of the context contract, and since `1.4` it also parses the role's declared schema file, naming in the event which dimension failed (a missing file, a bad JSON object, an unsupported keyword), so a broken contract is caught before a run instead of during one |
 | **outputs** | `FIELD_DESC` 372, `writeOutputs(api,nodeId,entries,shared)` 435 | writes `outputs/<node>/index.yaml` + one file per entry; `shared=true` puts it under `outputs/shared/<node>/` (used by the collection box) |
@@ -525,7 +536,7 @@ call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
-| `CanvasArea.tsx` 729 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
+| `CanvasArea.tsx` 794 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
 | `SidePanels.tsx` 839 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
 | `Overlays.tsx` 753 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
@@ -955,15 +966,19 @@ role definitions and their schemas *are* seeded, because they are what the contr
 ## 5.4 Editing a node
 
 ```
-textarea in the inspector → actions.updateNodeData(id, patch)
+textarea in the inspector (or on the canvas) → actions.updateNodeData(id, patch)
   → engine.patchNode(api, id, data)         // refused with a warn toast if locked (Law 3)
   → api.set(nodes: map over nodes)          // React Flow re-renders
+  → writeNodeArtifact(api, id, quiet=true)  // nodes/<id>.md via nodeToMarkdown (position included)
   → touch(api)                              // debounced 700 ms:
-      saveNow → writeNodeArtifact(id)       // nodes/<id>.md via nodeToMarkdown (position included)
-              → writeCanvasOverview()       // counts + current step
-              → saveNow(state.json)         // the cache; there is nothing else to write
+      saveNow → writeCanvasOverview()        // counts + current step
+              → writeCore → state.json      // the cache; it carries no nodes, on purpose
       saveState: "saving" → "saved"         // the TopBar chip, and the trigger for the live tree refresh
 ```
+The node file write is **synchronous inside the action**, not deferred to `saveNow`: a debounced cache write that is
+the only writer of a field is how a closed tab loses layout. Drag end goes through the same two calls
+(`writeNodeArtifact` per moved id, then `touch`), and `check-palette`'s sibling tests in `store-write.test.ts`
+keep both honest.
 Every keystroke costs one IndexedDB write 700 ms later — no batching layer, no queue to reason about. In
 folder mode writes are **synchronous and un-debounced** (a user watching `git status` expects the file to
 change now).
@@ -1132,14 +1147,51 @@ sentence in 24 px). The band is the run's refusal, verbatim — "output rejected
 make the user open the console and find the node's line among 250 events; a pipeline whose failure is only
 visible in a log is a pipeline nobody trusts. The text is never written into `nodes/<id>.md` (§5.8, Law 3).
 
-Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Enter in "save template").
-There are no canvas shortcuts, no focus rings on nodes, no `aria-live` on toasts — see §9.9.
+### Themes, roles, and the colours that stay data
+
+An appearance decision still needs a mechanism, and this one is a single attribute: `main.tsx` sets
+`document.documentElement.dataset.theme` from `settings.theme` **before the first paint** (in a component effect the
+canvas flashes the default for a frame), `App.tsx` keeps it in sync when the Settings modal changes it, and
+`src/index.css` re-maps the tokens under `:root[data-theme="…"]`. There is deliberately no theme object in
+TypeScript: a second list of colours in JS is a second truth, and `docs/ui-spec.md` §3 is the document that decides
+which of the two owns a value.
+
+- **Components name roles, never colours.** Colour literals live in exactly three kinds of block in `index.css`
+  (`@theme`, the `:root` role aliases, and one block per non-default theme). Anything else that needs a colour takes
+  a class (`.lc-card-surface`, `.lc-card-empty`, `.lc-fail-band`) or a `var()` inside an inline style — inline styles
+  do accept `var()`, which is how the node card's gradient left JSX without changing how it paints.
+- **React Flow is themed through the variables its stylesheet reads** (`--xy-background-pattern-color`,
+  `--xy-minimap-background-color`, `--xy-minimap-mask-background-color`), not through `color` / `maskColor` /
+  `style` props. Those props end up as inline styles, which outrank any theme, so they are not a theming API and
+  they are gone from `CanvasArea.tsx`.
+- **Contrast is measured, not felt.** `scripts/check-palette.mjs` resolves each theme's tokens and applies WCAG
+  relative luminance to six roles (body, titles, muted, action, error, success) against that theme's own
+  `ink-950`, and refuses a theme that is *dimmer* than the default for any of them. Alpha utilities follow the
+  theme too: Tailwind emits `color-mix(… var(--color-…), transparent)` behind an `@supports` guard, and the
+  pre-computed literal is the fallback for a browser without `color-mix`.
+- **Node, edge and stroke colours stay literals in the files.** They are what the user drew. A theme that
+  re-tinted them would rewrite the canvas, which is Law 1 seen from the other side.
+
+`GRID_GAP` (`src/lib/core.ts`) is one constant with two jobs: the `<Background gap>` dot pitch and `snapGrid`. They
+must stay equal — a snap that lands between two visible dots reads as broken alignment, whatever the number is.
+Snapping is **off until switched on in Settings**, because it rewrites `position` in every node file it touches: a
+document change wearing a view's clothes. `elevateNodesOnSelect` is on, since the selected card is the one being read.
+
+Editing text on the canvas (`LcNode`, markdown view): double-click swaps the rendered block for a `<textarea>`,
+and the commit path is `updateNodeData` — the same writer the inspector uses, so the node file is written and
+`mdInline` stays the only render door (Law 2). `Escape` cancels, `⌘/Ctrl+Enter` and blur commit; the textarea carries
+`nodrag nowheel` so the canvas does not steal the gesture. There is no `contentEditable` anywhere in the app, and
+adding one means re-arguing Law 2 first.
+
+Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Enter in "save template"), plus
+`Enter`/`Escape` inside in-place node editing. There are no canvas shortcuts, no focus rings on nodes, no
+`aria-live` on toasts — see §9.9.
 
 ---
 
 # 7. Immune system — tests
 
-`npx vitest run` → **7 files, 118 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **9 files, 126 tests**, no jsdom, no config file (vitest reads `vite.config.js`).
 Every test runs the **production** functions — no re-implementations. `src/lib/test-helpers.ts` exists so a
 test cannot accidentally grow its own serialiser (that is how a fixture hides a bug).
 
@@ -1151,6 +1203,8 @@ test cannot accidentally grow its own serialiser (that is how a fixture hides a 
 | `roundtrip.test.ts` | 4 | seed → collect → bundle → parse → **compare file maps byte for byte**; hydration from real Markdown; the template-folder regression at workspace level; export *without* `graph.json`/`state.json` still rebuilds — that last one is now the *normal* case, and its fixture is a deliberate `structure_version: "1.3"` folder, so the legacy shape stays covered |
 | `schema.test.ts` | 15 | the schema subset itself (§4.9.1): presence, `additionalProperties: false` in both directions, "a numeric field means nothing but a number", range/enum/pattern/length/boolean, **an unsupported keyword is reported at both levels and named by path**, a non-object root is refused, a broken `pattern` is the schema's own failure, `parseOutputSchema` accepts one JSON object or errors loudly, every shipped `ROLE_SCHEMAS` entry parses and promises exactly the fields its role declares |
 | `execution.test.ts` | 37 | the run rules: `evalCondition` fail-closed (unsatisfied / unknown variable / unparsable / non-numeric data / string compare), `numericScope`, `isPathAllowed` (dir, exact, one-segment glob, no neighbour leakage), `computeOrder` (diamond, disconnected, cycle, parallel edges, determinism, mid-graph start), `hasTool`/`unknownTools`; plus `runPipeline` end to end on a two-agent graph — an ungranted upstream path is not read, `write_output` missing makes the node fail with no output files, a conditional edge skips the node and logs the reason, the run ledger is written row by row and closed, and `MemoryManager.read` returns a granted `outputs/` file. The last group is the contract *enforced*: a score outside the schema's range fails the node with the reason in `execution.errors`, nothing lands in `outputs/`, the log and the ledger both record `rejected`; a schema file that is missing, outside `library/schemas/`, not one JSON object, or built from an unsupported keyword is refused before it can pass anything; and `validator: null` opts out of all of it — on purpose, with the cost asserted in the same test |
+| `store-write.test.ts` | 5 | the two paths that used to stop at the store: `Delete` on a node must delete `nodes/<id>.md` (and cascade its edges, exactly as the inspector button does), a run-locked node must survive both the change and the files with a toast that says why, and a drag end must land in the node file — while a drag still in progress must not touch the disk |
+| `theme.test.ts` | 3 | the settings half of appearance: every registered theme has a label and a hint, and `defaultSettings()` refuses an unregistered id, a corrupt blob and a truthy-not-boolean `snapToGrid` (a theme that selects nothing, or a document change that was not asked for, are both worse than the default). The colour half is in `scripts/check-palette.mjs`, because a test that reads `node:fs` does not belong inside `src/` |
 | `hydrate.test.ts` | 11 | the real `hydrate()` against `MemoryStorageAdapter`: no manifest → `false` and nothing deleted; custom template found after reload; several templates + neighbouring files; files-only mode builds the canvas; locked node not restored; **a `graph.json` left in the folder is inert** (positions and text both come from the node file); broken `state.json` tolerated; the adapter in play is the adapter read (no stale cache between tests); `seedWorkspace` writes the four role files + the four schemas, no `graph.json`, one start-here note and no edges; an imported bundle loses its `graph.json` and says so |
 
 Rules for adding a test:
@@ -1159,8 +1213,10 @@ Rules for adding a test:
 2. Do not deep-compare two `deriveCanvasFromFiles` results: it stamps `updated_at: nowIso()`, so compare a
    projection (see `roundtrip.test.ts`) or differences of a millisecond will make it flaky.
 3. A test that would also pass when the bug is reintroduced is worse than no test. Before finishing,
-   **revert the fix locally and confirm the test fails** — that is exactly how the Law-4 guard was verified
-   (7 tests fail on the old filter, 2 on the old `yv`).
+   **revert the fix locally and confirm the test fails** — that is how the Law-4 guard was verified (7 tests fail
+   on the old filter, 2 on the old `yv`), how `store-write.test.ts` was verified (4 of its 5 fail when the two
+   store routes go back to `applyNodeChanges` alone), and how `check-palette.mjs` was verified (a stray `#333333`
+   and a `THEME_IDS` entry without a CSS block each fail it, loudly).
 4. `setStorage(new MemoryStorageAdapter())` in `beforeEach` + restore afterwards: the adapter is a module
    singleton and tests must not leak it into each other.
 
@@ -1231,8 +1287,11 @@ npm dependencies and a 40 MB tracked snapshot; nothing that ran automatically (t
    Do **not** reuse `HttpStorageAdapter` for it: that adapter is file I/O against a storage backend, not an LLM
    gateway — a proxy needs a new contract of its own (`POST /api/llm`, provider+key server-side, no canvas
    semantics). Until then the settings panel must keep naming where the key lives.
-5. `defaultSettings()` in `state.ts` reads `localStorage["lc-settings"]` — the one place a data module does I/O
-   (Law 5 breach, harmless today, ugly tomorrow). Move it to `store.ts` next to `saveSettingsLocal`.
+5. `defaultSettings()` in `state.ts` reads `localStorage["lc-settings"]`. The I/O itself is now a **named** seam of
+   Law 4 (reader-scoped settings, ADR-006), which is the fix the earlier draft of this entry asked for — the debt
+   that remains is that the same factory also *normalises* what it finds (an unknown theme id, a truthy-but-not-true
+   `snapToGrid`). Data-shaping in a state factory is fine while it has one caller; a second caller means the
+   normalisation moves into `core` where it can be tested apart from the browser.
 6. `makeNodeData` stamps a placeholder id `"pending"` on its default agent, which callers must overwrite
    (`createNode` and `loadTemplate` do). Any new call site that forgets produces a node whose contract points at
    `nodes/pending.md`. Fix: pass the id in, no default agent at all.
@@ -1247,6 +1306,8 @@ npm dependencies and a 40 MB tracked snapshot; nothing that ran automatically (t
    one small file per run, forever. Snapshots have the same problem (§9.3); solve them together, with keep-last-N.
 9. no eslint/prettier config and no LICENSE file; a11y: no focus ring on canvas nodes, no keyboard traversal of the
    graph, toasts are not announced, draw mode has no escape-to-cancel (only the ✕ button), modals do not trap focus.
+   Node text can now be edited without reaching the inspector, but it still takes a **mouse** (double-click) — the
+   keyboard path is the same missing feature it was, and `Tab` does not reach the canvas.
 
 ---
 
@@ -1353,13 +1414,15 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 7 files / 118 tests
+npm test            vitest run            → 9 files / 126 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
-npm run build       tsc --noEmit && vite build → ~527 kB js / 163 kB gzip (chunk ceiling 600)
+npm run build       tsc --noEmit && vite build → ~530 kB js / 164 kB gzip, 68 kB css / 12 kB gzip (chunk ceiling 600)
 node scripts/check-english.mjs   language gate: RTL script only outside docs/; invisible bidi chars anywhere
 node scripts/doc-anchors.mjs     rewrites the `name 412` line anchors in §3.4 from src/lib/engine.ts (--check = exit 1)
 node scripts/check-docs.mjs      the doc map's gate: frontmatter, legal statuses, every reference resolving
+node scripts/check-palette.mjs   the appearance gate: theme registry, WCAG contrast per theme, no colour literals
+                                 outside the token blocks in src/index.css or in src/components/*.tsx
 ```
 
 Those checks are what CI runs, on `push`/`pull_request` for `main` and `arena/**` — including the anchor gate,

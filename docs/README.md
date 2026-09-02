@@ -62,7 +62,7 @@ Run it with `node scripts/check-docs.mjs`; CI runs it next to the other two repo
 
 `docs/` may be Persian. The owner is the reader, and a document that gets read is worth more than a document
 that is uniform — so the corpus is bilingual by decision: `ARCHITECTURE.md`, this map and the ADRs written before
-the ruling stay English, `ui-spec.md` and `inbox.md` are Persian, and a new file may be either.
+the ruling stay English, while `ui-spec.md`, `inbox.md` and `adr-006` are Persian. A new file may be either.
 
 What did **not** change: code, comments, UI strings and tests are English, because a tool that reads the
 repository (`scripts/doc-anchors.mjs`, a grep, an agent with no locale) should never have to transliterate.

@@ -2,6 +2,7 @@
    Living Canvas — AppState, factories, roles, seed data
    ============================================================ */
 import type { Node, Edge } from "@xyflow/react";
+import { DEFAULT_THEME, isThemeId } from "./lib/core";
 import type {
   LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode,
   AgentConfig, MemDoc, Settings, ExecutionState, BusEvent, Toast,
@@ -410,12 +411,27 @@ export const emptyExecution = (): ExecutionState => ({
   errors: {},
 });
 
+const SETTINGS_BASE: Settings = {
+  provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620,
+  backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
+};
+
+/**
+ * Settings are the only state that lives in `localStorage` (Law 4's third seam: they are reader-scoped,
+ * never canvas content, so Export must not carry them). A blob written by an older build lacks the newer
+ * keys, and an unknown theme id must not reach `data-theme`, so both are normalised here rather than
+ * trusted downstream.
+ */
 export const defaultSettings = (): Settings => {
+  let stored: Record<string, unknown> = {};
   try {
     const raw = localStorage.getItem("lc-settings");
-    if (raw) return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "", workspaceRoot: null, ...JSON.parse(raw) };
+    if (raw) stored = { ...(JSON.parse(raw) as Record<string, unknown>) };
   } catch { /* ignore */ }
-  return { provider: "sim", apiKey: "", model: "deepseek-chat", owner: "mahla", simDelay: 620, backendUrl: "", workspaceRoot: null };
+  const merged: Settings = { ...SETTINGS_BASE, ...stored };
+  if (!isThemeId(merged.theme)) merged.theme = DEFAULT_THEME;
+  merged.snapToGrid = stored.snapToGrid === true;
+  return merged;
 };
 
 /* ---------------- palette ---------------- */
