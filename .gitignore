@@ -3,3 +3,13 @@ node_modules/
 dist/
 build/
 *.log
+
+# ---- repo-duplication guard (review §7) ----
+# the legacy Persian snapshot and its archive stay on disk for reference only —
+# they are not built, not canonical, and not tracked (docs/ARCHITECTURE.md §9)
+*.zip
+Living_Canvas-main/
+coverage/
+.vite/
+*.tsbuildinfo
+.DS_Store

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, MiniMap, Controls,
-  Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow, useViewport,
+  Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow,
   type NodeProps, type EdgeProps, type NodeTypes, type EdgeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useStore } from "../store";
 import { roleById, NODE_TYPE_LABEL, CANVAS_ID } from "../state";
 import type { RFNode, RFEdge } from "../state";
-import { faNum, uid, nowIso, EMPTY_ARR, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
-import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash, INode, IChevD } from "./icons";
+import { uid, nowIso, mdInline, EMPTY_ARR, GRID_GAP, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
+import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash } from "./icons";
 
 /* ---------------- mini markdown ---------------- */
 
@@ -28,22 +28,22 @@ function Md({ text, compact = false }: { text: string; compact?: boolean }) {
           return (
             <p key={i} className="text-[11.5px] leading-5 text-ink-200 flex gap-1.5">
               <span className="text-amber-lc mt-[7px] w-1 h-1 rounded-full bg-amber-lc shrink-0" />
-              <span dangerouslySetInnerHTML={{ __html: bold(t.slice(2)) }} />
+              {/* mdInline escapes the HTML first, then formats — so AI content never becomes a tag */}
+              <span dangerouslySetInnerHTML={{ __html: mdInline(t.slice(2)) }} />
             </p>
           );
-        return <p key={i} className="text-[11.5px] leading-5 text-ink-200" dangerouslySetInnerHTML={{ __html: bold(t) }} />;
+        return <p key={i} className="text-[11.5px] leading-5 text-ink-200" dangerouslySetInnerHTML={{ __html: mdInline(t) }} />;
       })}
     </div>
   );
 }
 
-const bold = (s: string) =>
-  s.replace(/\*\*(.+?)\*\*/g, "<strong class='text-ink-50 font-bold'>$1</strong>").replace(/_(.+?)_/g, "<em>$1</em>");
+
 
 /* ---------------- status ---------------- */
 
-const STATUS_FA: Record<AgentStatus, string> = {
-  idle: "آماده", running: "در حال اجرا", done: "تکمیل شد", failed: "خطا", waiting: "در انتظار تأیید",
+const STATUS_LABEL: Record<AgentStatus, string> = {
+  idle: "Ready", running: "Running", done: "Done", failed: "Failed", waiting: "Awaiting approval",
 };
 const STATUS_COLOR: Record<AgentStatus, string> = {
   idle: "#8ba39d", running: "#e8b04b", done: "#8fbf7f", failed: "#e06a4e", waiting: "#e06a4e",
@@ -68,7 +68,9 @@ function shapeStyle(d: LCNodeData): React.CSSProperties {
     clipPath: clip,
     borderRadius: d.shape === "circle" ? "9999px" : d.shape === "card" ? "14px" : "8px",
     border: d.shape === "rectangle" || d.shape === "card" || d.shape === "empty" ? `${Math.max(1, d.style.strokeWidth / 2)}px solid ${d.style.strokeColor}4d` : "none",
-    background: d.style.fillStyle === "empty" ? "rgba(15,26,25,0.55)" : `linear-gradient(150deg, #182826 0%, #121d1c 100%)`,
+    // the surface itself is a class (`lc-card-surface` / `lc-card-empty`) so a theme can reach it;
+    // `d.color` stays inline on purpose — a node's colour is canvas data, written into the node file,
+    // and re-tinting it per theme would rewrite what somebody drew (§1.1, docs/ui-spec.md §3)
     boxShadow: `0 0 0 1px ${c}33, 0 10px 30px -12px ${c}40, inset 3px 0 0 0 ${c}`,
     opacity: d.style.opacity / 100,
   };
@@ -80,7 +82,13 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const chatOpen = useStore((s) => s.ui.chatNodeId === id);
   const confidence = useStore((s) => s.memory.agents[id]?.confidence ?? 0.7);
   const execWaiting = useStore((s) => s.execution.status === "waiting_approval" && s.execution.current_node_id === id);
+  // why the run refused this node (§3.6) — the executor's refusal is the interesting part of a
+  // non-deterministic pipeline, so it belongs on the card, not only in a console the user has to open
+  const failReason = useStore((s) => s.execution.errors[id] ?? "");
   const actions = useStore((s) => s.actions);
+  /* double-click editing, markdown mode only — see the note at the render site */
+  const [draft, setDraft] = useState<string | null>(null);
+  const cancelled = useRef(false);
   const agent = data.agent;
   const status: AgentStatus = agent?.status ?? "idle";
   const running = status === "running";
@@ -88,13 +96,13 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const locked = data.lock.status === "locked";
 
   const ring = running ? "anim-running" : waiting ? "anim-waiting" : "";
+  const wide = data.viewMode === "card" || data.viewMode === "markdown";
   const breathe = data.animation.type === "breathe" && !running ? "anim-breathe" : "";
   const breatheDur = { animationDuration: `${3.2 / data.animation.speed}s` };
 
   const shell = (inner: React.ReactNode, w?: string) => (
     <div
-      dir="rtl"
-      className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""}`}
+      className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""} ${data.style.fillStyle === "empty" ? "lc-card-empty" : "lc-card-surface"}`}
       style={{ ...shapeStyle(data), ...(breathe ? breatheDur : {}) }}
     >
       <div className={breathe ? "anim-breathe" : ""} style={breathe ? breatheDur : undefined}>
@@ -106,13 +114,29 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         </span>
       )}
       {agent?.require_approval && !running && (
-        <span className="absolute -top-2 -right-2 z-10 w-5 h-5 rounded-full bg-ink-800 border border-ember/60 text-ember flex items-center justify-center" title="نیاز به تأیید انسانی">
+        <span className="absolute -top-2 -right-2 z-10 w-5 h-5 rounded-full bg-ink-800 border border-ember/60 text-ember flex items-center justify-center" title="Needs human approval">
           <IWarn size={10} />
         </span>
       )}
       <Handle type="target" position={Position.Left} />
       <Handle type="source" position={Position.Right} />
       {selected && <span className="sr-only">selected</span>}
+      {failReason && (wide ? (
+        <div
+          className="lc-fail-band absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 px-2.5 py-1.5 rounded-b-[inherit] border-t border-ember/45"
+          title={failReason}
+        >
+          <IWarn size={10} className="shrink-0 mt-[2px] text-ember" />
+          <p className="text-[9.5px] font-mono leading-[13px] text-ember line-clamp-2 break-words">{failReason}</p>
+        </div>
+      ) : (
+        <span
+          className="absolute -bottom-1.5 -right-1.5 z-10 w-4 h-4 rounded-full bg-ink-950 border border-ember/70 text-ember flex items-center justify-center"
+          title={failReason}
+        >
+          <IWarn size={9} />
+        </span>
+      ))}
     </div>
   );
 
@@ -124,7 +148,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
           className={`w-6 h-6 rounded-full ${running ? "anim-running" : ""}`}
           style={{ background: data.color, boxShadow: `0 0 14px ${data.color}90` }}
         />
-        <span className="text-[9px] text-ink-300 max-w-[70px] truncate" dir="rtl">{data.title}</span>
+        <span className="text-[9px] text-ink-300 max-w-[70px] truncate">{data.title}</span>
       </div>
     );
   }
@@ -140,15 +164,51 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
     );
   }
 
-  /* markdown mode */
+  /* markdown mode.
+     Double-click writes here instead of in the inspector — the habit Excalidraw has and we did not.
+     Deliberately a `<textarea>` overlay rather than `contentEditable` (Law 2: raw HTML must never become
+     node state), and deliberately **not** a separate text record (no `boundElements`/`containerId`): the
+     text already lives in the node file's body, which is the split Excalidraw needs and we do not. */
   if (data.viewMode === "markdown") {
+    const commit = () => {
+      const next = draft;
+      setDraft(null);
+      if (next !== null && !cancelled.current && next !== data.content) actions.updateNodeData(id, { content: next });
+      cancelled.current = false;
+    };
     return shell(
-      <div className="p-3.5 w-[280px]">
+      <div
+        className="p-3.5 w-[280px]"
+        onDoubleClick={(e) => {
+          if (locked) return;
+          e.stopPropagation();
+          setDraft(data.content);
+        }}
+        title={locked ? "Locked by a run (§12.5)" : "Double-click to write on the canvas"}
+      >
         <div className="flex items-center gap-2 mb-2">
           <span style={{ color: data.color }}><TypeIcon type={data.nodeType} /></span>
           <h3 className="text-[13px] font-extrabold text-ink-50 leading-5">{data.title}</h3>
         </div>
-        {data.content ? <Md text={data.content} compact /> : <p className="text-[11px] text-ink-400">بدون محتوا — از پنل بازرسی بنویسید.</p>}
+        {draft !== null ? (
+          <textarea
+            autoFocus
+            value={draft}
+            dir="auto"
+            onPointerDown={(e) => e.stopPropagation()}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { e.preventDefault(); cancelled.current = true; setDraft(null); }
+              else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+            }}
+            className="nodrag nowheel w-full min-h-[110px] resize-y rounded-lg bg-ink-950/70 border border-amber-lc/50 px-2 py-1.5 text-[11.5px] leading-5 text-ink-100 font-mono focus:outline-none focus:border-amber-lc"
+          />
+        ) : data.content ? (
+          <Md text={data.content} compact />
+        ) : (
+          <p className="text-[11px] text-ink-400">No content — double-click here, or write it in the inspector.</p>
+        )}
       </div>
     );
   }
@@ -176,7 +236,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         {agent && (
           <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0" style={{ color: STATUS_COLOR[status], background: `${STATUS_COLOR[status]}18` }}>
             <span className={`w-1.5 h-1.5 rounded-full ${running || waiting ? "anim-blink" : ""}`} style={{ background: STATUS_COLOR[status] }} />
-            {STATUS_FA[status]}
+            {STATUS_LABEL[status]}
           </span>
         )}
       </div>
@@ -185,16 +245,16 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         <div className="px-3.5 pb-2.5 flex flex-wrap gap-1">
           <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-ink-800 text-ink-300 border border-ink-700">{agent.model}</span>
           {agent.tools.slice(0, 3).map((t) => (
-            <span key={t} className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-ink-800 text-ink-300 border border-ink-700" dir="ltr">{t}</span>
+            <span key={t} className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-ink-800 text-ink-300 border border-ink-700">{t}</span>
           ))}
-          {agent.tools.length > 3 && <span className="text-[9.5px] text-ink-400 self-center">+{faNum(agent.tools.length - 3)}</span>}
+          {agent.tools.length > 3 && <span className="text-[9.5px] text-ink-400 self-center">+{agent.tools.length - 3}</span>}
         </div>
       )}
 
       {running && lastLogs.length > 0 && (
         <div className="mx-3.5 mb-2.5 px-2 py-1.5 rounded-md bg-ink-950/80 border border-amber-lc/20">
           {lastLogs.map((l, i) => (
-            <p key={i} className="text-[9.5px] font-mono text-amber-lc/90 truncate leading-4" dir="rtl">{l.replace(/^\[[^\]]+\]\s*/, "")}</p>
+            <p key={i} className="text-[9.5px] font-mono text-amber-lc/90 truncate leading-4">{l.replace(/^\[[^\]]+\]\s*/, "")}</p>
           ))}
         </div>
       )}
@@ -203,8 +263,8 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         <span className="text-[10px] text-ink-400">
           {data.nodeType === "agent"
             ? <span className="flex items-center gap-2">
-                <span className="flex items-center gap-1"><IFile size={10} /> {faNum(outputs)} خروجی</span>
-                {agent && <span className="flex items-center gap-1"><ISpark size={10} /> اعتماد {faNum(Math.round(confidence * 100) / 100)}</span>}
+                <span className="flex items-center gap-1"><IFile size={10} /> {outputs} outputs</span>
+                {agent && <span className="flex items-center gap-1"><ISpark size={10} /> confidence {Math.round(confidence * 100) / 100}</span>}
               </span>
             : data.content
               ? <span className="truncate block max-w-[170px]">{data.content.replace(/[#*\n-]/g, " ").slice(0, 42)}…</span>
@@ -213,7 +273,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
         <button
           onClick={() => actions.setChatNode(chatOpen ? null : id)}
           className="nodrag text-ink-400 hover:text-amber-lc transition-colors cursor-pointer"
-          title={agent ? "گفتگو با ایجنت" : "یادداشت"}
+          title={agent ? "Chat with the agent" : "Note"}
         >
           <IChat size={14} />
         </button>
@@ -229,7 +289,7 @@ const EDGE_COLOR: Record<string, string> = {
 };
 
 function LcEdge(props: EdgeProps<RFEdge>) {
-  const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd } = props;
+  const { sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, data, selected, markerEnd } = props;
   const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, curvature: 0.28 });
   const color = EDGE_COLOR[data?.edgeType ?? "flow"] ?? "#5f7b76";
   const anim = data?.animation === "flow" ? "lc-edge-flow" : data?.animation === "pulse" ? "lc-edge-pulse" : "";
@@ -243,7 +303,6 @@ function LcEdge(props: EdgeProps<RFEdge>) {
       {data?.label && (
         <EdgeLabelRenderer>
           <div
-            dir="rtl"
             className="absolute pointer-events-none text-[9.5px] font-bold px-1.5 py-0.5 rounded-md border anim-fade"
             style={{
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
@@ -251,7 +310,7 @@ function LcEdge(props: EdgeProps<RFEdge>) {
             }}
           >
             {data.label}
-            {data.trigger?.type === "condition" && <span className="font-mono opacity-70" dir="ltr"> · {data.trigger.condition}</span>}
+            {data.trigger?.type === "condition" && <span className="font-mono opacity-70"> · {data.trigger.condition}</span>}
           </div>
         </EdgeLabelRenderer>
       )}
@@ -381,8 +440,8 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
         className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full bg-ink-900/90 border border-ink-600 text-ink-200 text-[12px] font-bold shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] hover:border-amber-lc/60 hover:text-amber-lc transition-all cursor-pointer backdrop-blur-sm group"
       >
         <IPen size={15} className="text-amber-lc group-hover:scale-110 transition-transform" />
-        نقاشی روی بوم
-        {strokes.length > 0 && <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded-full bg-amber-lc/15 border border-amber-lc/40 text-amber-lc">{faNum(strokes.length)}</span>}
+        Draw on the canvas
+        {strokes.length > 0 && <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded-full bg-amber-lc/15 border border-amber-lc/40 text-amber-lc">{strokes.length}</span>}
       </button>
     );
   }
@@ -400,20 +459,20 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
   return (
     <>
       {convertOpen && (
-        <div className="absolute bottom-[76px] left-1/2 -translate-x-1/2 z-40 w-[300px] rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_24px_70px_-16px_rgba(0,0,0,0.85)] anim-pop overflow-hidden" dir="rtl">
+        <div className="absolute bottom-[76px] left-1/2 -translate-x-1/2 z-40 w-[300px] rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_24px_70px_-16px_rgba(0,0,0,0.85)] anim-pop overflow-hidden">
           <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-ink-700 bg-ink-850">
             <IWand size={15} className="text-plum" />
-            <p className="text-[12.5px] font-extrabold text-ink-50 flex-1">تبدیل طرح‌ها به گراف</p>
+            <p className="text-[12.5px] font-extrabold text-ink-50 flex-1">Convert strokes to a graph</p>
             <button onClick={() => setConvertOpen(false)} className="text-ink-400 hover:text-ember transition-colors cursor-pointer"><IX size={14} /></button>
           </div>
           <div className="p-3.5 space-y-3">
             <p className="text-[11px] text-ink-300 leading-5">
-              {faNum(strokes.length)} خط در <strong className="text-plum">{faNum(clusters)} خوشه</strong> شناسایی شد. هر خوشه به یک نود تبدیل می‌شود.
+              {strokes.length} strokes found in <strong className="text-plum">{clusters} clusters</strong>. Each cluster becomes a node.
             </p>
             <div>
-              <p className="text-[10px] font-bold text-ink-400 mb-1.5">نوع نود</p>
+              <p className="text-[10px] font-bold text-ink-400 mb-1.5">Node type</p>
               <div className="grid grid-cols-3 gap-1.5">
-                {([["note", "یادداشت"], ["agent", "ایجنت"], ["shape", "شکل"]] as const).map(([v, l]) => (
+                {([["note", "Note"], ["agent", "Agent"], ["shape", "Shape"]] as const).map(([v, l]) => (
                   <button
                     key={v}
                     onClick={() => setConvertType(v)}
@@ -429,27 +488,27 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
                 <span className={`block w-3.5 h-3.5 rounded-full bg-ink-100 transition-transform ${connect ? "-translate-x-3.5" : ""}`} />
               </span>
               <input type="checkbox" checked={connect} onChange={(e) => setConnect(e.target.checked)} className="hidden" />
-              <span className="text-[11px] text-ink-200">اتصال نودها به ترتیب ترسیم</span>
+              <span className="text-[11px] text-ink-200">Connect the nodes in drawing order</span>
             </label>
             <div className="flex gap-2 pt-1">
               <button
                 onClick={() => { actions.convertStrokes({ nodeType: convertType, connect }); setConvertOpen(false); }}
                 className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl bg-plum text-ink-950 text-[11.5px] font-black hover:brightness-110 transition-all cursor-pointer active:scale-[0.98]"
               >
-                <IWand size={13} /> تبدیل
+                <IWand size={13} /> Convert
               </button>
               <button onClick={() => setConvertOpen(false)} className="px-3.5 py-2 rounded-xl bg-ink-850 border border-ink-600 text-[11.5px] font-bold text-ink-300 hover:text-ink-100 transition-colors cursor-pointer">
-                لغو
+                Cancel
               </button>
             </div>
           </div>
         </div>
       )}
 
-      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-2.5 py-2 rounded-2xl bg-ink-900/95 border border-ink-600 shadow-[0_14px_50px_-12px_rgba(0,0,0,0.7)] backdrop-blur-sm anim-pop" dir="rtl">
-        <ToolBtn active={tool === "pen"} onClick={() => setTool("pen")} title="قلم"><IPen size={15} /></ToolBtn>
-        <ToolBtn active={tool === "highlight"} onClick={() => setTool("highlight")} title="ماژیک"><IHighlight size={15} /></ToolBtn>
-        <ToolBtn active={tool === "eraser"} onClick={() => setTool("eraser")} title="پاک‌کن"><IEraser size={15} /></ToolBtn>
+      <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 px-2.5 py-2 rounded-2xl bg-ink-900/95 border border-ink-600 shadow-[0_14px_50px_-12px_rgba(0,0,0,0.7)] backdrop-blur-sm anim-pop">
+        <ToolBtn active={tool === "pen"} onClick={() => setTool("pen")} title="Pen"><IPen size={15} /></ToolBtn>
+        <ToolBtn active={tool === "highlight"} onClick={() => setTool("highlight")} title="Highlighter"><IHighlight size={15} /></ToolBtn>
+        <ToolBtn active={tool === "eraser"} onClick={() => setTool("eraser")} title="Eraser"><IEraser size={15} /></ToolBtn>
 
         <span className="w-px h-6 bg-ink-700 mx-0.5" />
 
@@ -472,7 +531,7 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
             <button
               key={w}
               onClick={() => setWidth(w)}
-              title={`ضخامت ${faNum(w)}`}
+              title={`width ${w}`}
               className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all cursor-pointer ${width === w ? "bg-ink-700 text-ink-50" : "text-ink-400 hover:text-ink-200"}`}
             >
               <span className="rounded-full bg-current" style={{ width: w + 2, height: w + 2 }} />
@@ -482,13 +541,13 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
 
         <span className="w-px h-6 bg-ink-700 mx-0.5" />
 
-        <ToolBtn onClick={() => actions.undoStroke()} title="بازگردانی آخرین خط"><IUndo size={15} /></ToolBtn>
-        <ToolBtn onClick={() => setConvertOpen(true)} title="تبدیل طرح‌ها به گراف"><IWand size={15} /></ToolBtn>
-        <ToolBtn onClick={() => actions.clearStrokes()} title="پاک کردن همه‌ی طرح‌ها"><ITrash size={15} /></ToolBtn>
+        <ToolBtn onClick={() => actions.undoStroke()} title="Undo last stroke"><IUndo size={15} /></ToolBtn>
+        <ToolBtn onClick={() => setConvertOpen(true)} title="Convert strokes to a graph"><IWand size={15} /></ToolBtn>
+        <ToolBtn onClick={() => actions.clearStrokes()} title="Clear all strokes"><ITrash size={15} /></ToolBtn>
 
         <span className="w-px h-6 bg-ink-700 mx-0.5" />
 
-        <ToolBtn onClick={() => { setDrawMode(false); setConvertOpen(false); }} title="خروج از حالت نقاشی"><IX size={15} /></ToolBtn>
+        <ToolBtn onClick={() => { setDrawMode(false); setConvertOpen(false); }} title="Leave drawing mode"><IX size={15} /></ToolBtn>
       </div>
     </>
   );
@@ -506,6 +565,7 @@ function CanvasInner() {
   const { screenToFlowPosition, fitView, getZoom } = useReactFlow();
   const didFit = useRef(false);
 
+  const snapToGrid = useStore((s) => s.settings.snapToGrid);
   const [drawMode, setDrawMode] = useState(false);
   const [live, setLive] = useState<StrokePoint[] | null>(null);
   const drawingRef = useRef(false);
@@ -613,7 +673,6 @@ function CanvasInner() {
   return (
     <div
       className="relative h-full w-full lc-bg"
-      dir="ltr"
       onPointerDown={drawMode ? onDrawDown : undefined}
       onPointerMove={drawMode ? onDrawMove : undefined}
       onPointerUp={drawMode ? onDrawUp : undefined}
@@ -636,12 +695,17 @@ function CanvasInner() {
         deleteKeyCode={drawMode ? null : ["Backspace", "Delete"]}
         proOptions={{ hideAttribution: false }}
         defaultEdgeOptions={{ type: "lc" }}
+        /* §11.3 of the spec: the grid and the dots are one number, and a snap that falls between two
+           visible dots reads as broken alignment. Opt-in, because it rewrites `position` in node files. */
+        elevateNodesOnSelect
+        snapToGrid={snapToGrid}
+        snapGrid={[GRID_GAP, GRID_GAP]}
         panOnDrag={drawMode ? [1, 2] : true}
         nodesDraggable={!drawMode}
         nodesConnectable={!drawMode}
         elementsSelectable={!drawMode}
       >
-        <Background variant={BackgroundVariant.Dots} gap={26} size={1.4} color="#22383440" />
+        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.4} />
         <StrokesLayer
           strokes={strokes}
           live={live}
@@ -653,8 +717,6 @@ function CanvasInner() {
           position="top-right"
           pannable zoomable
           nodeColor={(n) => (n.data as LCNodeData).color}
-          maskColor="rgba(11,19,18,0.82)"
-          style={{ background: "#0f1a19" }}
         />
         <Controls position="bottom-left" showInteractive={false} />
       </ReactFlow>
@@ -662,10 +724,10 @@ function CanvasInner() {
       {drawMode && (
         <>
           <div className="absolute inset-2 rounded-2xl border-2 border-dashed border-amber-lc/25 pointer-events-none z-10" />
-          <div dir="rtl" className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none anim-fade">
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none anim-fade">
             <span className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-lc/10 border border-amber-lc/40 text-amber-lc text-[10.5px] font-bold backdrop-blur-sm">
               <IPen size={12} />
-              حالت نقاشی — {drawToolNow === "eraser" ? "روی خطوط بکشید تا پاک شوند" : "با دکمه‌ی چپ بکشید · اسکرول: زوم · کلیک راست: جابجایی"}
+              Drawing mode — {drawToolNow === "eraser" ? "trace over strokes to erase them" : "drag with the left button · scroll: zoom · right click: pan"}
             </span>
           </div>
         </>
@@ -675,35 +737,35 @@ function CanvasInner() {
       </div>
 
       {/* stats chip */}
-      <div data-drawui dir="rtl" className="absolute top-3 left-3 z-10 flex items-center gap-2 anim-fade">
+      <div data-drawui className="absolute top-3 left-3 z-10 flex items-center gap-2 anim-fade">
         <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-ink-900/85 border border-ink-700 backdrop-blur-sm text-[11px] text-ink-300">
-          <span className="flex items-center gap-1.5"><IBrain size={13} className="text-amber-lc" /> {faNum(agentCount)} ایجنت</span>
+          <span className="flex items-center gap-1.5"><IBrain size={13} className="text-amber-lc" /> {agentCount} agents</span>
           <span className="w-px h-3.5 bg-ink-700" />
-          <span>{faNum(nodes.length)} نود</span>
+          <span>{nodes.length} nodes</span>
           <span className="w-px h-3.5 bg-ink-700" />
-          <span>{faNum(edges.length)} یال</span>
+          <span>{edges.length} edges</span>
           <span className="w-px h-3.5 bg-ink-700" />
           <span className={`flex items-center gap-1.5 font-bold ${running ? "text-amber-lc" : execution.status === "completed" ? "text-sage" : ""}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${running ? "anim-blink" : ""}`} style={{ background: running ? "#e8b04b" : execution.status === "completed" ? "#8fbf7f" : "#5f7b76" }} />
-            {running ? "در حال اجرا" : execution.status === "waiting_approval" ? "منتظر تأیید" : execution.status === "completed" ? "کامل شد" : execution.status === "failed" ? "خطا" : "آماده"}
+            {running ? "Running" : execution.status === "waiting_approval" ? "Awaiting approval" : execution.status === "completed" ? "Completed" : execution.status === "failed" ? "Failed" : "Ready"}
           </span>
         </div>
       </div>
 
       {/* approval banner */}
       {waitingNode && (
-        <div dir="rtl" className="absolute top-3 left-1/2 -translate-x-1/2 z-20 anim-pop">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 anim-pop">
           <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl bg-ink-900/95 border border-ember/50 shadow-[0_8px_40px_-8px_rgba(224,106,78,0.35)]">
             <IWarn size={18} className="text-ember" />
             <div className="text-[12px]">
-              <p className="font-extrabold text-ink-50">تأیید انسانی لازم است — «{waitingNode.data.title}»</p>
-              <p className="text-ink-300 text-[10.5px]">خروجی نود آماده است؛ برای ادامه‌ی خط لوله تصمیم بگیرید.</p>
+              <p className="font-extrabold text-ink-50">Human approval required — “{waitingNode.data.title}”</p>
+              <p className="text-ink-300 text-[10.5px]">The node output is ready; decide to continue the pipeline.</p>
             </div>
             <button onClick={actions.resume} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sage/15 border border-sage/50 text-sage text-[11.5px] font-bold hover:bg-sage/25 transition-colors cursor-pointer">
-              <ICheck size={13} /> تأیید و ادامه
+              <ICheck size={13} /> Approve &amp; continue
             </button>
             <button onClick={actions.reject} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-ink-800 border border-ink-600 text-ink-200 text-[11.5px] font-bold hover:border-ember/60 hover:text-ember transition-colors cursor-pointer">
-              <IX size={13} /> رد
+              <IX size={13} /> Reject
             </button>
           </div>
         </div>
@@ -711,11 +773,11 @@ function CanvasInner() {
 
       {/* empty state */}
       {booted && nodes.length === 0 && (
-        <div dir="rtl" className="absolute inset-0 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="text-center anim-rise">
             <IPlay size={28} className="mx-auto text-ink-500 mb-3" />
-            <p className="text-ink-300 font-bold">بوم خالی است</p>
-            <p className="text-ink-400 text-[12px] mt-1">از کتابخانه‌ی سمت راست، نودها را به اینجا بکشید</p>
+            <p className="text-ink-300 font-bold">The canvas is empty</p>
+            <p className="text-ink-400 text-[12px] mt-1">Drag nodes here from the library on the left</p>
           </div>
         </div>
       )}
