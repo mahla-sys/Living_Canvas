@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow, ReactFlowProvider, Background, BackgroundVariant, MiniMap, Controls,
   Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow, SelectionMode,
+  useStore as useFlowStore,
   type NodeProps, type EdgeProps, type NodeTypes, type EdgeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -374,8 +375,23 @@ function StrokesLayer({ strokes, live, liveColor, liveWidth, liveTool }: {
   liveTool: "pen" | "highlight";
 }) {
   const strokeWidth = (w: number, tool: "pen" | "highlight") => (tool === "highlight" ? w * 2.6 : w);
+  /* Children of <ReactFlow> are rendered as SIBLINGS of GraphView, which means outside .react-flow__viewport
+     — i.e. in screen coordinates (see the children position in @xyflow/react's GraphView render). But a
+     stroke's points are flow coordinates, because flow coordinates are what gets written to
+     `strokes/<id>.json`. The two only agree while the viewport is exactly {x:0, y:0, zoom:1}, and it never is
+     for long: the canvas runs fitView() 80ms after boot. So the layer has to apply the pan/zoom itself, and
+     without it every stroke lands somewhere the reader cannot see. */
+  const [vx, vy, vz] = useFlowStore((st) => st.transform);
   return (
-    <svg className="absolute inset-0 pointer-events-none" style={{ width: 1, height: 1, overflow: "visible", zIndex: 3 }}>
+    <svg
+      className="absolute inset-0 pointer-events-none"
+      data-lc-strokes
+      style={{
+        width: 1, height: 1, overflow: "visible", zIndex: 3,
+        transform: `translate(${vx}px, ${vy}px) scale(${vz})`,
+        transformOrigin: "0 0",
+      }}
+    >
       {strokes.map((s) => (
         <path
           key={s.id}
@@ -564,7 +580,10 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
 
 /* ---------------- canvas ---------------- */
 
-function CanvasInner() {
+/* Exported so a test can mount the canvas inside its own ReactFlowProvider and therefore reach the same
+   React Flow store the strokes layer reads. Without it, a test's provider is a *different* store and anything
+   it does to the viewport is invisible to the component under test. */
+export function CanvasInner() {
   const nodes = useStore((s) => s.nodes);
   const edges = useStore((s) => s.edges);
   const strokes = useStore((s) => s.strokes);

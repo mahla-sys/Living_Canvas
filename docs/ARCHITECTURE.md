@@ -173,22 +173,22 @@ src/
 ├── App.tsx                      93  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
 ├── state.ts                    534  L   ★ constants, types re-exports, factories, role schemas, seed
 ├── store.ts                    474  L   ★ zustand store + Actions façade (the only UI-facing API)
-├── index.css                   511  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
+├── index.css                   520  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
 │   ├── core.ts                1220  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
 │   ├── engine.ts              2257  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             3395  L   228 tests in 18 files (§7)
+│   └── __tests__/             3634  L   238 tests in 19 files (§7)
 └── components/
-    ├── CanvasArea.tsx          808  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
+    ├── CanvasArea.tsx          827  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
     ├── SidePanels.tsx          931  L   ★ library/files tabs, file tree, live folder tree, inspector
     ├── Overlays.tsx            970  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **12 280 lines** in 32 files (11 769 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **12 547 lines** in 33 files (12 027 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -543,12 +543,12 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 2 830 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 2 849 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
-| `CanvasArea.tsx` 808 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
+| `CanvasArea.tsx` 827 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
 | `SidePanels.tsx` 931 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
 | `Overlays.tsx` 970 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
@@ -1259,7 +1259,7 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **18 files, 228 tests**, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **19 files, 238 tests**, no config file (vitest reads `vite.config.js`).
 
 **On jsdom, a reversal worth stating plainly.** This section used to say the suite runs with no jsdom, and
 called that a principle. It was not one — it was a limitation dressed as a rule, and three bugs got through
@@ -1507,7 +1507,7 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 18 files / 228 tests
+npm test            vitest run            → 19 files / 238 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)
@@ -1518,6 +1518,9 @@ node scripts/doc-anchors.mjs     rewrites the `name 412` line anchors in §3.4 f
 node scripts/check-docs.mjs      the doc map's gate: frontmatter, legal statuses, every reference resolving
 node scripts/check-palette.mjs   the appearance gate: theme registry, WCAG contrast per theme, no colour literals
                                  outside the token blocks in src/index.css or in src/components/*.tsx
+node scripts/check-css.mjs       the layout-height gate: `html { height: 100% }` must be its own rule in the
+                                 source and must survive into dist/ — a selector list starting with a comma is
+                                 discarded whole, and without the height no panel can scroll
 node scripts/check-facts.mjs     regenerates every count the prose quotes (--check = exit 1 on a stale number)
 ```
 

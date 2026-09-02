@@ -134,7 +134,16 @@
   --color-lc-accent: #5ecfa8;
 }
 
-html,
+/* `html` must have its OWN rule. Written as `html, body, #root { … }`, the bundler emitted the list as
+   `,body,#root{…}` — the `html` selector dropped and the leading comma left behind. A selector list starting
+   with a comma is invalid, and CSS error recovery discards the *whole* rule, so body and #root silently lost
+   `height: 100%` too. With no bounded height anywhere in the app, no `overflow-y: auto` container can ever
+   scroll: adding `min-h-0` to the scrollers fixed nothing, because the missing height was three levels up.
+   `scripts/check-css.mjs` fails the build if this is ever merged back into one rule. */
+html {
+  height: 100%;
+}
+
 body,
 #root {
   height: 100%;

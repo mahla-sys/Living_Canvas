@@ -22,7 +22,7 @@ and the app reads your edits back.** Files are the source of truth; in-memory st
 ```bash
 npm install
 npm run dev         # http://localhost:3000  (binds 0.0.0.0, accepts any host for sandboxed previews)
-npm test            # vitest run — 18 files / 228 tests, no jsdom, no extra config file
+npm test            # vitest run — 19 files / 238 tests, no jsdom, no extra config file
 npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
 npm run build       # tsc --noEmit && vite build — types are part of the build
 node scripts/check-english.mjs   # the language rule above, as CI runs it
@@ -67,7 +67,7 @@ src/
 ├── lib/engine.ts                behaviour: events · files · memory · execution · strokes · portability
 ├── lib/portable.ts              the export bundle + rebuilding a canvas from its files
 ├── lib/fs-access.ts             the File System Access adapter (a real folder on disk)
-├── lib/__tests__/               228 tests, production code only (no fixtures that reimplement a serialiser)
+├── lib/__tests__/               238 tests, production code only (no fixtures that reimplement a serialiser)
 └── components/                  CanvasArea · SidePanels · Overlays · icons
 ```
 

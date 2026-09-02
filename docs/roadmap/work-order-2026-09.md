@@ -1,0 +1,56 @@
+---
+title: Work order — round of 2026-09-02
+status: active
+updated: 2026-09-02
+sources: [scripts/check-css.mjs, src/components/CanvasArea.tsx, src/lib/__tests__/drawing.test.tsx, src/lib/__tests__/interactive.test.tsx, docs/decisions/adr-014-layout-height-is-a-build-contract.md]
+---
+
+# Work order — round of 2026-09-02
+
+Written **before** any code this round. The order is the reader's. Status is set only after an item is
+verified against its own acceptance criteria. Undecided items live in [`../inbox.md`](../inbox.md).
+
+## 1. Defects
+
+| | Defect | Root cause | Status |
+|---|---|---|---|
+| 1a | left/right panels do not scroll | the bundler dropped `html` from `html, body, #root { height: 100% }`, leaving `,body,#root{…}` — an invalid list the browser discards whole, so nothing in the app had a bounded height | ✅ fixed, `adr-014` |
+| 1b | drawing produces nothing | `StrokesLayer` painted flow coordinates outside `.react-flow__viewport`, i.e. in screen space; `fitView()` 80 ms after boot means the viewport is never identity | ✅ fixed |
+| 1c | panel resize must not break layout | no defect found; close/dock deferred | ✅ verified |
+
+**1a** is the one worth naming. The classes on every scroller were already correct, which is why adding
+`min-h-0` changed nothing — the missing height was three levels up and the *source* looked right. Verified
+against the built stylesheet, where the count of `html{…height:100%…}` was **0**. Guarded now by
+`scripts/check-css.mjs`, which reads `dist/` and not only the source; mutation-tested both ways.
+
+**1b** was found by reading `@xyflow/react`'s own output: it renders user `children` as *siblings* of
+`GraphView`, outside the transform. The layer now applies `translate(x, y) scale(z)` from the React Flow
+store. Coordinates stay in flow space, because flow coordinates are what `strokes/<id>.json` holds.
+
+**Honest limit, both items.** jsdom does no layout, so `scrollHeight > clientHeight` cannot be measured here,
+and no browser is installable in this sandbox (`playwright install` fails at the download). The CSS contract
+is verified and mutation-tested; the rendered geometry is not.
+
+## 2. Features, in the reader's order
+
+| # | Feature | ADR | Status |
+|---|---|---|---|
+| 2.1 | Run Scope — Selected / From / Until | `adr-012` | ✅ 12 tests |
+| 2.2 | Inspector tabs — Status / Diary / Logs | `adr-015` (to write) | ⬜ next |
+| 2.3 | Run controls — Run / Pause / Step / Stop | `adr-013` | ✅ 11 tests |
+| 2.4 | Left-panel search + status icons | `adr-016` (to write) | ⬜ |
+
+2.2's **Status** tab shows real execution data only. CPU/memory stays deferred — browsers expose no CPU
+figure, and `performance.memory` is Chrome-only and approximate. Registered as inbox item 1.
+
+2.4's status glyphs derive from `execution` and `agent.status` that already exist; nothing is invented.
+
+## 3. Test policy
+
+Every item ships with a test named for the behaviour it protects, and every fix is **mutation-tested**: the
+bug goes back in and the test must fail. Both fixes this round were. A test that cannot fail is not a test.
+
+## 4. Theme architecture
+
+Unchanged and re-verified: one `:root[data-theme="…"]` block plus one `THEMES` entry, measured by the palette
+gate. Role tokens are the seam a future user-editable accent plugs into (inbox item 3).

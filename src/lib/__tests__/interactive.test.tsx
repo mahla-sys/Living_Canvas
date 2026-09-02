@@ -11,6 +11,9 @@
    The existing suite stays on the node environment and is untouched: the `@vitest-environment` docblock at
    the top of this file is per-file, so jsdom is loaded for these tests only.
    ============================================================ */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -20,6 +23,7 @@ import { LeftPanel, RightPanel } from "../../components/SidePanels";
 import { TopBar, ChatPanel, SettingsModal, StatusBar } from "../../components/Overlays";
 import { makeNodeData, makeAgentConfig } from "../../state";
 import type { RFNode } from "../../state";
+
 
 /* React Flow measures itself with APIs jsdom does not implement. These are not stubs of the code under test —
    they are the browser surface the library expects to exist. */
@@ -45,6 +49,57 @@ afterEach(() => cleanup());
 
 const agentNode = (id: string, title: string): RFNode =>
   ({ id, position: { x: 40, y: 40 }, selected: false, data: makeNodeData("agent", title, "mahla", { agent: makeAgentConfig(id, "risk-analyst") }) }) as RFNode;
+
+/* ---------------------------------------------------------------- scrolling
+   jsdom does no layout at all: `scrollHeight` and `clientHeight` are both 0 for every element, so asserting
+   `scrollHeight > clientHeight` here would be asserting a stub against a stub. What *is* assertable is the
+   precondition — the CSS contract a flex child needs in order to scroll — and that contract is exactly what
+   broke. The real failure was not in the scrollers at all: `src/index.css` declared
+   `html, body, #root { height: 100% }` and the bundler emitted `,body,#root{…}`, an invalid selector list
+   that the browser discards whole. With no bounded height anywhere, no `overflow-y: auto` container can ever
+   scroll, and no amount of `min-h-0` on the scrollers would have helped. `scripts/check-css.mjs` guards the
+   stylesheet; this test guards the components. */
+describe("the panel scrollers carry the contract a flex child needs in order to scroll", () => {
+  it("the left panel is a bounded flex column with a scrollable body", () => {
+    const { container } = render(<LeftPanel />);
+    const aside = container.querySelector("aside")!;
+    expect(aside).toBeInTheDocument();
+    expect(aside.className).toContain("flex-col");
+    expect(aside.className).toContain("h-full"); // bounded height, inherited from #root
+    expect(aside.className).toContain("min-h-0");
+    expect(aside.className).toContain("overflow-hidden"); // the aside clips; the child scrolls
+
+    const scroller = aside.querySelector<HTMLElement>('[class*="overflow-y-auto"]')!;
+    expect(scroller).toBeTruthy();
+    expect(scroller.className).toContain("flex-1");
+    expect(scroller.className).toContain("min-h-0"); // without this a flex child refuses to shrink below its content
+    expect(scroller.className).toContain("overscroll-contain");
+    expect(scroller.className).not.toContain("overflow-hidden");
+  });
+
+  it("the right panel is a bounded flex column with a scrollable body", () => {
+    const { container } = render(<RightPanel />);
+    const aside = container.querySelector("aside")!;
+    expect(aside.className).toContain("flex-col");
+    expect(aside.className).toContain("h-full");
+    expect(aside.className).toContain("min-h-0");
+
+    const scroller = aside.querySelector<HTMLElement>('[class*="overflow-y-auto"]')!;
+    expect(scroller).toBeTruthy();
+    expect(scroller.className).toContain("flex-1");
+    expect(scroller.className).toContain("min-h-0");
+  });
+
+  it("the height chain the scrollers depend on is declared, and `html` is not merged into it", () => {
+    /* Read the real stylesheet rather than trusting a description of it. This is the regression that made
+       both panels unscrollable while every class on the scrollers looked correct. */
+    const here = dirname(fileURLToPath(import.meta.url));
+    const css = readFileSync(resolve(here, "../../index.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(css).toMatch(/html\s*\{[^}]*height:\s*100%/);
+    expect(css).toMatch(/body,\s*#root\s*\{[^}]*height:\s*100%/);
+    expect(css).not.toMatch(/html\s*,\s*body/);
+  });
+});
 
 /* ---------------------------------------------------------------- panels */
 describe("the side panels open and close", () => {
