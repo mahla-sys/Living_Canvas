@@ -39,6 +39,7 @@ is verified and mutation-tested; the rendered geometry is not.
 | 2.2 | Inspector tabs — Status / Diary / Logs | `adr-015` | ✅ 12 tests |
 | 2.3 | Run controls — Run / Pause / Step / Stop | `adr-013` | ✅ 11 tests |
 | 2.4 | Left-panel search + status icons | `adr-016` | ✅ 13 tests |
+| 2.5 | Status bar in words, not enums | `adr-017` | ✅ 7 tests |
 
 2.2's **Status** tab shows real execution data only. CPU/memory stays deferred — browsers expose no CPU
 figure, and `performance.memory` is Chrome-only and approximate. Registered as inbox item 1. It carries four
@@ -54,6 +55,13 @@ second time this round that mutation-testing found a hole in a test rather than 
 hands zustand a fresh array on every call and its equality is `Object.is`, so the component re-rendered
 forever; and an absence assertion written with `getByText` throws instead of returning null, so it failed for
 the wrong reason.
+
+2.5 also fixed a visible defect found while reading the bar: the TopBar subtitle printed the application name
+a second time, directly under the application name. A test now counts it and requires exactly one.
+
+An existing test in `layout-render.test.ts` asserted the old machine-facing `run: idle`. It was updated
+rather than deleted, because the assertion it made — that the right half names the run — is still the point;
+only the expected wording changed.
 
 ## 3. Test policy
 

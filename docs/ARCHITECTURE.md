@@ -180,15 +180,15 @@ src/
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             4013  L   263 tests in 21 files (§7)
+│   └── __tests__/             4120  L   270 tests in 22 files (§7)
 └── components/
     ├── CanvasArea.tsx          827  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
     ├── SidePanels.tsx          1148  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx            970  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    ├── Overlays.tsx            986  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **13 153 lines** in 35 files (12 633 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **13 276 lines** in 36 files (12 756 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -543,14 +543,14 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 3 066 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 3 082 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
 | `CanvasArea.tsx` 827 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
 | `SidePanels.tsx` 1148 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
-| `Overlays.tsx` 970 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
+| `Overlays.tsx` 986 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 121 | 30+ inline SVGs | no icon library |
 
 ---
@@ -1259,7 +1259,7 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **21 files, 263 tests**, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **22 files, 270 tests**, no config file (vitest reads `vite.config.js`).
 
 **On jsdom, a reversal worth stating plainly.** This section used to say the suite runs with no jsdom, and
 called that a principle. It was not one — it was a limitation dressed as a rule, and three bugs got through
@@ -1507,7 +1507,7 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 21 files / 263 tests
+npm test            vitest run            → 22 files / 270 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)

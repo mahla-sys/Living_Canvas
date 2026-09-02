@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { roleById, APP_VERSION, type RFNode } from "../state";
+import { roleById, APP_VERSION, type RFNode, type AppState } from "../state";
 import { fmtClock, fmtDate, EMPTY_ARR, THEMES, GRID_GAP, STATUS_BAR_HEIGHT, type BusEvent, type ChatMsg } from "../lib/core";
 import {
   IPlay, IStop, ICamera, IHistory, IGear, IChat, IX, ISend, ICheck, IWarn,
@@ -16,15 +16,24 @@ import { isFsAccessSupported } from "../lib/fs-access";
    One is read back from files on every boot; the other is gone when the tab closes. A reader should be able
    to tell which is which without being told. */
 
-const RUN_TONE: Record<string, string> = {
-  idle: "text-ink-500",
-  running: "text-lc-accent",
+/* Every execution state gets a sentence, and the table is a total Record on purpose (ADR-017): if a value is
+   added to `ExecutionState["status"]` and nobody writes its phrase, TypeScript refuses to build. A lookup with
+   a fallback would have quietly printed the raw enum to the reader instead. */
+/* `saveState` gets the same treatment: "saved" is a value in the store, not something a reader parses. */
+const SAVE_PHRASE: Record<AppState["saveState"], string> = {
+  saved: "All changes saved",
+  saving: "Saving…",
+};
+
+const STATUS_PHRASE: Record<AppState["execution"]["status"], { label: string; tone: string }> = {
+  idle: { label: "Ready — nothing running", tone: "text-ink-500" },
+  running: { label: "Running", tone: "text-lc-accent" },
   // paused and waiting are "this needs you", not "this is live" — that is the warn role, not the accent
-  paused: "text-lc-warn",
-  waiting_approval: "text-lc-warn",
-  completed: "text-sage",
-  failed: "text-ember",
-  stopped: "text-ember",
+  paused: { label: "Paused — press Resume to continue", tone: "text-lc-warn" },
+  waiting_approval: { label: "Waiting for your approval", tone: "text-lc-warn" },
+  completed: { label: "Run finished", tone: "text-sage" },
+  failed: { label: "Run failed — see the log", tone: "text-ember" },
+  stopped: { label: "Run stopped", tone: "text-ember" },
 };
 
 export function StatusBar() {
@@ -37,6 +46,8 @@ export function StatusBar() {
   const rightOpen = useStore((s) => s.canvas.layout.rightOpen);
   const focus = useStore((s) => s.ui.focusMode);
   const chordDepth = useStore((s) => s.ui.chordDepth);
+  const queue = useStore((s) => s.execution.queue);
+  const completed = useStore((s) => s.execution.completed.length);
   const actions = useStore((s) => s.actions);
   const mode = storageMode();
 
@@ -56,7 +67,7 @@ export function StatusBar() {
             leftOpen ? "border-ink-600 text-ink-200 hover:border-lc-accent/60" : "border-ink-700 text-ink-500 hover:text-ink-200"
           }`}
         >
-          {leftOpen ? "◧ Library" : "▫ Library"}
+          {leftOpen ? "Library on" : "Library off"}
         </button>
         <span className="truncate text-[10px] font-bold text-ink-200">{title}</span>
         <span className={chip}>{nodeCount} nodes</span>
@@ -82,8 +93,14 @@ export function StatusBar() {
             Focus mode — Esc Esc
           </button>
         )}
-        <span className={`text-[9.5px] font-bold ${RUN_TONE[status] ?? "text-ink-500"}`}>run: {status}</span>
-        <span className={chip}>{saveState}</span>
+        {/* the phrase, not the enum — and the queue position while there is a queue to be in */}
+        <span className={`text-[9.5px] font-bold ${STATUS_PHRASE[status].tone}`} data-lc-run-phrase>
+          {STATUS_PHRASE[status].label}
+          {queue.length > 0 && (status === "running" || status === "paused") && (
+            <span className="font-mono text-ink-400 ms-1.5">{completed} of {queue.length}</span>
+          )}
+        </span>
+        <span className={chip} title="Whether the last change reached the files">{SAVE_PHRASE[saveState]}</span>
         <button
           onClick={() => actions.togglePanel("right")}
           title={`${rightOpen ? "Hide" : "Show"} the inspector`}
@@ -91,7 +108,7 @@ export function StatusBar() {
             rightOpen ? "border-ink-600 text-ink-200 hover:border-lc-accent/60" : "border-ink-700 text-ink-500 hover:text-ink-200"
           }`}
         >
-          {rightOpen ? "Inspector ▨" : "Inspector ▫"}
+          {rightOpen ? "Inspector on" : "Inspector off"}
         </button>
       </div>
     </div>
@@ -132,8 +149,7 @@ export function TopBar() {
         <Logo />
         <div className="leading-none">
           <p className="font-display text-[19px] text-ink-50 tracking-wide">Living Canvas</p>
-          <p className="text-[9px] text-ink-400 mt-0.5 flex items-center gap-1.5">
-            Living Canvas
+          <p className="text-[9px] text-ink-400 mt-0.5 flex items-center gap-1.5" data-lc-topbar-subtitle>
             <span className="font-mono text-ink-300 px-1 py-px rounded bg-ink-800 border border-ink-700">v{APP_VERSION}</span>
             <span className="w-1 h-1 rounded-full bg-ink-500" />
             doc <span className="font-mono">1.3</span>
