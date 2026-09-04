@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useStore, buildFileContent } from "../store";
-import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT, NODE_COLORS } from "../state";
+import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT, NODE_COLORS, makeAgentConfig } from "../state";
 import type { RFNode } from "../state";
-import { storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType } from "../lib/core";
+import { storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType, fmtClock, EMPTY_ARR, type ChatMsg } from "../lib/core";
 import {
   IBrain, IBox, IFile, IFolder, IChevD, IChevR, ITrash, IPlay, IChat, ILock,
   ISpark, IDatabase, IHistory, IX, IEye, INode, IPulse, ICheck, IStop, IWarn,
+  ISend, IGear,
 } from "./icons";
 
 /* lc-data-colour: the picker writes the chosen value into the node file, so these are canvas data, not
@@ -1107,15 +1108,232 @@ function CanvasInspector() {
   );
 }
 
+/* ================= chat panel (docked in right sidebar) ================= */
+
+export function ChatPanel() {
+  const chatNodeId = useStore((s) => s.ui.chatNodeId);
+  const nodes = useStore((s) => s.nodes);
+  const agentNodes = useMemo(() => nodes.filter((n) => n.data.nodeType === "agent"), [nodes]);
+  const node = useStore((s): RFNode | undefined => s.nodes.find((n) => n.id === s.ui.chatNodeId));
+  const msgs = useStore((s): ChatMsg[] => (s.ui.chatNodeId ? s.chats[s.ui.chatNodeId] ?? EMPTY_ARR : EMPTY_ARR));
+  const typing = useStore((s) => (s.ui.chatNodeId ? s.typing[s.ui.chatNodeId] ?? false : false));
+  const actions = useStore((s) => s.actions);
+  const [text, setText] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [msgs.length, typing, chatNodeId]);
+
+  if (!chatNodeId || !node) {
+    return (
+      <div data-lc-chatpanel className="flex flex-col h-full min-h-[360px] anim-fade p-4 text-center justify-center items-center">
+        <IChat size={28} className="text-lc-accent/70 mb-2.5" />
+        <p className="text-[13px] font-extrabold text-ink-100">AI Agent Chat</p>
+        <p className="text-[10.5px] text-ink-400 mt-1 max-w-[240px] leading-5">
+          Select an agent from below or on the canvas to open a docked conversation.
+        </p>
+        {agentNodes.length > 0 ? (
+          <div className="mt-4 w-full max-w-[260px] space-y-1.5 text-start">
+            <p className="text-[9.5px] font-bold text-ink-400 uppercase tracking-wider px-1">Active Agents</p>
+            {agentNodes.map((an) => (
+              <button
+                key={an.id}
+                onClick={() => actions.setChatNode(an.id)}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-ink-850 border border-ink-700 hover:border-lc-accent/60 text-ink-200 text-start text-[11.5px] transition-colors cursor-pointer"
+              >
+                <IBrain size={14} style={{ color: an.data.color }} className="shrink-0" />
+                <span className="truncate font-semibold flex-1">{an.data.title}</span>
+                <span className="text-[9px] font-mono text-ink-500 shrink-0">{an.data.agent?.role_id}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button
+            onClick={() => {
+              void actions.addNode("agent", { x: 100, y: 100 }).then((id) => {
+                actions.updateNodeData(id, { title: "Canvas Manager", agent: makeAgentConfig(id, "manager") });
+                actions.setChatNode(id);
+              });
+            }}
+            className="mt-4 flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-lc-accent/15 border border-lc-accent/50 text-lc-accent text-[11.5px] font-bold hover:bg-lc-accent/25 transition-colors cursor-pointer"
+          >
+            <ISpark size={13} /> Spawn Canvas Manager Copilot
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const agent = node.data.agent;
+  const role = agent ? roleById(agent.role_id) : null;
+
+  const send = () => {
+    const t = text.trim();
+    if (!t || typing) return;
+    setText("");
+    actions.chat(chatNodeId, t);
+  };
+
+  return (
+    <div data-lc-chatpanel className="flex flex-col h-full max-h-full min-h-0 bg-ink-900 overflow-hidden anim-fade">
+      {/* Chat header */}
+      <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-ink-700 bg-ink-850 shrink-0">
+        <span
+          className="w-8 h-8 rounded-[9px] flex items-center justify-center shrink-0"
+          style={{ background: `${node.data.color}1a`, color: node.data.color, border: `1px solid ${node.data.color}40` }}
+        >
+          <IChat size={15} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <select
+              value={chatNodeId}
+              onChange={(e) => actions.setChatNode(e.target.value)}
+              className="bg-transparent text-[12.5px] font-extrabold text-ink-50 focus:outline-none border-b border-transparent focus:border-lc-accent/50 max-w-[150px] truncate cursor-pointer"
+            >
+              {agentNodes.map((an) => (
+                <option key={an.id} value={an.id} className="bg-ink-900 text-ink-100">
+                  {an.data.title}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-[9.5px] text-ink-400 flex items-center gap-1.5 mt-0.5 truncate">
+            {role ? `role: ${role.name}` : "Agent"}
+            {agent && <span className="font-mono text-ink-500">· {agent.model}</span>}
+          </p>
+        </div>
+        <button
+          data-lc-chat-close
+          onClick={() => actions.setChatNode(null)}
+          title="Close chat"
+          aria-label={`Close the chat with ${node.data.title}`}
+          className="ms-auto shrink-0 w-7 h-7 grid place-items-center rounded-lg border border-ink-600 bg-ink-800 text-ink-200 hover:text-ember hover:border-ember/60 transition-colors cursor-pointer"
+        >
+          <IX size={14} />
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3.5 space-y-2.5 lc-panel-scroller">
+        {msgs.length === 0 && (
+          <div className="text-center py-6 anim-fade">
+            <ISpark size={22} className="mx-auto text-lc-accent/60 mb-2" />
+            <p className="text-[11.5px] text-ink-300 font-bold">Conversation with {node.data.title}</p>
+            <p className="text-[10.5px] text-ink-400 mt-1 leading-5">
+              {agent ? "The agent operates strictly within its context contract." : "Write a prompt to begin."}
+            </p>
+            {agent && (
+              <div className="mt-3 space-y-1.5 text-start">
+                {[
+                  "What is your core mission and output contract?",
+                  "What inputs and predecessors do you require?",
+                  role?.id === "manager" ? "Analyze the canvas and build a multi-agent system." : "How will you evaluate your step's success?",
+                ].map((q) => (
+                  <button
+                    key={q}
+                    onClick={() => actions.chat(chatNodeId, q)}
+                    className="block w-full text-start text-[10.5px] px-2.5 py-1.5 rounded-lg bg-ink-850 border border-ink-600 text-ink-300 hover:border-lc-accent/50 hover:text-lc-accent transition-colors cursor-pointer"
+                  >
+                    {q}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {msgs.map((m, i) => (
+          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} anim-rise`}>
+            <div
+              className={`max-w-[88%] px-3 py-2 rounded-xl text-[11.5px] leading-5 ${
+                m.role === "user"
+                  ? "bg-lc-accent/15 border border-lc-accent/35 text-ink-100 rounded-br-sm"
+                  : "bg-ink-800 border border-ink-600 text-ink-200 rounded-bl-sm"
+              }`}
+            >
+              <p className="whitespace-pre-wrap break-words">{m.text}</p>
+              <p className="text-[8.5px] text-ink-500 mt-1 text-end">{fmtClock(m.at)}</p>
+            </div>
+          </div>
+        ))}
+        {typing && (
+          <div className="flex justify-start anim-fade">
+            <div className="px-3.5 py-2.5 rounded-2xl rounded-bl-sm bg-ink-800 border border-ink-600 flex items-center gap-1">
+              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-lc-accent" />
+              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-lc-accent" />
+              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-lc-accent" />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input area */}
+      <div className="p-2.5 border-t border-ink-700 bg-ink-850 shrink-0">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            send();
+          }}
+          className="flex items-end gap-1.5"
+        >
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+            placeholder={`Message ${node.data.title}…`}
+            rows={1}
+            className="flex-1 resize-none max-h-24 bg-ink-900 border border-ink-600 focus:border-lc-accent rounded-lg px-2.5 py-1.5 text-[11.5px] text-ink-100 placeholder:text-ink-500 focus:outline-none transition-colors"
+          />
+          <button
+            type="submit"
+            disabled={!text.trim() || typing}
+            aria-label="Send message"
+            className="h-[33px] px-3 rounded-lg bg-lc-accent text-ink-950 font-bold hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer flex items-center justify-center shrink-0"
+          >
+            <ISend size={14} />
+          </button>
+        </form>
+        <div className="flex items-center justify-between text-[9px] text-ink-500 mt-1 px-0.5">
+          <span>Enter ↵ to send · Shift+Enter for newline</span>
+          <span className="font-mono truncate max-w-[120px]">chats/chat-{node.id}.md</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function RightPanel() {
   const selectedNode = useStore((s) => s.nodes.find((n) => n.selected));
   const selectedEdge = useStore((s) => s.edges.find((e) => e.selected));
+  const chatNodeId = useStore((s) => s.ui.chatNodeId);
   const open = useStore((s) => s.canvas.layout.rightOpen);
   const width = useStore((s) => s.canvas.layout.rightWidth);
   const focus = useStore((s) => s.ui.focusMode);
+  const actions = useStore((s) => s.actions);
+  const [panelMode, setPanelMode] = useState<"inspector" | "chat" | "canvas">("inspector");
   const scrollerRef = useRef<HTMLDivElement>(null);
 
+  // Sync mode with selections and chat
+  useEffect(() => {
+    if (chatNodeId) {
+      setPanelMode("chat");
+    }
+  }, [chatNodeId]);
+
+  useEffect(() => {
+    if (selectedNode || selectedEdge) {
+      if (!chatNodeId) setPanelMode("inspector");
+    }
+  }, [selectedNode?.id, selectedEdge?.id]);
+
   if (focus || !open) return null;
+
   return (
     <>
     <ResizeHandle side="right" />
@@ -1128,12 +1346,77 @@ export function RightPanel() {
       }}
       className="shrink-0 border-s border-ink-700 bg-ink-900/80 flex flex-col h-full max-h-full min-h-0 overflow-hidden"
     >
+      {/* Top navigation tabs for RightPanel */}
+      <div className="flex items-center border-b border-ink-700 bg-ink-850 shrink-0 px-1 py-1" data-lc-rightpanel-tabs>
+        <button
+          onClick={() => {
+            setPanelMode("inspector");
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
+            panelMode === "inspector"
+              ? "bg-ink-750 text-lc-accent shadow-sm"
+              : "text-ink-400 hover:text-ink-200"
+          }`}
+        >
+          <INode size={12} />
+          <span className="truncate">{selectedNode ? "Node" : selectedEdge ? "Edge" : "Inspector"}</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setPanelMode("chat");
+            if (!chatNodeId) {
+              if (selectedNode?.data.nodeType === "agent") {
+                actions.setChatNode(selectedNode.id);
+              } else {
+                const firstAgent = useStore.getState().nodes.find((n) => n.data.nodeType === "agent");
+                if (firstAgent) actions.setChatNode(firstAgent.id);
+              }
+            }
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
+            panelMode === "chat"
+              ? "bg-ink-750 text-lc-accent shadow-sm"
+              : "text-ink-400 hover:text-ink-200"
+          }`}
+        >
+          <IChat size={12} />
+          <span>Chat</span>
+          {chatNodeId && <span className="w-1.5 h-1.5 rounded-full bg-lc-accent" />}
+        </button>
+
+        <button
+          onClick={() => {
+            setPanelMode("canvas");
+          }}
+          className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
+            panelMode === "canvas"
+              ? "bg-ink-750 text-lc-accent shadow-sm"
+              : "text-ink-400 hover:text-ink-200"
+          }`}
+        >
+          <IGear size={12} />
+          <span className="truncate">Canvas</span>
+        </button>
+      </div>
+
+      {/* Main panel body */}
       <div
         ref={scrollerRef}
         data-lc-panel-scroller="right"
-        className="flex-1 min-h-0 overflow-y-auto overscroll-contain lc-panel-scroller"
+        className="flex-1 min-h-0 overflow-y-auto overscroll-contain lc-panel-scroller flex flex-col"
       >
-        {selectedNode ? <NodeInspector node={selectedNode} /> : selectedEdge ? <EdgeInspector edgeId={selectedEdge.id} /> : <CanvasInspector />}
+        {panelMode === "chat" ? (
+          <ChatPanel />
+        ) : panelMode === "canvas" ? (
+          <CanvasInspector />
+        ) : selectedNode ? (
+          <NodeInspector node={selectedNode} />
+        ) : selectedEdge ? (
+          <EdgeInspector edgeId={selectedEdge.id} />
+        ) : (
+          <CanvasInspector />
+        )}
       </div>
     </aside>
     </>

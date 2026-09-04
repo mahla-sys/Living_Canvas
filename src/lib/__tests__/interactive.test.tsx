@@ -166,7 +166,7 @@ describe("the panels and the modals actually scroll", () => {
 
   it("right panel", () => {
     const { container } = render(<RightPanel />);
-    scroller(container.querySelector("aside > div"));
+    scroller(container.querySelector("aside > div:nth-of-type(2)"));
   });
 
   it("the settings modal — the one that was reported as unscrollable", () => {
@@ -204,17 +204,15 @@ describe("the chat panel can be closed", () => {
     expect(useStore.getState().ui.chatNodeId).toBeNull();
   });
 
-  it("sits beside the inspector rather than over the middle of the canvas", () => {
-    useStore.setState((s) => ({ canvas: { ...s.canvas, layout: { ...s.canvas.layout, rightWidth: 420, rightOpen: true } } }));
-    const { container } = render(<ChatPanel />);
+  it("renders within the right panel with tabs rather than floating over the canvas", () => {
+    useStore.setState((s) => ({
+      canvas: { ...s.canvas, layout: { ...s.canvas.layout, rightWidth: 380, rightOpen: true } },
+      ui: { ...s.ui, chatNodeId: "a" },
+    }));
+    const { container } = render(<RightPanel />);
     const panel = container.querySelector<HTMLElement>("[data-lc-chatpanel]");
-    // 420 + 14 — derived from the layout, not the hardcoded 306 that put it in the middle of the screen
-    expect(panel!.style.insetInlineEnd).toBe("434px");
-
-    useStore.setState((s) => ({ canvas: { ...s.canvas, layout: { ...s.canvas.layout, rightOpen: false } } }));
-    const wide = render(<ChatPanel />);
-    const flush = wide.container.querySelector<HTMLElement>("[data-lc-chatpanel]");
-    expect(flush!.style.insetInlineEnd).toBe("14px");
+    expect(panel).toBeInTheDocument();
+    expect(container.querySelector("[data-lc-rightpanel-tabs]")).toBeInTheDocument();
   });
 });
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ReactFlow, ReactFlowProvider, Background, BackgroundVariant, MiniMap, Controls,
+  ReactFlow, ReactFlowProvider, Background, BackgroundVariant,
   Handle, Position, EdgeLabelRenderer, getBezierPath, useReactFlow, SelectionMode,
   useStore as useFlowStore,
   type NodeProps, type EdgeProps, type NodeTypes, type EdgeTypes,
@@ -88,6 +88,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   // why the run refused this node (§3.6) — the executor's refusal is the interesting part of a
   // non-deterministic pipeline, so it belongs on the card, not only in a console the user has to open
   const failReason = useStore((s) => s.execution.errors[id] ?? "");
+  const typing = useStore((s) => s.typing[id]);
   const actions = useStore((s) => s.actions);
   /* double-click editing, markdown mode only — see the note at the render site */
   const [draft, setDraft] = useState<string | null>(null);
@@ -108,6 +109,26 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
       className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""}`}
       style={breathe ? breatheDur : undefined}
     >
+      {/* Ghost Cursor */}
+      {(running || typing) && (
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 z-50 pointer-events-none flex items-center gap-2 animate-bounce">
+          <div className="bg-lc-accent/10 backdrop-blur-md border border-lc-accent/40 text-lc-accent text-[11px] font-mono px-3 py-1.5 rounded-full flex items-center gap-2 shadow-lg">
+            <span className="w-1.5 h-1.5 rounded-full bg-lc-accent animate-pulse" />
+            {data.agent?.role_id || "agent"}@{typing ? "typing..." : "thinking..."}
+          </div>
+        </div>
+      )}
+
+      {/* Ambient glow when running */}
+      {running && (
+        <div 
+          className="absolute inset-[-10px] z-[-1] pointer-events-none rounded-[inherit] opacity-40 animate-pulse"
+          style={{
+            boxShadow: `0 0 35px 10px ${data.color || "var(--color-lc-accent)"}`,
+          }}
+        />
+      )}
+      
       {/* Background shape backdrop with clip-path, border, boxShadow, fill */}
       <div
         className={`absolute inset-0 pointer-events-none transition-shadow duration-200 ${data.style.fillStyle === "empty" ? "lc-card-empty" : "lc-card-surface"}`}
@@ -752,12 +773,6 @@ export function CanvasInner() {
           liveWidth={drawCfg().width}
           liveTool={drawToolNow === "highlight" ? "highlight" : "pen"}
         />
-        <MiniMap
-          position="top-right"
-          pannable zoomable
-          nodeColor={(n) => (n.data as LCNodeData).color}
-        />
-        <Controls position="bottom-left" showInteractive={false} />
       </ReactFlow>
 
       {drawMode && (

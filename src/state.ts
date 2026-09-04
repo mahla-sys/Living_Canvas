@@ -4,7 +4,7 @@
 import type { Node, Edge } from "@xyflow/react";
 import {
   DEFAULT_THEME, DEFAULT_MODEL, isThemeId, readSettingsLocal,
-  PANEL_DEFAULT_LEFT, PANEL_DEFAULT_RIGHT,
+  PANEL_DEFAULT_LEFT, PANEL_DEFAULT_RIGHT
 } from "./lib/core";
 import type {
   LCNodeData, LCEdgeData, NodeType, ShapeKind, ViewMode,
@@ -186,7 +186,7 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
 /* Every entry must have an endpoint behind it (`resolveModelRoute`, ADR-008). `glm-4-flash` was removed
    rather than left to 400 and degrade to the simulator: a dropdown that offers a model the app cannot
    reach is the same lie as a validator nobody runs. Adding it back is one row in that table. */
-export const MODELS = [DEFAULT_MODEL, "ollama:qwen2.5"];
+export const MODELS = [DEFAULT_MODEL, "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"];
 
 /* ---------------- roles (§3.8) ---------------- */
 
@@ -240,6 +240,26 @@ export const ROLES: RoleDef[] = [
     model: "deepseek-chat",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "decision", "approval_request"],
+  },
+  {
+    id: "manager",
+    name: "Living Canvas Manager",
+    description: "An AI Copilot with full access to modify the canvas structure and UI.",
+    system_prompt:
+      "You are the Manager agent for Living Canvas. You have full access to UI tools (get_ui_state, capture_canvas_snapshot) and graph manipulation tools (create_node, create_edge, etc.). Your job is to listen to the user and dynamically build, route, or restructure the pipeline they need. You act as an executive orchestrator.",
+    model: "deepseek-chat",
+    tools: ["get_ui_state", "capture_canvas_snapshot", "create_node", "update_node", "delete_node", "create_edge", "update_edge", "delete_edge", "read_memory", "write_memory", "write_output", "get_canvas_overview", "chat_with_user"],
+    required_fields: ["summary"],
+  },
+  {
+    id: "builder",
+    name: "System Builder",
+    description: "An agent that helps the Manager write code or create specific node contents.",
+    system_prompt:
+      "You are a System Builder agent. You write code, draft node contents, and provide technical outputs based on the Manager's plan.",
+    model: "deepseek-chat",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "technical_plan"],
   },
 ];
 
@@ -310,6 +330,29 @@ export const ROLE_SCHEMAS: Record<string, unknown> = {
       approval_request: { type: "string", minLength: 20, description: "the exact question put to the human approver" },
     },
   },
+  "manager": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "manager output",
+    description: "The manager's summary of actions taken.",
+    type: "object",
+    required: ["summary"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: what actions were taken" },
+    },
+  },
+  "builder": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "builder output",
+    description: "The builder's technical output.",
+    type: "object",
+    required: ["summary", "technical_plan"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: summary of what was built" },
+      technical_plan: { type: "string", minLength: 20, description: "the technical implementation details or code" },
+    },
+  },
 };
 
 /** The canvas-relative path a role's schema lives at (§4.9). */
@@ -360,7 +403,7 @@ export function makeAgentConfig(nodeId: string, roleId: string, opts?: AgentConf
     max_tokens: 4000,
     require_approval: false,
     context_contract: {
-      allowed_read_paths: [
+      allowed_read_paths: roleId === "manager" ? ["nodes/", "edges/", "memory/", "outputs/", "logs/", "canvas-overview.md"] : [
         "canvas-overview.md",
         `nodes/${nodeId}.md`,
         `memory/agents/${nodeId}.md`,
@@ -369,7 +412,7 @@ export function makeAgentConfig(nodeId: string, roleId: string, opts?: AgentConf
         "outputs/*/summary.md",
         ...extraRead,
       ],
-      allowed_write_paths: [`outputs/${nodeId}/`, `memory/agents/${nodeId}.md`, `logs/${nodeId}/`],
+      allowed_write_paths: roleId === "manager" ? ["nodes/", "edges/", "memory/", "outputs/", "logs/", "canvas-overview.md"] : [`outputs/${nodeId}/`, `memory/agents/${nodeId}.md`, `logs/${nodeId}/`],
       output_contract: {
         format: "markdown",
         required_fields: [...role.required_fields],
@@ -446,7 +489,7 @@ export const emptyExecution = (): ExecutionState => ({
 });
 
 const SETTINGS_BASE: Settings = {
-  provider: "sim", apiKey: "", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,
+  provider: "mistral", apiKey: "HsRVetWmpgwTz613v2uIUPTeanfWQGho", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 };
 
@@ -498,34 +541,27 @@ export function buildSeed(owner: string) {
     color: "#6fb3c7",
     shape: "rectangle",
     content: [
-      "## This canvas is empty on purpose",
+      "## Living Canvas",
       "",
-      "Drag from the **library** on the left:",
-      "",
-      "1. a `note` for the goal you are trying to reach;",
-      "2. an `agent` node per step — each one carries its own contract (read paths, write paths, required output fields);",
-      "3. a `flow` edge from one to the next; put `{{ field <op> value }}` on an edge to gate the hop.",
-      "",
-      "Then press **Run**. Every step writes plain files under `canvases/<id>/` — `nodes/`, `outputs/`,",
-      "`memory/`, `logs/`, and one `runs/<run-id>.md` ledger — and the app reads them back, so Git and",
-      "Obsidian see the same thing this canvas does. State is the cache; the folder is the record.",
+      "A self-building visual programming workspace powered by AI agents.",
+      "Open the **Library** to add nodes, or ask the AI in the Chat tab.",
     ].join("\n"),
   });
 
   const memory = {
     global: makeMemDoc("memory/global.md", "Overall project status",
-      "- goal: not written yet\n- progress: nothing has run\n- important: the files in this folder are the record of this canvas", 0.5, "system"),
+      "- goal: (describe what you are building)\n- progress: fresh canvas\n- important: the files in this folder are the record of this canvas", 0.5, "system"),
     decisions: makeMemDoc("memory/decisions.md", "Key decisions",
       "- (empty: decisions recorded by a run or by you land here)", 0.5, "system"),
     progress: makeMemDoc("memory/progress.md", "Work in progress",
-      "# Done\n- (nothing yet)\n\n# In progress\n- (nothing yet)\n\n# Next\n- add the first node", 0.5, "system"),
+      "# Done\n- (nothing yet)\n\n# In progress\n- (nothing yet)\n\n# Next\n- Pick a role from the Library and drop it on the canvas", 0.5, "system"),
     user: makeMemDoc("memory/user.md", "User profile",
       `- name: ${owner}\n- working style: (tell the agents once, and they will remember it here)`, 0.6, "user"),
     agents: {},
   };
 
   const canvas: CanvasMeta = {
-    title: "Untitled canvas",
+    title: "Untitled Canvas",
     owner,
     canvas_type: "agent-pipeline",
     tags: [],
@@ -537,5 +573,7 @@ export function buildSeed(owner: string) {
     layout: { ...DEFAULT_LAYOUT },
   };
 
-  return { nodes: [mkNode("note-001", "lc", 80, 80, start)], edges: [] as RFEdge[], memory, canvas };
+  const n1 = mkNode(start.id as string, "lc", 150, 150, start);
+
+  return { nodes: [n1] as RFNode[], edges: [] as RFEdge[], memory, canvas };
 }

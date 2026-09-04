@@ -141,7 +141,7 @@ export interface Toast {
 }
 
 export interface Settings {
-  provider: "sim" | "deepseek";
+  provider: "sim" | "deepseek" | "ollama" | "mistral";
   apiKey: string;
   model: string;
   owner: string;
@@ -261,6 +261,7 @@ export function clearSettingsLocal(): void {
    left the list instead of gaining a placeholder URL (docs/ARCHITECTURE.md §9.1). */
 export const DEEPSEEK_BASE = "https://api.deepseek.com";
 export const OLLAMA_BASE = "http://127.0.0.1:11434";
+export const MISTRAL_BASE = "https://api.mistral.ai/v1";
 export const DEFAULT_MODEL = "deepseek-chat";
 
 export interface ModelRoute {
@@ -268,7 +269,7 @@ export interface ModelRoute {
   endpoint: string;
   /** the model name as the provider expects it — an `ollama:` prefix is ours, so it is stripped */
   model: string;
-  provider: "deepseek" | "ollama";
+  provider: "deepseek" | "ollama" | "mistral";
 }
 
 /** Pure, so the routing table is testable without a network (`model-route.test.ts`). */
@@ -278,6 +279,10 @@ export function resolveModelRoute(id: string | null | undefined, fallback?: stri
   if (name.startsWith("ollama:")) {
     const local = name.slice("ollama:".length).trim();
     return { endpoint: `${OLLAMA_BASE}/v1/chat/completions`, model: local || "llama3.2", provider: "ollama" };
+  }
+  if (name.startsWith("mistral:") || name.startsWith("mistral-") || name === "mistral" || name.startsWith("codestral")) {
+    const modelName = name.startsWith("mistral:") ? name.slice("mistral:".length).trim() : name;
+    return { endpoint: `${MISTRAL_BASE}/chat/completions`, model: modelName || "mistral-small-latest", provider: "mistral" };
   }
   return { endpoint: `${DEEPSEEK_BASE}/chat/completions`, model: name, provider: "deepseek" };
 }

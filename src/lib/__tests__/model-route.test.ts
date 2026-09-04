@@ -64,6 +64,12 @@ describe("resolveModelRoute — the provider comes from the model name, not from
   it("trims whitespace, because a hand-edited node file will have some", () => {
     expect(resolveModelRoute("  deepseek-chat  ", "x").model).toBe("deepseek-chat");
   });
+
+  it("a mistral model name routes to the mistral endpoint", () => {
+    const r = resolveModelRoute("mistral-small-latest", "deepseek-chat");
+    expect(r.provider).toBe("mistral");
+    expect(r.endpoint).toContain("api.mistral.ai");
+  });
 });
 
 describe("every model the UI offers is one the app can actually call", () => {
@@ -78,7 +84,7 @@ describe("every model the UI offers is one the app can actually call", () => {
   it("the shipped list is exactly the providers that exist — a removed model stays removed", () => {
     /* `glm-4-flash` was in this list while the only endpoint was DeepSeek, so choosing it produced a 400
        and a silent fall back to the simulator. It comes back with a Zhipu route, not with a placeholder. */
-    expect(MODELS).toEqual([DEFAULT_MODEL, "ollama:qwen2.5"]);
+    expect(MODELS).toEqual([DEFAULT_MODEL, "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"]);
   });
 });
 

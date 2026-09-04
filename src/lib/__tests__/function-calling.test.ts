@@ -16,6 +16,9 @@ import {
   makeAgentConfig,
   makeNodeData,
   makeEdgeData,
+  makeMemDoc,
+  defaultSettings,
+  DEFAULT_LAYOUT,
   CANVAS_ID,
   ROOT,
   type AppState,
@@ -39,7 +42,7 @@ describe("CANVAS_TOOL_DEFINITIONS — standard JSON Schema tools catalog", () =>
     for (const exp of expected) {
       expect(names).toContain(exp);
     }
-    expect(Object.keys(CANVAS_TOOL_DEFINITIONS).length).toBe(10);
+    expect(Object.keys(CANVAS_TOOL_DEFINITIONS).length).toBe(12);
   });
 
   it("every tool has a strict OpenAI-compatible schema specification", () => {
@@ -63,14 +66,14 @@ describe("executeTool — capability gates, ledger audits, and file persistence"
       booted: true,
       bootLines: [],
       canvasId: CANVAS_ID,
-      canvas: { title: "Test Graph", owner: "test-user", canvas_type: "pipeline", created_at: "", updated_at: "", layout: { mode: "flow", direction: "LR", snap_to_grid: true, grid_size: 20 } },
+      canvas: { title: "Test Graph", owner: "test-user", canvas_type: "pipeline", tags: [], default_model: "deepseek-chat", template_id: "", template_version: "", created_at: "", updated_at: "", layout: { ...DEFAULT_LAYOUT } },
       nodes: [
         {
           id: "node-1",
           type: "lc",
           position: { x: 100, y: 100 },
           data: {
-            ...makeNodeData("agent"),
+            ...makeNodeData("agent", "Planner", "test-user"),
             title: "Planner",
             agent: makeAgentConfig("node-1", "planner"),
           },
@@ -80,7 +83,7 @@ describe("executeTool — capability gates, ledger audits, and file persistence"
           type: "lc",
           position: { x: 300, y: 100 },
           data: {
-            ...makeNodeData("agent"),
+            ...makeNodeData("agent", "Executor", "test-user"),
             title: "Executor",
             agent: makeAgentConfig("node-2", "executor"),
           },
@@ -96,34 +99,25 @@ describe("executeTool — capability gates, ledger audits, and file persistence"
         },
       ],
       memory: {
-        global: { title: "Global", content: "global content", updated_at: "" },
-        decisions: { title: "Decisions", content: "decisions content", updated_at: "" },
-        progress: { title: "Progress", content: "progress content", updated_at: "" },
-        user: { title: "User", content: "user content", updated_at: "" },
+        global: makeMemDoc("memory/global.md", "Global", "global content", 1, "user"),
+        decisions: makeMemDoc("memory/decisions.md", "Decisions", "decisions content", 1, "user"),
+        progress: makeMemDoc("memory/progress.md", "Progress", "progress content", 1, "user"),
+        user: makeMemDoc("memory/user.md", "User", "user content", 1, "user"),
         agents: {},
       },
       strokes: [],
       chats: {},
       logs: {},
-      ledger: [],
-      runState: { status: "idle", queue: [], activeNodeId: null, stepMode: false, currentStep: 0, runId: null, paused: false },
-      selectedNodeId: null,
-      selectedEdgeId: null,
-      sidebarTab: "nodes",
-      inspectorTab: "config",
-      leftCollapsed: false,
-      rightCollapsed: false,
-      theme: "system",
+      snapshots: [],
+      templates: [],
+      saveState: "saved",
+      typing: {},
+      ui: { leftTab: "palette", inspectorTab: "config", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
       settings: {
+        ...defaultSettings(),
         model: "deepseek-chat",
         provider: "deepseek",
         apiKey: "test-key",
-        stepDelayMs: 0,
-        enableLogs: true,
-        enableBackups: false,
-        theme: "system",
-        canvasTitle: "Test",
-        owner: "test",
       },
       events: [],
       toasts: [],
@@ -140,7 +134,6 @@ describe("executeTool — capability gates, ledger audits, and file persistence"
       },
       outputs: {},
       runs: ["run-test-001"],
-      fsAccess: { supported: false, connected: false, directoryName: null, permissionState: "prompt" },
     };
 
     api = {
@@ -201,9 +194,12 @@ describe("executeTool — capability gates, ledger audits, and file persistence"
 
     const res = await executeTool(api, "node-1", agent, "get_canvas_overview", {});
     expect(res.status).toBe("ok");
-    expect(res.overview).toBeDefined();
-    expect(res.overview?.nodes.length).toBe(2);
-    expect(res.overview?.edges.length).toBe(1);
+    if (res.status === "ok") {
+      const overview = res.overview as { nodes: unknown[]; edges: unknown[] } | undefined;
+      expect(overview).toBeDefined();
+      expect(overview?.nodes.length).toBe(2);
+      expect(overview?.edges.length).toBe(1);
+    }
 
     const ledgerFile = await storage.readFile(`${ROOT}/runs/run-test-001.md`);
     expect(ledgerFile).toContain("get_canvas_overview");
@@ -230,7 +226,9 @@ describe("executeTool — capability gates, ledger audits, and file persistence"
     });
 
     expect(res.status).toBe("ok");
-    expect(res.id).toBe("node-3");
+    if (res.status === "ok") {
+      expect(res.id).toBe("node-3");
+    }
 
     // Verify state was mutated
     const created = state.nodes.find((n) => n.id === "node-3");
@@ -310,34 +308,41 @@ describe("askModel — autonomous tool_calls loop", () => {
       booted: true,
       bootLines: [],
       canvasId: CANVAS_ID,
-      canvas: { title: "Test", owner: "user", canvas_type: "pipeline", created_at: "", updated_at: "", layout: { mode: "flow", direction: "LR", snap_to_grid: true, grid_size: 20 } },
+      canvas: { title: "Test", owner: "user", canvas_type: "pipeline", tags: [], default_model: "deepseek-chat", template_id: "", template_version: "", created_at: "", updated_at: "", layout: { ...DEFAULT_LAYOUT } },
       nodes: [
         {
           id: "node-1",
           type: "lc",
           position: { x: 50, y: 50 },
           data: {
-            ...makeNodeData("agent"),
+            ...makeNodeData("agent", "Bot", "user"),
             title: "Bot",
             agent: makeAgentConfig("node-1", "architect"),
           },
         },
       ],
       edges: [],
-      memory: { global: { title: "G", content: "", updated_at: "" }, decisions: { title: "D", content: "", updated_at: "" }, progress: { title: "P", content: "", updated_at: "" }, user: { title: "U", content: "", updated_at: "" }, agents: {} },
+      memory: {
+        global: makeMemDoc("memory/global.md", "G", "", 1, "user"),
+        decisions: makeMemDoc("memory/decisions.md", "D", "", 1, "user"),
+        progress: makeMemDoc("memory/progress.md", "P", "", 1, "user"),
+        user: makeMemDoc("memory/user.md", "U", "", 1, "user"),
+        agents: {},
+      },
       strokes: [],
       chats: {},
       logs: {},
-      ledger: [],
-      runState: { status: "idle", queue: [], activeNodeId: null, stepMode: false, currentStep: 0, runId: null, paused: false },
-      selectedNodeId: null,
-      selectedEdgeId: null,
-      sidebarTab: "nodes",
-      inspectorTab: "config",
-      leftCollapsed: false,
-      rightCollapsed: false,
-      theme: "system",
-      settings: { model: "deepseek-chat", provider: "deepseek", apiKey: "dummy", stepDelayMs: 0, enableLogs: true, enableBackups: false, theme: "system", canvasTitle: "", owner: "" },
+      snapshots: [],
+      templates: [],
+      saveState: "saved",
+      typing: {},
+      ui: { leftTab: "palette", inspectorTab: "config", fileViewer: null, historyOpen: false, settingsOpen: false, chatNodeId: null, consoleOpen: true, portOpen: false, focusMode: false, chordDepth: 0 },
+      settings: {
+        ...defaultSettings(),
+        model: "deepseek-chat",
+        provider: "deepseek",
+        apiKey: "dummy",
+      },
       events: [],
       toasts: [],
       execution: {
@@ -353,7 +358,6 @@ describe("askModel — autonomous tool_calls loop", () => {
       },
       outputs: {},
       runs: ["run-test-loop"],
-      fsAccess: { supported: false, connected: false, directoryName: null, permissionState: "prompt" },
     };
 
     api = {

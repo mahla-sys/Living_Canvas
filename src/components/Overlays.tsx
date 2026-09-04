@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useStore } from "../store";
-import { roleById, APP_VERSION, type RFNode, type AppState } from "../state";
-import { fmtClock, fmtDate, EMPTY_ARR, THEMES, GRID_GAP, STATUS_BAR_HEIGHT, type BusEvent, type ChatMsg } from "../lib/core";
+import { APP_VERSION, makeAgentConfig, type AppState } from "../state";
+import { fmtClock, fmtDate, THEMES, GRID_GAP, STATUS_BAR_HEIGHT, type BusEvent } from "../lib/core";
 import {
-  IPlay, IStop, ICamera, IHistory, IGear, IChat, IX, ISend, ICheck, IWarn,
-  ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD, IFolder, IFile,
+  IPlay, IStop, ICamera, IHistory, IGear, IX, ICheck, IWarn,
+  ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD, IFolder, IFile, ILayers, INode, IPlus,
 } from "./icons";
 import { storageMode } from "../lib/core";
 import { isFsAccessSupported } from "../lib/fs-access";
@@ -42,8 +42,6 @@ export function StatusBar() {
   const edgeCount = useStore((s) => s.edges.length);
   const saveState = useStore((s) => s.saveState);
   const status = useStore((s) => s.execution.status);
-  const leftOpen = useStore((s) => s.canvas.layout.leftOpen);
-  const rightOpen = useStore((s) => s.canvas.layout.rightOpen);
   const focus = useStore((s) => s.ui.focusMode);
   const chordDepth = useStore((s) => s.ui.chordDepth);
   const queue = useStore((s) => s.execution.queue);
@@ -60,15 +58,6 @@ export function StatusBar() {
     >
       {/* left — the document */}
       <div className="flex items-center gap-2 min-w-0">
-        <button
-          onClick={() => actions.togglePanel("left")}
-          title={`${leftOpen ? "Hide" : "Show"} the left panel`}
-          className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
-            leftOpen ? "border-ink-600 text-ink-200 hover:border-lc-accent/60" : "border-ink-700 text-ink-500 hover:text-ink-200"
-          }`}
-        >
-          {leftOpen ? "Library on" : "Library off"}
-        </button>
         <span className="truncate text-[10px] font-bold text-ink-200">{title}</span>
         <span className={chip}>{nodeCount} nodes</span>
         <span className={chip}>{edgeCount} edges</span>
@@ -101,15 +90,6 @@ export function StatusBar() {
           )}
         </span>
         <span className={chip} title="Whether the last change reached the files">{SAVE_PHRASE[saveState]}</span>
-        <button
-          onClick={() => actions.togglePanel("right")}
-          title={`${rightOpen ? "Hide" : "Show"} the inspector`}
-          className={`text-[9.5px] font-bold px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
-            rightOpen ? "border-ink-600 text-ink-200 hover:border-lc-accent/60" : "border-ink-700 text-ink-500 hover:text-ink-200"
-          }`}
-        >
-          {rightOpen ? "Inspector on" : "Inspector off"}
-        </button>
       </div>
     </div>
   );
@@ -135,6 +115,8 @@ export function TopBar() {
   const backendUrl = useStore((s) => s.settings.backendUrl);
   const execution = useStore((s) => s.execution);
   const actions = useStore((s) => s.actions);
+  const leftOpen = useStore((s) => s.canvas.layout.leftOpen);
+  const rightOpen = useStore((s) => s.canvas.layout.rightOpen);
   const running = execution.status === "running";
   const waiting = execution.status === "waiting_approval";
   const paused = execution.status === "paused";
@@ -145,6 +127,18 @@ export function TopBar() {
 
   return (
     <header className="h-[54px] w-full max-w-full shrink-0 flex items-center gap-3 px-4 border-b border-ink-700 bg-ink-900/90 backdrop-blur-sm min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller">
+      <div className="flex items-center gap-2 shrink-0 me-1">
+        <button
+          onClick={() => actions.togglePanel("left")}
+          title={`${leftOpen ? "Hide" : "Show"} library panel`}
+          className={`p-2 rounded-lg border transition-all cursor-pointer ${
+            leftOpen ? "border-ink-600 text-ink-200 bg-ink-800 hover:border-lc-accent/60" : "border-transparent text-ink-500 hover:text-ink-300 hover:bg-ink-800"
+          }`}
+        >
+          <ILayers size={16} />
+        </button>
+      </div>
+
       <div className="flex items-center gap-2.5 shrink-0">
         <Logo />
         <div className="leading-none">
@@ -184,6 +178,46 @@ export function TopBar() {
 
       <div className="ms-auto flex items-center gap-1.5">
         <button
+          onClick={() => {
+            if (window.confirm("Start a new canvas? This resets the workspace to a fresh canvas.")) {
+              void actions.reset();
+            }
+          }}
+          title="New canvas"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-ink-200 hover:text-lc-accent hover:bg-ink-800 border border-ink-600 transition-all cursor-pointer active:scale-95"
+        >
+          <IPlus size={13} />
+          New
+        </button>
+
+        <button
+          onClick={() => {
+            const s = useStore.getState();
+            const manager = s.nodes.find((n) => n.data.agent?.role_id === "manager");
+            if (manager) {
+              actions.setChatNode(manager.id);
+            } else {
+              void actions.addNode("agent", { x: 340, y: 160 }).then(() => {
+                const updated = useStore.getState();
+                const last = updated.nodes[updated.nodes.length - 1];
+                if (last) {
+                  actions.updateNodeData(last.id, {
+                    title: "Canvas Manager",
+                    agent: makeAgentConfig(last.id, "manager"),
+                  });
+                  actions.setChatNode(last.id);
+                }
+              });
+            }
+          }}
+          title="Chat with Canvas Manager Copilot"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-lc-accent bg-lc-accent/10 border border-lc-accent/40 hover:bg-lc-accent/20 transition-all cursor-pointer active:scale-95"
+        >
+          <ISpark size={13} />
+          Copilot
+        </button>
+
+        <button
           onClick={() => actions.setPortOpen(true)}
           title="Export / Import and folder attach"
           className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-bold text-ink-300 hover:text-lc-accent hover:bg-ink-800 border border-ink-600 transition-all cursor-pointer"
@@ -200,6 +234,19 @@ export function TopBar() {
         <button onClick={() => actions.setSettingsOpen(true)} title="Settings" className="p-2 rounded-lg text-ink-300 hover:text-lc-accent hover:bg-ink-800 border border-transparent hover:border-ink-600 transition-all cursor-pointer">
           <IGear size={16} />
         </button>
+        
+        <div className="w-px h-6 bg-ink-700 mx-1" />
+        
+        <button
+          onClick={() => actions.togglePanel("right")}
+          title={`${rightOpen ? "Hide" : "Show"} inspector panel`}
+          className={`p-2 rounded-lg border transition-all cursor-pointer ${
+            rightOpen ? "border-ink-600 text-ink-200 bg-ink-800 hover:border-lc-accent/60" : "border-transparent text-ink-500 hover:text-ink-300 hover:bg-ink-800"
+          }`}
+        >
+          <INode size={16} />
+        </button>
+
         <div className="w-px h-6 bg-ink-700 mx-1" />
         {running ? (
           <button onClick={actions.stop} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-ember/15 border border-ember/50 text-ember text-[12px] font-extrabold hover:bg-ember/25 transition-all cursor-pointer">
@@ -319,134 +366,9 @@ export function ActivityConsole() {
   );
 }
 
-/* ================= chat panel ================= */
+/* ================= chat panel (docked in right sidebar) ================= */
 
-export function ChatPanel() {
-  const chatNodeId = useStore((s) => s.ui.chatNodeId);
-  /* The panel floats beside the inspector, so it has to follow the inspector: both its width and its
-     visibility are the user's now (§6.1). The old hardcoded `insetInlineEnd: 306` assumed 292px + 14, which
-     put the panel in the middle of the canvas the moment the inspector was widened, closed, or focus mode
-     was on. Same for the bottom offset, which assumed an open console and covered the status strip. */
-  const rightOpen = useStore((s) => s.canvas.layout.rightOpen);
-  const rightWidth = useStore((s) => s.canvas.layout.rightWidth);
-  const focus = useStore((s) => s.ui.focusMode);
-  const consoleOpen = useStore((s) => s.ui.consoleOpen);
-  const node = useStore((s): RFNode | undefined => s.nodes.find((n) => n.id === s.ui.chatNodeId));
-  const msgs = useStore((s): ChatMsg[] => (s.ui.chatNodeId ? s.chats[s.ui.chatNodeId] ?? EMPTY_ARR : EMPTY_ARR));
-  const typing = useStore((s) => (s.ui.chatNodeId ? s.typing[s.ui.chatNodeId] ?? false : false));
-  const actions = useStore((s) => s.actions);
-  const [text, setText] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [msgs.length, typing, chatNodeId]);
-
-  if (!chatNodeId || !node) return null;
-  const agent = node.data.agent;
-  const role = agent ? roleById(agent.role_id) : null;
-
-  const send = () => {
-    const t = text.trim();
-    if (!t || typing) return;
-    setText("");
-    actions.chat(chatNodeId, t);
-  };
-
-  return (
-    <div
-      data-lc-chatpanel
-      className="fixed z-40 w-[370px] max-w-[calc(100vw-2rem)] rounded-2xl bg-ink-900 border border-ink-600 shadow-[0_24px_70px_-16px_rgba(0,0,0,0.85)] anim-pop overflow-hidden flex flex-col"
-      style={{
-        height: 470,
-        // beside the inspector when there is one, otherwise flush to the canvas edge
-        insetInlineEnd: focus || !rightOpen ? 14 : rightWidth + 14,
-        // clear the status strip, and the console too while it is open
-        bottom: STATUS_BAR_HEIGHT + (consoleOpen ? 176 : 42),
-      }}
-    >
-      <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-ink-700 bg-ink-850">
-        <span className="w-8 h-8 rounded-[9px] flex items-center justify-center" style={{ background: `${node.data.color}1a`, color: node.data.color, border: `1px solid ${node.data.color}40` }}>
-          <IChat size={15} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[12.5px] font-extrabold text-ink-50 truncate">{node.data.title}</p>
-          <p className="text-[9.5px] text-ink-400 flex items-center gap-1.5">
-            {role ? `role: ${role.name}` : "Chat"}
-            {agent && <span className="font-mono">{agent.model}</span>}
-          </p>
-        </div>
-        <span className="hidden xl:inline text-[9px] text-ink-500 font-mono shrink-0">chats/chat-{node.id}.md</span>
-        {/* `shrink-0` is the fix: without it a long node title pushed this button out of a 370px panel and
-            there was no way to close the chat. `ms-auto` keeps it in the corner whatever the title does. */}
-        <button
-          data-lc-chat-close
-          onClick={() => actions.setChatNode(null)}
-          title="Close chat"
-          aria-label={`Close the chat with ${node.data.title}`}
-          className="ms-auto shrink-0 w-7 h-7 grid place-items-center rounded-lg border border-ink-600 bg-ink-800 text-ink-200 hover:text-ember hover:border-ember/60 transition-colors cursor-pointer"
-        >
-          <IX size={14} />
-        </button>
-      </div>
-
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3.5 space-y-2.5">
-        {msgs.length === 0 && (
-          <div className="text-center py-8 anim-fade">
-            <ISpark size={22} className="mx-auto text-lc-accent/60 mb-2" />
-            <p className="text-[11.5px] text-ink-300 font-bold">Working memory of this agent</p>
-            <p className="text-[10.5px] text-ink-400 mt-1 leading-5">
-              {agent ? `The agent answers only through its own context contract.` : "Write a message to start the conversation."}
-            </p>
-            {agent && (
-              <div className="mt-3 space-y-1 text-start">
-                {["What is the success criterion for this step?", "What do you still not know?"].map((q) => (
-                  <button key={q} onClick={() => actions.chat(chatNodeId, q)} className="block w-full text-start text-[10.5px] px-2.5 py-1.5 rounded-lg bg-ink-850 border border-ink-600 text-ink-300 hover:border-lc-accent/50 hover:text-lc-accent transition-colors cursor-pointer">
-                    {q}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {msgs.map((m, i) => (
-          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"} anim-rise`}>
-            <div className={`max-w-[85%] px-3 py-2 rounded-xl text-[11.5px] leading-5 ${
-              m.role === "user"
-                ? "bg-lc-accent/15 border border-lc-accent/35 text-ink-100 rounded-2xl rounded-bl-sm"
-                : "bg-ink-800 border border-ink-600 text-ink-200 rounded-2xl rounded-br-sm"
-            }`}>
-              <p className="whitespace-pre-wrap">{m.text}</p>
-              <p className="text-[8.5px] text-ink-500 mt-1 text-end">{fmtClock(m.at)}</p>
-            </div>
-          </div>
-        ))}
-        {typing && (
-          <div className="flex justify-start anim-fade">
-            <div className="px-3.5 py-2.5 rounded-2xl rounded-br-sm bg-ink-800 border border-ink-600 flex items-center gap-1">
-              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-lc-accent" />
-              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-lc-accent" />
-              <span className="typing-dot w-1.5 h-1.5 rounded-full bg-lc-accent" />
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="p-2.5 border-t border-ink-700 bg-ink-850 flex items-center gap-2">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          placeholder={agent ? "Type your message…" : "Note text…"}
-          className="flex-1 px-3 py-2 rounded-xl bg-ink-900 border border-ink-600 text-[12px] text-ink-100 focus:border-lc-accent/60 focus:outline-none transition-colors"
-        />
-        <button onClick={send} disabled={!text.trim() || typing} className="w-9 h-9 rounded-xl bg-lc-accent text-ink-950 flex items-center justify-center hover:brightness-110 transition-all cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed active:scale-95">
-          <ISend size={15} className="-scale-x-100" />
-        </button>
-      </div>
-    </div>
-  );
-}
+export { ChatPanel } from "./SidePanels";
 
 /* ================= history modal ================= */
 
@@ -515,23 +437,23 @@ export function SettingsModal() {
         <div data-lc-modal-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
           <div>
             <p className="text-[11px] font-bold text-ink-300 mb-2">AI provider (§15)</p>
-            <div className="grid grid-cols-2 gap-2">
-              {([["sim", "Internal simulator", "no key needed — phase 1 template answers"], ["deepseek", "DeepSeek API", "real connection to deepseek-chat"]] as const).map(([k, t, d]) => (
+            <div className="grid grid-cols-3 gap-2">
+              {([["sim", "Simulator", "no key needed"], ["deepseek", "DeepSeek", "deepseek-chat"], ["mistral", "Mistral", "mistral-small"]] as const).map(([k, t, d]) => (
                 <button
                   key={k}
                   onClick={() => actions.updateSettings({ provider: k })}
-                  className={`text-start p-3 rounded-xl border transition-all cursor-pointer ${settings.provider === k ? "border-lc-accent/60 bg-lc-accent/10" : "border-ink-600 bg-ink-850 hover:border-ink-500"}`}
+                  className={`text-start p-2.5 rounded-xl border transition-all cursor-pointer ${settings.provider === k ? "border-lc-accent/60 bg-lc-accent/10" : "border-ink-600 bg-ink-850 hover:border-ink-500"}`}
                 >
-                  <p className={`text-[12px] font-extrabold flex items-center gap-1.5 ${settings.provider === k ? "text-lc-accent" : "text-ink-100"}`}>
-                    {settings.provider === k && <ICheck size={12} />}{t}
+                  <p className={`text-[11.5px] font-extrabold flex items-center gap-1 ${settings.provider === k ? "text-lc-accent" : "text-ink-100"}`}>
+                    {settings.provider === k && <ICheck size={11} />}{t}
                   </p>
-                  <p className="text-[9.5px] text-ink-400 mt-1 leading-4">{d}</p>
+                  <p className="text-[9px] text-ink-400 mt-1 leading-3.5 truncate">{d}</p>
                 </button>
               ))}
             </div>
           </div>
 
-          {settings.provider === "deepseek" && (
+          {(settings.provider === "deepseek" || settings.provider === "mistral") && (
             <div className="space-y-3 anim-rise">
               <label className="block">
                 <span className="block text-[11px] font-bold text-ink-300 mb-1">API key</span>

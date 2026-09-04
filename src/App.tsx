@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useStore } from "./store";
 import CanvasArea from "./components/CanvasArea";
 import { LeftPanel, RightPanel, FileViewer } from "./components/SidePanels";
-import { TopBar, ActivityConsole, ChatPanel, HistoryModal, SettingsModal, PortModal, Toasts, BootOverlay, StatusBar } from "./components/Overlays";
+import { TopBar, ActivityConsole, HistoryModal, SettingsModal, PortModal, Toasts, BootOverlay, StatusBar } from "./components/Overlays";
 
 export default function App() {
   const init = useStore((s) => s.actions.init);
@@ -81,7 +81,6 @@ export default function App() {
 
       <StatusBar />
 
-      <ChatPanel />
       <FileViewer />
       <HistoryModal />
       <SettingsModal />

@@ -89,8 +89,6 @@ describe("the status bar speaks in words", () => {
   it("drops the ad-hoc glyph alphabet in favour of words", () => {
     const { container } = render(<StatusBar />);
     expect(container.textContent).not.toMatch(/[◧▨▫]/);
-    expect(screen.getByText("Library on")).toBeInTheDocument();
-    expect(screen.getByText("Inspector on")).toBeInTheDocument();
   });
 });
 

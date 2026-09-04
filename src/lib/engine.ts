@@ -332,7 +332,7 @@ export const MemoryManager = {
 
 export async function testFallback(api: EngineApi) {
   const s = api.get();
-  if (s.settings.provider !== "deepseek" || !s.settings.apiKey.trim()) {
+  if ((s.settings.provider !== "deepseek" && s.settings.provider !== "mistral") || !s.settings.apiKey.trim()) {
     emit(api, "system", "fallback test: no API key configured — internal simulator is active (phase 1 default)");
     toast(api, "info", "No key configured; the system runs on the internal simulator.");
     return;
@@ -615,6 +615,28 @@ export const CANVAS_TOOL_DEFINITIONS: Record<string, CanvasToolDefinition> = {
       },
     },
   },
+  get_ui_state: {
+    type: "function",
+    function: {
+      name: "get_ui_state",
+      description: "Read the current state of the user interface (active tabs, selected node, viewport state). Useful for Copilot agents.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
+  capture_canvas_snapshot: {
+    type: "function",
+    function: {
+      name: "capture_canvas_snapshot",
+      description: "Get a clean, lightweight JSON snapshot of the canvas geometry, node coordinates, and types. Use this to understand the visual layout.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+  },
   get_canvas_overview: {
     type: "function",
     function: {
@@ -748,6 +770,39 @@ export async function executeTool(
         detail: `${s.nodes.length} nodes, ${s.edges.length} edges`,
       });
       return { status: "ok", overview };
+    }
+
+    case "get_ui_state": {
+      const s = api.get();
+      const selectedNode = s.nodes.find(n => n.selected);
+      const selectedEdge = s.edges.find(e => e.selected);
+      const uiState = {
+        selectedNodeId: selectedNode?.id || null,
+        selectedEdgeId: selectedEdge?.id || null,
+        leftTab: s.ui.leftTab,
+        inspectorTab: s.ui.inspectorTab,
+        fileViewerOpen: !!s.ui.fileViewer,
+        activeFile: s.ui.fileViewer?.path,
+        runStatus: s.execution.status,
+      };
+      await appendLog(api, nodeId, `tool get_ui_state → read ui state`);
+      await ledgerRow(api, { node: nodeId, tool: "get_ui_state", status: "ok" });
+      return { status: "ok", uiState };
+    }
+
+    case "capture_canvas_snapshot": {
+      const s = api.get();
+      const snapshot = {
+        nodes: s.nodes.map((n) => ({
+          id: n.id,
+          position: n.position,
+          title: n.data.title,
+          type: n.data.nodeType,
+        })),
+      };
+      await appendLog(api, nodeId, `tool capture_canvas_snapshot → read snapshot`);
+      await ledgerRow(api, { node: nodeId, tool: "capture_canvas_snapshot", status: "ok" });
+      return { status: "ok", snapshot };
     }
 
     case "create_node": {
@@ -1189,6 +1244,8 @@ export const TOOL_NAMES = [
   "create_edge",
   "update_edge",
   "delete_edge",
+  "get_ui_state",
+  "capture_canvas_snapshot",
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 const HARNESS_TOOLS: string[] = ["get_canvas_overview", "get_agent_brief"];
@@ -1503,7 +1560,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
     // step 4 — generation. `agent.model` is the model that runs (ADR-008); `settings.model` is only the
     // fallback for a node whose file predates the field or whose author left it empty.
     const route = resolveModelRoute(agent?.model, api.get().settings.model);
-    await appendLog(api, nodeId, agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey
+    await appendLog(api, nodeId, agent && (api.get().settings.provider === "deepseek" || api.get().settings.provider === "mistral") && api.get().settings.apiKey
       ? `calling ${route.provider}/${route.model} (max_tokens ${agent?.max_tokens ?? 900})…`
       : "generating a response in the phase 1 simulator…");
     let fields: Record<string, string>;
@@ -1514,7 +1571,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
       agent,
       outputDelivered: false,
     };
-    if (agent && api.get().settings.provider === "deepseek" && api.get().settings.apiKey) {
+    if (agent && (api.get().settings.provider === "deepseek" || api.get().settings.provider === "mistral") && api.get().settings.apiKey) {
       try {
         const text = await askModel(route, api.get().settings.apiKey, [
           { role: "system", content: agent.system_prompt },
@@ -1882,6 +1939,13 @@ function simChatReply(roleId: string, roleTitle: string, userText: string, memDo
       `My summary of your message: you agree with the current path but worry about the schedule. I will add a weekly review to the final decision.`,
       `The final decision still needs human approval. If you want, run the pipeline so the decision package is built.`,
     ],
+    manager: [
+      `I received your directive: “${short}”. As the Canvas Manager, I have full authority to architect agent pipelines, configure tools, and connect data flows. Let me structure the nodes for your workflow.`,
+      `Canvas Manager ready. I can orchestrate new agent roles, create edges, and guide pipeline execution based on your goals.`,
+    ],
+    builder: [
+      `Builder agent ready for: “${short}”. I will draft technical node logic and execution code according to the architecture.`,
+    ],
   };
   const opts = base[roleId] ?? base["decision-maker"];
   const pick = opts[(userText.length + roleTitle.length) % opts.length];
@@ -1920,7 +1984,7 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
 
   let reply: string;
   const settings = api.get().settings;
-  if (settings.provider === "deepseek" && settings.apiKey && node.data.agent) {
+  if ((settings.provider === "deepseek" || settings.provider === "mistral") && settings.apiKey && node.data.agent) {
     try {
       const history = (api.get().chats[nodeId] ?? []).slice(-8).map((m) => ({
         role: m.role === "user" ? "user" as const : "assistant" as const,

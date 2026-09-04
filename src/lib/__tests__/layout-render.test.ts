@@ -32,14 +32,12 @@ describe("the status strip is mounted chrome, 22px, with a document half and a m
     expect(strip).toContain(`height:${STATUS_BAR_HEIGHT}px`);
   });
 
-  it("left half names the document and the storage mode; right half names the run and the panels", () => {
+  it("left half names the document and the storage mode; right half names the run status", () => {
     expect(strip).toContain("nodes"); // counts
     expect(strip).toContain("edges");
     // the moment — as a sentence, not the store's enum (ADR-017). `run: idle` was the old, machine-facing form.
     expect(strip).toContain("Ready — nothing running");
     expect(strip).not.toContain("run: idle");
-    expect(strip).toContain("Library"); // the two panel toggles
-    expect(strip).toContain("Inspector");
   });
 
   it("does not offer the focus-mode way out before focus mode is on", () => {

@@ -1,7 +1,4 @@
-/* Auto-detection is switched off and the sources named explicitly. Tailwind v4 otherwise scans every tracked
-   file in the repo, so a class name written in `docs/ARCHITECTURE.md` — or in a comment in a build script —
-   generated a real utility in the shipped stylesheet, which is how amber rules survived the removal of
-   amber from every component: nothing rendered them, and the CSS still carried them. */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,700;1,6..72,400&family=Plus+Jakarta+Sans:wght@400;700;800&display=swap');
 @import "tailwindcss" source(none);
 @source "../index.html";
 @source "../src";
@@ -556,4 +553,10 @@ body,
   /* plum keeps working here: hue is meaningless against an achromatic ramp, and its chroma (0.28) is what
      separates it from a grey `ink-400` */
   --color-lc-accent: #b98bc2;
+}
+
+:root {
+  --font-display: "Plus Jakarta Sans", sans-serif;
+  --font-body: "Newsreader", serif;
+  --font-mono: "JetBrains Mono", monospace;
 }

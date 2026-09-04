@@ -26,6 +26,11 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
 | 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted (clause 3 superseded by 011) | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data |
 | 011 | `adr-011-accent-must-differ-in-hue-from-ink.md` | accepted | an accent must sit at least 60° from its own theme's ink hue (or, on an achromatic ramp, carry enough chroma), enforced by the palette gate; `botanical` is the default again |
+| 029 | `adr-029-mistral-api-integration.md` | accepted | integrates Mistral API provider and configures default Mistral API key |
+| 028 | `adr-028-remove-left-panel-canvas-manager-and-configure-api-key.md` | accepted | removes redundant Canvas Manager banner from left panel and configures default DeepSeek API key |
+| 027 | `adr-027-docked-right-panel-chat.md` | accepted | docks conversational interfaces inside right panel, provides top navigation options for inspector, chat, and canvas |
+| 026 | `adr-026-topbar-actions-and-status-cleanup.md` | accepted | removes redundant bottom panel toggles, adds topbar new canvas and manager copilot actions |
+| 025 | `adr-025-bootstrap-self-building.md` | proposed | UI-awareness tools and Manager agent for self-building |
 | 022 | `adr-022-function-calling-loop-and-canvas-tools.md` | accepted | model-driven function calling loop in askModel with 10 canvas tools, strict contract gating, and ledger logging |
 | 021 | `adr-021-mounted-root-height-boundary-playwright.md` | accepted | closes height chain breakage at data-lc-mounted so laptop viewports don't push status bar off-screen |
 | 020 | `adr-020-laptop-viewport-fit-and-scrolling.md` | accepted | viewport fit contract (fixed inset-0, dvh), middle container overflow clamping so panels scroll on laptops |
