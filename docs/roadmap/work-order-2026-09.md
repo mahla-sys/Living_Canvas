@@ -43,6 +43,8 @@ is verified and mutation-tested; the rendered geometry is not.
 | 2.4 | Left-panel search + status icons | `adr-016` | ✅ 13 tests |
 | 2.5 | Status bar in words, not enums | `adr-017` | ✅ 7 tests |
 | 2.6 | Function Calling & Canvas Tools | `adr-022` | active |
+| 2.7 | Design Tokens & Obsidian Laboratory Palette | `adr-030` | ✅ 12 tests |
+| 2.8 | UI Declutter & Semantic Token Unification | `adr-033` | active |
 
 2.2's **Status** tab shows real execution data only. CPU/memory stays deferred — browsers expose no CPU
 figure, and `performance.memory` is Chrome-only and approximate. Registered as inbox item 1. It carries four

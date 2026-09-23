@@ -26,6 +26,7 @@ bug wearing prose: so one home per fact, links instead of copies, and a gate tha
 | `notes/ideas.md` | everything not yet a decision, including product identity | decision language ("accepted", "decided") |
 | `archive/` | superseded docs, each naming what replaced it | silence about why it died |
 | `ui-spec.md` | what the interface must **look like**, row by row: value + storage location + status | the mechanism behind it; a taste without a number |
+| `foundational-manifesto.md` | the core soul and non-negotiable principles of Living Canvas | temporary implementation details |
 | `inbox.md` | every open question and every idea with no home, ranked by the cost of not answering | content that already has a home |
 
 ## Format, and the gate that enforces it

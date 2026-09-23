@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { chromium, type Browser } from "playwright";
 import { createServer, type ViteDevServer } from "vite";

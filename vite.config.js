@@ -27,6 +27,11 @@ export default defineConfig({
     },
     chunkSizeWarningLimit: 600,
   },
+  test: {
+    environment: "jsdom",
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["tests/**", "node_modules/**"],
+  },
   server: {
     host: "0.0.0.0",
     port: 3000,

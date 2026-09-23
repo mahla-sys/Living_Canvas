@@ -171,7 +171,7 @@ function initialState(): AppState {
       historyOpen: false,
       settingsOpen: false,
       chatNodeId: null,
-      consoleOpen: true,
+      consoleOpen: false,
       portOpen: false,
       focusMode: false,
       chordDepth: 0,

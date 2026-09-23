@@ -276,6 +276,20 @@ for (const step of RETIRED_AS_CHROME) {
   }
 }
 
+/* ---- ban legacy raw Tailwind colors (violet, fuchsia, purple, pink, indigo, blue, cyan, emerald) ---- */
+const FORBIDDEN_TAILWIND = /(?:text|bg|border|ring)-(?:violet|fuchsia|purple|pink|indigo|blue|cyan|emerald)-[0-9]+/g;
+for (const f of readdirSync(dir).filter((n) => n.endsWith(".tsx"))) {
+  const text = readFileSync(join(dir, f), "utf8");
+  for (const [i, line] of text.split("\n").entries()) {
+    if (/\/\/\s*lc-data-colour\b/.test(line)) continue;
+    const hits = stripComment(line).match(FORBIDDEN_TAILWIND);
+    if (hits && hits.length > 0) {
+      fail(`src/components/${f}:${i + 1} uses legacy Tailwind color classes [${hits.join(", ")}] — use design tokens instead (e.g. bg-lc-accent, text-text-secondary)`);
+    }
+  }
+}
+
+
 if (problems.length) {
   console.error(`palette: ${problems.length} problem(s)\n` + problems.map((p) => `  - ${p}`).join("\n"));
   process.exit(1);

@@ -1,0 +1,127 @@
+/* ==========================================================
+   Living Canvas — Design Tokens v1
+   Philosophy: Obsidian Laboratory (warm-neutral dark + warm amber)
+   Architecture: 4-layer surface hierarchy + semantic accents
+   Extensibility: Add any new theme by declaring [data-theme="id"]
+   ========================================================== */
+
+:root,
+[data-theme="neutral"] {
+  /* ---------- Surfaces (warm-neutral obsidian, NOT teal, NOT blue) ---------- */
+  --lc-void:            #0A0A0C;   /* Canvas background */
+  --lc-dot:             rgba(255, 255, 255, 0.08); /* Canvas dot grid */
+  --lc-surface-base:    #101114;   /* Panels: sidebar, inspector */
+  --lc-surface-raised:  #16181D;   /* Cards, nodes, inputs */
+  --lc-surface-overlay: #1D2025;   /* Modals, tooltips, menus */
+  --lc-surface-hover:   #24272D;   /* Hover state */
+  --lc-surface-active:  #2B2F36;   /* Pressed / active state */
+
+  /* ---------- Borders (translucent — never harsh solid lines) ---------- */
+  --lc-border-subtle:   rgba(255, 255, 255, 0.06);
+  --lc-border-default:  rgba(255, 255, 255, 0.10);
+  --lc-border-strong:   rgba(255, 255, 255, 0.16);
+
+  /* ---------- Text Ramp ---------- */
+  --lc-text-primary:    #F0F1F3;   /* High contrast body text */
+  --lc-text-secondary:  #A0A5AD;   /* Secondary labels, muted body */
+  --lc-text-tertiary:   #6B7079;   /* Captions, metadata */
+  --lc-text-quaternary: #454A52;   /* Placeholders, disabled text */
+  --lc-text-inverse:    #0A0A0C;   /* Text on bright accent */
+
+  /* ---------- Accent: Warm Amber (primary brand) ---------- */
+  --lc-accent:          #D4A853;
+  --lc-accent-hover:    #E5BB6A;
+  --lc-accent-pressed:  #B8903F;
+  --lc-accent-subtle:   rgba(212, 168, 83, 0.12);
+  --lc-accent-ring:     rgba(212, 168, 83, 0.40);
+
+  /* ---------- Semantic Roles ---------- */
+  --lc-success:         #5FB37A;
+  --lc-success-subtle:  rgba(95, 179, 122, 0.12);
+  --lc-warning:         #E5A54B;
+  --lc-warning-subtle:  rgba(229, 165, 75, 0.12);
+  --lc-danger:          #E06C6C;
+  --lc-danger-subtle:   rgba(224, 108, 108, 0.12);
+  --lc-info:            #6BA3D4;
+  --lc-info-subtle:     rgba(107, 163, 212, 0.12);
+
+  /* ---------- AI/Agent Role (reserved for agent states & badges) ---------- */
+  --lc-ai:              #A78BFA;
+  --lc-ai-subtle:       rgba(167, 139, 250, 0.12);
+
+  /* ---------- Radius Scale ---------- */
+  --lc-radius-xs:       4px;
+  --lc-radius-sm:       6px;
+  --lc-radius-md:       10px;
+  --lc-radius-lg:       14px;
+  --lc-radius-xl:       20px;
+  --lc-radius-full:     9999px;
+
+  /* ---------- Elevation (tuned for dark mode: shadow + 1px light ring) ---------- */
+  --lc-shadow-sm:  0 1px 2px rgba(0, 0, 0, 0.40);
+  --lc-shadow-md:  0 4px 12px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--lc-border-subtle);
+  --lc-shadow-lg:  0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--lc-border-default);
+  --lc-shadow-xl:  0 24px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--lc-border-default);
+
+  /* ---------- Motion ---------- */
+  --lc-ease-out:        cubic-bezier(0.16, 1, 0.3, 1);
+  --lc-ease-in-out:     cubic-bezier(0.65, 0, 0.35, 1);
+  --lc-duration-instant: 100ms;
+  --lc-duration-fast:    150ms;
+  --lc-duration-base:    200ms;
+  --lc-duration-slow:    300ms;
+  --lc-duration-slower:  500ms;
+}
+
+/* ==========================================================
+   Theme: Botanical (sage green accent, deep forest void)
+   ========================================================== */
+[data-theme="botanical"] {
+  --lc-void:            #0A0F0D;
+  --lc-surface-base:    #0F1614;
+  --lc-surface-raised:  #151D1A;
+  --lc-surface-overlay: #1B2420;
+  --lc-surface-hover:   #212A26;
+
+  --lc-accent:          #7BC79D;
+  --lc-accent-hover:    #8FD4AF;
+  --lc-accent-pressed:  #68B488;
+  --lc-accent-subtle:   rgba(123, 199, 157, 0.12);
+  --lc-accent-ring:     rgba(123, 199, 157, 0.40);
+}
+
+/* ==========================================================
+   Theme: Plum (violet-rose accent, deep plum void)
+   ========================================================== */
+[data-theme="plum"] {
+  --lc-void:            #0D0912;
+  --lc-surface-base:    #140F1A;
+  --lc-surface-raised:  #1A1422;
+  --lc-surface-overlay: #211A2A;
+  --lc-surface-hover:   #281F33;
+
+  --lc-accent:          #B88CD6;
+  --lc-accent-hover:    #C9A0E5;
+  --lc-accent-pressed:  #A076C0;
+  --lc-accent-subtle:   rgba(184, 140, 214, 0.12);
+  --lc-accent-ring:     rgba(184, 140, 214, 0.40);
+}
+
+/* ==========================================================
+   Accessibility: Motion reduction contract
+   ========================================================== */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lc-duration-instant: 0ms;
+    --lc-duration-fast:    0ms;
+    --lc-duration-base:    0ms;
+    --lc-duration-slow:    0ms;
+    --lc-duration-slower:  0ms;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

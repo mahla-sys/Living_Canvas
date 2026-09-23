@@ -13,3 +13,5 @@ coverage/
 .vite/
 *.tsbuildinfo
 .DS_Store
+artifacts/
+*.png

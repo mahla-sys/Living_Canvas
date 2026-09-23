@@ -54,63 +54,59 @@ function Palette() {
   const actions = useStore((s) => s.actions);
   const templates = useStore((s) => s.templates);
   return (
-    <div className="p-3 pb-24 space-y-2">
-      <p className="text-[10.5px] text-ink-400 leading-5 px-1">
-        Drag elements <strong className="text-ink-200">into the canvas</strong>, or click to add one.
-      </p>
-      {PALETTE.map((p) => (
-        <div
-          key={p.nodeType}
-          draggable
-          onDragStart={(e) => {
-            e.dataTransfer.setData("application/lc", p.nodeType);
-            e.dataTransfer.effectAllowed = "move";
-          }}
-          onClick={() => void actions.addNode(p.nodeType, { x: 420 + Math.random() * 420, y: 120 + Math.random() * 280 })}
-          className="group flex items-center gap-3 p-2.5 rounded-xl bg-ink-850 border border-ink-700 hover:border-lc-accent/40 hover:bg-ink-800 cursor-grab active:cursor-grabbing transition-all duration-150 hover:translate-x-[-2px]"
-        >
-          <span
-            className="w-9 h-9 rounded-[10px] flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
-            style={{
-              background: `${nodeColor(p.nodeType)}1a`, color: nodeColor(p.nodeType), border: `1px solid ${nodeColor(p.nodeType)}40`,
+    <div className="p-3 pb-24 space-y-3">
+      <div className="space-y-1">
+        {PALETTE.map((p) => (
+          <div
+            key={p.nodeType}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/lc", p.nodeType);
+              e.dataTransfer.effectAllowed = "move";
             }}
+            onClick={() => void actions.addNode(p.nodeType, { x: 420 + Math.random() * 420, y: 120 + Math.random() * 280 })}
+            className="group flex items-center gap-2.5 px-3 h-[40px] rounded-lg bg-surface-base hover:bg-surface-raised cursor-grab active:cursor-grabbing transition-colors duration-150 select-none"
           >
-            {p.nodeType === "agent" ? <IBrain size={17} /> : p.nodeType === "output-box" ? <IBox size={17} /> : <IFile size={17} />}
-          </span>
-          <div className="min-w-0">
-            <p className="text-[12.5px] font-bold text-ink-100 flex items-center gap-1.5">
-              {p.label}
-              <span className="text-[9px] font-mono text-ink-500 uppercase">{p.nodeType}</span>
-            </p>
-            <p className="text-[10.5px] text-ink-400 leading-4">{p.desc}</p>
-          </div>
-        </div>
-      ))}
-
-      <div className="pt-3 mt-2 border-t border-ink-700">
-        <p className="text-[10px] font-bold text-ink-300 px-1 mb-2 flex items-center gap-1.5">
-          <IHistory size={11} className="text-plum" />
-          Ready-made templates <span className="font-mono text-ink-500 text-[8.5px]">library/templates/</span>
-        </p>
-        {templates.map((t) => (
-          <div key={t.id} className="flex items-center gap-2 p-2 rounded-xl bg-ink-850 border border-ink-700 hover:border-plum/40 transition-colors mb-1.5 anim-rise">
+            <span
+              className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-transform group-hover:scale-105"
+              style={{
+                background: `color-mix(in srgb, ${nodeColor(p.nodeType)} 12%, transparent)`,
+                color: nodeColor(p.nodeType),
+              }}
+            >
+              {p.nodeType === "agent" ? <IBrain size={15} /> : p.nodeType === "output-box" ? <IBox size={15} /> : <IFile size={15} />}
+            </span>
             <div className="min-w-0 flex-1">
-              <p className="text-[11.5px] font-bold text-ink-100 flex items-center gap-1.5">
-                {t.name}
-                {t.builtin && <span className="text-[8px] font-mono px-1 py-px rounded bg-plum/15 border border-plum/40 text-plum">built-in</span>}
-              </p>
-              <p className="text-[9.5px] text-ink-400 mt-0.5">
-                {t.nodes} nodes · {t.edges} edges
+              <p className="text-[12px] font-semibold text-text-primary truncate">
+                {p.label}
               </p>
             </div>
-            <button
-              onClick={() => actions.loadTemplate(t.id)}
-              className="shrink-0 text-[10px] font-black px-2.5 py-1.5 rounded-lg bg-ink-800 border border-ink-600 text-plum hover:border-plum/60 hover:bg-plum/10 transition-all cursor-pointer active:scale-95"
-            >
-              Load
-            </button>
           </div>
         ))}
+      </div>
+
+      <div className="pt-3 mt-3 border-t border-border-subtle">
+        <p className="text-[11px] font-bold text-text-secondary px-2 mb-2">Templates</p>
+        <div className="space-y-1">
+          {templates.map((t) => (
+            <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-base hover:bg-surface-raised transition-colors group">
+              <div className="min-w-0 flex-1">
+                <p className="text-[11.5px] font-medium text-text-primary truncate">
+                  {t.name}
+                </p>
+                <p className="text-[9.5px] text-text-tertiary">
+                  {t.nodes} nodes · {t.edges} edges
+                </p>
+              </div>
+              <button
+                onClick={() => actions.loadTemplate(t.id)}
+                className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-md bg-surface-raised border border-border-subtle text-text-secondary opacity-0 group-hover:opacity-100 hover:text-lc-accent hover:border-lc-accent/50 transition-all cursor-pointer active:scale-95"
+              >
+                Load
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -483,9 +479,6 @@ function TemplatesSection() {
           Save
         </button>
       </div>
-      <p className="text-[9px] text-ink-500 px-2 pb-1 leading-4">
-        The current canvas graph is stored as a template in library/templates/ (§13).
-      </p>
     </Folder>
   );
 }
@@ -559,7 +552,7 @@ export function LeftPanel() {
             key={key}
             onClick={() => actions.setLeftTab(key)}
             className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11.5px] font-bold transition-colors cursor-pointer border-b-2 ${
-              tab === key ? "text-lc-accent border-lc-accent bg-ink-850" : "text-ink-400 border-transparent hover:text-ink-200"
+              tab === key ? "text-lc-accent border-lc-accent bg-surface-raised" : "text-text-secondary border-transparent hover:text-text-primary"
             }`}
           >
             <Icon size={13} /> {label}
@@ -583,8 +576,8 @@ export function LeftPanel() {
 
 function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="px-3.5 py-3 border-b border-ink-700/70">
-      <p className="text-[10.5px] font-extrabold text-ink-400 mb-2.5 flex items-center gap-1.5">
+    <div className="px-3.5 py-3 border-b border-border-subtle">
+      <p className="text-[10.5px] font-bold text-text-secondary uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
         {icon}{title}
       </p>
       {children}
@@ -595,13 +588,13 @@ function Section({ title, icon, children }: { title: string; icon?: React.ReactN
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block mb-2.5">
-      <span className="block text-[10.5px] text-ink-400 mb-1">{label}</span>
+      <span className="block text-[11px] font-medium text-text-secondary mb-1">{label}</span>
       {children}
     </label>
   );
 }
 
-const inputCls = "w-full px-2.5 py-1.5 rounded-lg bg-ink-850 border border-ink-600 text-[12px] text-ink-100 focus:border-lc-accent/60 focus:outline-none transition-colors";
+const inputCls = "w-full px-2.5 py-1.5 rounded-lg bg-surface-raised border border-border-subtle text-[12px] text-text-primary placeholder:text-text-tertiary focus:border-lc-accent/60 focus:outline-none transition-colors";
 const selectCls = inputCls + " cursor-pointer";
 
 /* ---------------------------------------------------------------- inspector tabs (ADR-015)
@@ -743,7 +736,7 @@ function NodeInspector({ node }: { node: RFNode }) {
       {runLocked && (
         <div className="mx-3.5 mt-3 mb-0.5 flex items-center gap-2 px-3 py-2 rounded-lg bg-lc-warn/10 border border-lc-warn/45 anim-rise">
           <ILock size={13} className="text-lc-warn shrink-0" />
-          <p className="text-[10.5px] leading-4 text-lc-warn font-bold">Locked while running — editing is disabled until this step ends (§12.5)</p>
+          <p className="text-[10.5px] leading-4 text-lc-warn font-bold">Locked while running</p>
         </div>
       )}
 
@@ -899,8 +892,8 @@ function NodeInspector({ node }: { node: RFNode }) {
           </Section>
 
           <Section title="Context contract" icon={<ILock size={12} />}>
-            <p className="text-[10px] text-ink-400 leading-5 mb-2.5 bg-ink-850 border border-ink-700 rounded-lg px-2.5 py-2">
-              The agent sees <strong className="text-ink-200">no file</strong> outside this list and writes nowhere else — per §9 of the document.
+            <p className="text-[10px] text-text-secondary mb-2 bg-surface-raised border border-border-subtle rounded-lg px-2.5 py-1.5">
+              File access strictly bound to allowed paths.
             </p>
 
             <ContractGroup
@@ -930,12 +923,8 @@ function NodeInspector({ node }: { node: RFNode }) {
               onClick={() => actions.selfTest(node.id)}
               className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-sky-lc/10 border border-sky-lc/40 text-sky-lc text-[11px] font-bold hover:bg-sky-lc/20 transition-all cursor-pointer active:scale-[0.99]"
             >
-              <ILock size={12} /> Self-test this node's contract
-              <span className="text-[8.5px] font-mono opacity-70">§9</span>
+              <ILock size={12} /> Self-test contract
             </button>
-            <p className="text-[9px] text-ink-500 mt-1.5 leading-4">
-              Simulates one allowed write and two intrusion attempts (global memory and another agent's memory); the result lands in the event console.
-            </p>
           </Section>
         </>
       )}
@@ -981,7 +970,7 @@ function NodeInspector({ node }: { node: RFNode }) {
         </div>
         <button
           onClick={() => actions.removeNode(node.id)}
-          className="mt-1.5 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-ink-850 border border-ink-600 text-ink-400 text-[11.5px] font-bold hover:border-ember/60 hover:text-ember transition-colors cursor-pointer"
+          className="mt-1.5 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-transparent border border-border-subtle text-text-secondary text-[11.5px] font-medium hover:border-danger/60 hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer active:scale-98"
         >
           <ITrash size={13} /> Delete node and its files
         </button>
@@ -1039,7 +1028,7 @@ function EdgeInspector({ edgeId }: { edgeId: string }) {
         )}
       </Section>
       <Section title="Actions">
-        <button onClick={() => actions.removeEdge(edge.id)} className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-ink-850 border border-ink-600 text-ink-400 text-[11.5px] font-bold hover:border-ember/60 hover:text-ember transition-colors cursor-pointer">
+        <button onClick={() => actions.removeEdge(edge.id)} className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-transparent border border-border-subtle text-text-secondary text-[11.5px] font-medium hover:border-danger/60 hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer active:scale-98">
           <ITrash size={13} /> Delete edge
         </button>
       </Section>
@@ -1055,9 +1044,9 @@ function CanvasInspector() {
   const actions = useStore((s) => s.actions);
   return (
     <div className="anim-fade pb-24">
-      <div className="px-3.5 py-3 border-b border-ink-700">
-        <p className="text-[13px] font-extrabold text-ink-50 flex items-center gap-2"><INode size={15} className="text-ink-300" /> Canvas settings</p>
-        <p className="text-[10px] text-ink-400 mt-1 leading-5">Select a node to inspect it. With nothing selected, canvas-wide settings live here.</p>
+      <div className="px-3.5 py-3 border-b border-border-subtle">
+        <p className="text-[13px] font-extrabold text-text-primary flex items-center gap-2"><INode size={15} className="text-text-secondary" /> Canvas settings</p>
+        <p className="text-[10.5px] text-text-secondary mt-1 leading-5">Select a node to inspect it. With nothing selected, canvas-wide settings live here.</p>
       </div>
       <Section title="canvas.yaml">
         <Field label="Canvas title">
@@ -1079,19 +1068,18 @@ function CanvasInspector() {
             {["deepseek-chat", "glm-4-flash", "ollama:qwen2.5"].map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Field>
-        <Field label="Tags (comma separated)">
+        <Field label="Tags">
           <input value={canvas.tags.join(", ")} onChange={(e) => actions.updateCanvas({ tags: e.target.value.split(",").map((t) => t.trim()).filter(Boolean) })} className={inputCls} />
         </Field>
-        <p className="text-[10px] text-ink-500 font-mono mt-1">template: {canvas.template_id} v{canvas.template_version}</p>
       </Section>
       <Section title="Live stats" icon={<IPulse size={12} />}>
         <div className="grid grid-cols-3 gap-1.5 text-center">
           {[
             [nodes.length, "nodes"], [edges.length, "edges"], [snapshots.length, "checkpoints"],
           ].map(([n, l]) => (
-            <div key={l as string} className="py-2.5 rounded-lg bg-ink-850 border border-ink-700">
+            <div key={l as string} className="py-2.5 rounded-lg bg-surface-raised border border-border-subtle">
               <p className="text-[18px] font-display text-lc-accent leading-6">{n as number}</p>
-              <p className="text-[9.5px] text-ink-400">{l}</p>
+              <p className="text-[9.5px] text-text-secondary">{l}</p>
             </div>
           ))}
         </div>
@@ -1099,7 +1087,7 @@ function CanvasInspector() {
       <Section title="Danger zone">
         <button
           onClick={() => { if (confirm("The whole workspace is cleared and rebuilt. Are you sure?")) void actions.reset(); }}
-          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-ember/10 border border-ember/40 text-ember text-[11.5px] font-bold hover:bg-ember/20 transition-colors cursor-pointer"
+          className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg bg-transparent border border-border-subtle text-text-secondary text-[11.5px] font-medium hover:border-danger/60 hover:text-danger hover:bg-danger/10 transition-colors cursor-pointer active:scale-98"
         >
           <ITrash size={13} /> Clear and rebuild the canvas
         </button>
@@ -1347,15 +1335,15 @@ export function RightPanel() {
       className="shrink-0 border-s border-ink-700 bg-ink-900/80 flex flex-col h-full max-h-full min-h-0 overflow-hidden"
     >
       {/* Top navigation tabs for RightPanel */}
-      <div className="flex items-center border-b border-ink-700 bg-ink-850 shrink-0 px-1 py-1" data-lc-rightpanel-tabs>
+      <div className="flex items-center border-b border-border-subtle bg-surface-base shrink-0 px-1 py-1" data-lc-rightpanel-tabs>
         <button
           onClick={() => {
             setPanelMode("inspector");
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
             panelMode === "inspector"
-              ? "bg-ink-750 text-lc-accent shadow-sm"
-              : "text-ink-400 hover:text-ink-200"
+              ? "bg-surface-raised text-lc-accent shadow-sm"
+              : "text-text-secondary hover:text-text-primary"
           }`}
         >
           <INode size={12} />
@@ -1376,8 +1364,8 @@ export function RightPanel() {
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
             panelMode === "chat"
-              ? "bg-ink-750 text-lc-accent shadow-sm"
-              : "text-ink-400 hover:text-ink-200"
+              ? "bg-surface-raised text-lc-accent shadow-sm"
+              : "text-text-secondary hover:text-text-primary"
           }`}
         >
           <IChat size={12} />
@@ -1391,8 +1379,8 @@ export function RightPanel() {
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
             panelMode === "canvas"
-              ? "bg-ink-750 text-lc-accent shadow-sm"
-              : "text-ink-400 hover:text-ink-200"
+              ? "bg-surface-raised text-lc-accent shadow-sm"
+              : "text-text-secondary hover:text-text-primary"
           }`}
         >
           <IGear size={12} />

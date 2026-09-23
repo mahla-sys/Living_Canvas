@@ -26,14 +26,14 @@ const SAVE_PHRASE: Record<AppState["saveState"], string> = {
 };
 
 const STATUS_PHRASE: Record<AppState["execution"]["status"], { label: string; tone: string }> = {
-  idle: { label: "Ready — nothing running", tone: "text-ink-500" },
-  running: { label: "Running", tone: "text-lc-accent" },
+  idle: { label: "Ready — nothing running", tone: "text-text-secondary font-medium" },
+  running: { label: "Running", tone: "text-lc-accent font-bold" },
   // paused and waiting are "this needs you", not "this is live" — that is the warn role, not the accent
-  paused: { label: "Paused — press Resume to continue", tone: "text-lc-warn" },
-  waiting_approval: { label: "Waiting for your approval", tone: "text-lc-warn" },
-  completed: { label: "Run finished", tone: "text-sage" },
-  failed: { label: "Run failed — see the log", tone: "text-ember" },
-  stopped: { label: "Run stopped", tone: "text-ember" },
+  paused: { label: "Paused — press Resume to continue", tone: "text-lc-warn font-bold" },
+  waiting_approval: { label: "Waiting for your approval", tone: "text-lc-warn font-bold" },
+  completed: { label: "Run finished", tone: "text-lc-success font-bold" },
+  failed: { label: "Run failed — see the log", tone: "text-ember font-bold" },
+  stopped: { label: "Run stopped", tone: "text-ember font-bold" },
 };
 
 export function StatusBar() {
@@ -49,22 +49,22 @@ export function StatusBar() {
   const actions = useStore((s) => s.actions);
   const mode = storageMode();
 
-  const chip = "text-[9.5px] font-mono leading-none px-1.5 py-0.5 rounded border border-ink-700 bg-ink-850";
+  const chip = "text-[10px] font-mono leading-none px-2 py-1 rounded border border-border-subtle bg-surface-raised text-text-secondary";
   return (
     <div
       data-lc-statusbar
-      className="h-[22px] w-full max-w-full shrink-0 flex items-center justify-between gap-3 px-2.5 border-t border-ink-700 bg-ink-900 text-ink-400 select-none min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller"
+      className="h-[22px] w-full max-w-full shrink-0 flex items-center justify-between gap-3 px-2.5 border-t border-border-subtle bg-surface-base text-text-secondary select-none min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller"
       style={{ height: STATUS_BAR_HEIGHT }}
     >
       {/* left — the document */}
       <div className="flex items-center gap-2 min-w-0">
-        <span className="truncate text-[10px] font-bold text-ink-200">{title}</span>
+        <span className="truncate text-[10px] font-bold text-text-primary">{title}</span>
         <span className={chip}>{nodeCount} nodes</span>
         <span className={chip}>{edgeCount} edges</span>
         <button
           onClick={() => actions.setPortOpen(true)}
           title="Where the files live — and how to move them"
-          className={`${chip} text-sky-lc hover:border-sky-lc/60 cursor-pointer`}
+          className={`${chip} text-sky-lc font-medium hover:border-sky-lc/60 cursor-pointer`}
         >
           {mode}
         </button>
@@ -72,7 +72,7 @@ export function StatusBar() {
 
       {/* right — the moment */}
       <div className="flex items-center gap-2 shrink-0">
-        {chordDepth > 0 && <span className="text-[9.5px] font-mono text-ink-300">Ctrl+K … press Z</span>}
+        {chordDepth > 0 && <span className="text-[9.5px] font-mono text-text-secondary">Ctrl+K … press Z</span>}
         {focus && (
           <button
             onClick={actions.toggleFocusMode}
@@ -83,10 +83,10 @@ export function StatusBar() {
           </button>
         )}
         {/* the phrase, not the enum — and the queue position while there is a queue to be in */}
-        <span className={`text-[9.5px] font-bold ${STATUS_PHRASE[status].tone}`} data-lc-run-phrase>
+        <span className={`text-[9.5px] ${STATUS_PHRASE[status].tone}`} data-lc-run-phrase>
           {STATUS_PHRASE[status].label}
           {queue.length > 0 && (status === "running" || status === "paused") && (
-            <span className="font-mono text-ink-400 ms-1.5">{completed} of {queue.length}</span>
+            <span className="font-mono text-text-secondary ms-1.5">{completed} of {queue.length}</span>
           )}
         </span>
         <span className={chip} title="Whether the last change reached the files">{SAVE_PHRASE[saveState]}</span>
@@ -112,7 +112,6 @@ function Logo() {
 export function TopBar() {
   const canvas = useStore((s) => s.canvas);
   const saveState = useStore((s) => s.saveState);
-  const backendUrl = useStore((s) => s.settings.backendUrl);
   const execution = useStore((s) => s.execution);
   const actions = useStore((s) => s.actions);
   const leftOpen = useStore((s) => s.canvas.layout.leftOpen);
@@ -130,7 +129,7 @@ export function TopBar() {
       <div className="flex items-center gap-2 shrink-0 me-1">
         <button
           onClick={() => actions.togglePanel("left")}
-          title={`${leftOpen ? "Hide" : "Show"} library panel`}
+          title={`${leftOpen ? "Hide" : "Show"} library panel (⌘1)`}
           className={`p-2 rounded-lg border transition-all cursor-pointer ${
             leftOpen ? "border-ink-600 text-ink-200 bg-ink-800 hover:border-lc-accent/60" : "border-transparent text-ink-500 hover:text-ink-300 hover:bg-ink-800"
           }`}
@@ -142,12 +141,9 @@ export function TopBar() {
       <div className="flex items-center gap-2.5 shrink-0">
         <Logo />
         <div className="leading-none">
-          <p className="font-display text-[19px] text-ink-50 tracking-wide">Living Canvas</p>
-          <p className="text-[9px] text-ink-400 mt-0.5 flex items-center gap-1.5" data-lc-topbar-subtitle>
-            <span className="font-mono text-ink-300 px-1 py-px rounded bg-ink-800 border border-ink-700">v{APP_VERSION}</span>
-            <span className="w-1 h-1 rounded-full bg-ink-500" />
-            doc <span className="font-mono">1.3</span>
-            <span className="w-1 h-1 rounded-full bg-sage" title="phase 1 closed" />
+          <p className="font-display text-[18px] text-ink-50 tracking-wide">Living Canvas</p>
+          <p className="text-[10px] text-text-tertiary mt-0.5" data-lc-topbar-subtitle>
+            <span className="font-mono">v{APP_VERSION}</span>
           </p>
         </div>
       </div>
@@ -156,14 +152,9 @@ export function TopBar() {
 
       <div className="min-w-0">
         <p className="text-[13px] font-extrabold text-ink-100 truncate">{canvas.title}</p>
-        <p className="text-[9.5px] text-ink-400 flex items-center gap-1.5 mt-0.5">
-          <span className={`w-1.5 h-1.5 rounded-full ${saveState === "saving" ? "bg-lc-accent anim-blink" : "bg-sage"}`} />
-          {saveState === "saving"
-            ? "saving…"
-            : backendUrl?.trim()
-              ? "saved — server StorageAdapter"
-              : "saved — IndexedDB"}
-          <span className="font-mono">/{canvas.canvas_type}</span>
+        <p className="text-[10px] text-text-secondary flex items-center gap-1.5 mt-0.5">
+          <span className={`w-1.5 h-1.5 rounded-full ${saveState === "saving" ? "bg-lc-accent anim-blink" : "bg-lc-success"}`} />
+          {saveState === "saving" ? "saving…" : "saved"}
         </p>
       </div>
 
@@ -239,7 +230,7 @@ export function TopBar() {
         
         <button
           onClick={() => actions.togglePanel("right")}
-          title={`${rightOpen ? "Hide" : "Show"} inspector panel`}
+          title={`${rightOpen ? "Hide" : "Show"} inspector panel (⌘2)`}
           className={`p-2 rounded-lg border transition-all cursor-pointer ${
             rightOpen ? "border-ink-600 text-ink-200 bg-ink-800 hover:border-lc-accent/60" : "border-transparent text-ink-500 hover:text-ink-300 hover:bg-ink-800"
           }`}
@@ -249,11 +240,11 @@ export function TopBar() {
 
         <div className="w-px h-6 bg-ink-700 mx-1" />
         {running ? (
-          <button onClick={actions.stop} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-ember/15 border border-ember/50 text-ember text-[12px] font-extrabold hover:bg-ember/25 transition-all cursor-pointer">
+          <button onClick={actions.stop} className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-transparent border border-ember/50 text-ember text-[11.5px] font-bold hover:bg-ember/10 transition-all cursor-pointer">
             <IStop size={14} /> Stop run
           </button>
         ) : waiting ? (
-          <button onClick={actions.resume} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-ember/15 border border-ember/60 text-ember text-[12px] font-extrabold anim-waiting transition-all cursor-pointer">
+          <button onClick={actions.resume} className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-transparent border border-lc-warn/60 text-lc-warn text-[11.5px] font-bold anim-waiting transition-all cursor-pointer">
             <IWarn size={14} /> Approve &amp; continue
           </button>
         ) : (
@@ -333,30 +324,30 @@ export function ActivityConsole() {
   // focus mode is about the board: the log is chrome, and chrome is what leaves
   if (focus) return null;
   return (
-    <div className={`shrink-0 border-t border-ink-700 bg-ink-900/90 transition-all duration-300 ${open ? "h-[168px]" : "h-[34px]"} flex flex-col`}>
-      <button onClick={actions.toggleConsole} className="flex items-center gap-2 px-3.5 h-[34px] shrink-0 text-ink-300 hover:text-ink-100 transition-colors cursor-pointer">
+    <div className={`shrink-0 border-t border-border-subtle bg-surface-base transition-all duration-300 ${open ? "h-[168px]" : "h-[32px]"} flex flex-col`}>
+      <button onClick={actions.toggleConsole} className="flex items-center gap-2 px-3.5 h-[32px] shrink-0 text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
         <ITerminal size={13} className="text-lc-accent" />
-        <span className="text-[11px] font-bold">Events and system log</span>
-        <span className="text-[9.5px] font-mono text-ink-500">Event Bus §11</span>
-        <span className="text-[9.5px] text-ink-500 bg-ink-800 border border-ink-700 rounded px-1.5">{events.length}</span>
+        <span className="text-[11px] font-bold text-text-primary">Events</span>
+        <span className="text-[9.5px] font-mono text-text-secondary bg-surface-raised border border-border-subtle rounded px-1.5">{events.length}</span>
+        <span className="text-[9px] font-mono text-text-tertiary border border-border-subtle rounded px-1 hidden sm:inline">⌘L</span>
         <IChevD size={13} className={`ms-auto transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 pb-2 space-y-[3px]">
-          {events.length === 0 && <p className="text-[10.5px] text-ink-500 py-2">No event yet — start working on the canvas.</p>}
+          {events.length === 0 && <p className="text-[10.5px] text-text-tertiary py-2">No event yet — start working on the canvas.</p>}
           {events.map((e: BusEvent) => {
             // one lookup per row, because the two alpha tints are derived from the same role
-            const tagColor = TAG_COLOR[e.type] ?? "var(--color-ink-300)";
+            const tagColor = TAG_COLOR[e.type] ?? "var(--lc-text-secondary)";
             return (
             <div key={e.id} className="flex items-center gap-2 text-[10.5px] anim-rise">
-              <span className="font-mono text-ink-500 shrink-0 w-[52px]">{fmtClock(e.at)}</span>
+              <span className="font-mono text-text-tertiary shrink-0 w-[52px]">{fmtClock(e.at)}</span>
               <span
                 className="shrink-0 font-mono text-[9px] px-1.5 py-px rounded border"
                 style={{ color: tagColor, borderColor: `color-mix(in srgb, ${tagColor} 27%, transparent)`, background: `color-mix(in srgb, ${tagColor} 6%, transparent)` }}
               >
                 {e.type}
               </span>
-              <span className="text-ink-300 truncate">{e.message}</span>
+              <span className="text-text-secondary truncate">{e.message}</span>
             </div>
             );
           })}
@@ -384,7 +375,7 @@ export function HistoryModal() {
           <IHistory size={16} className="text-plum" />
           <div className="flex-1">
             <p className="text-[13px] font-extrabold text-ink-50">History and checkpoints</p>
-            <p className="text-[9.5px] text-ink-400 font-mono">history/ — §10</p>
+            <p className="text-[9.5px] text-ink-400 font-mono">history/</p>
           </div>
           <button onClick={actions.snapshot} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-lc-accent/12 border border-lc-accent/40 text-lc-accent text-[10.5px] font-bold hover:bg-lc-accent/20 transition-colors cursor-pointer">
             <ICamera size={12} /> New checkpoint
@@ -573,21 +564,31 @@ export function Toasts() {
     warn: { c: "var(--color-lc-warn)", Icon: IWarn },
     error: { c: "var(--color-ember)", Icon: IWarn },
   } as const;
+
+  useEffect(() => {
+    if (!toasts.length) return;
+    const latest = toasts[toasts.length - 1];
+    const timer = setTimeout(() => {
+      actions.dismissToast(latest.id);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [toasts, actions]);
+
   return (
-    <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] space-y-2 w-[380px] max-w-[calc(100vw-2rem)] pointer-events-none">
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[60] space-y-2 w-[380px] max-w-[calc(100vw-2rem)] pointer-events-none">
       {toasts.map((t) => {
         const k = KIND[t.kind];
         return (
           <button
             key={t.id}
             onClick={() => actions.dismissToast(t.id)}
-            className="pointer-events-auto w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-ink-900/95 border shadow-[0_14px_40px_-10px_rgba(0,0,0,0.7)] anim-toast text-start cursor-pointer backdrop-blur-sm"
+            className="pointer-events-auto w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-surface-overlay border border-border-subtle shadow-[0_14px_40px_-10px_rgba(0,0,0,0.7)] anim-toast text-start cursor-pointer backdrop-blur-sm"
             style={{ borderColor: `${k.c}55` }}
           >
             <span className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${k.c}18`, color: k.c }}>
               <k.Icon size={13} />
             </span>
-            <span className="text-[11.5px] text-ink-100 font-bold leading-5">{t.text}</span>
+            <span className="text-[11.5px] text-text-primary font-medium leading-5">{t.text}</span>
           </button>
         );
       })}

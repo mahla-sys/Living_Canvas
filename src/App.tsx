@@ -49,6 +49,21 @@ export default function App() {
         if (!typing) a.escapeKey();
         return;
       }
+      if (k === "1" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        a.togglePanel("left");
+        return;
+      }
+      if (k === "2" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        a.togglePanel("right");
+        return;
+      }
+      if (k === "l" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        a.toggleConsole();
+        return;
+      }
       if (k === "k" && (e.ctrlKey || e.metaKey)) {
         e.preventDefault(); // Ctrl+K is "search" in most browsers; on the canvas it starts this chord
         if (!typing) a.chordKey("k");

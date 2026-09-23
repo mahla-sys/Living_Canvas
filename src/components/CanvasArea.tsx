@@ -489,11 +489,17 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
     return (
       <button
         onClick={() => setDrawMode(true)}
-        className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full bg-ink-900/90 border border-ink-600 text-ink-200 text-[12px] font-bold shadow-[0_10px_40px_-10px_rgba(0,0,0,0.6)] hover:border-lc-accent/60 hover:text-lc-accent transition-all cursor-pointer backdrop-blur-sm group"
+        aria-label="Draw on the canvas"
+        title="Draw on the canvas"
+        className="absolute bottom-6 right-6 z-30 w-12 h-12 rounded-full flex items-center justify-center bg-surface-raised border border-border-subtle text-text-primary shadow-[0_8px_30px_-6px_rgba(0,0,0,0.6)] hover:border-lc-accent/60 hover:text-lc-accent transition-all cursor-pointer backdrop-blur-sm group active:scale-95"
       >
-        <IPen size={15} className="text-lc-accent group-hover:scale-110 transition-transform" />
-        Draw on the canvas
-        {strokes.length > 0 && <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded-full bg-lc-accent/15 border border-lc-accent/40 text-lc-accent">{strokes.length}</span>}
+        <IPen size={18} className="text-lc-accent group-hover:scale-110 transition-transform" />
+        <span className="sr-only">Draw on the canvas</span>
+        {strokes.length > 0 && (
+          <span className="absolute -top-1 -right-1 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-lc-accent text-void font-bold shadow-sm">
+            {strokes.length}
+          </span>
+        )}
       </button>
     );
   }
@@ -720,9 +726,6 @@ export function CanvasInner() {
     [execution, nodes]
   );
 
-  const agentCount = nodes.filter((n) => n.data.nodeType === "agent").length;
-  const running = execution.status === "running";
-
   const drawToolNow = drawCfg().tool;
 
   return (
@@ -748,7 +751,7 @@ export function CanvasInner() {
         maxZoom={2.2}
         fitView={false}
         deleteKeyCode={drawMode ? null : ["Backspace", "Delete"]}
-        proOptions={{ hideAttribution: false }}
+        proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={{ type: "lc" }}
         /* §11.3 of the spec: the grid and the dots are one number, and a snap that falls between two
            visible dots reads as broken alignment. Opt-in, because it rewrites `position` in node files. */
@@ -765,7 +768,7 @@ export function CanvasInner() {
         nodesConnectable={!drawMode}
         elementsSelectable={!drawMode}
       >
-        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.4} />
+        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.5} color="var(--lc-dot, rgba(255,255,255,0.08))" />
         <StrokesLayer
           strokes={strokes}
           live={live}
@@ -788,22 +791,6 @@ export function CanvasInner() {
       )}
       <div data-drawui>
         <DrawToolbar drawMode={drawMode} setDrawMode={setDrawMode} />
-      </div>
-
-      {/* stats chip */}
-      <div data-drawui className="absolute top-3 left-3 z-10 flex items-center gap-2 anim-fade">
-        <div className="flex items-center gap-3 px-3.5 py-2 rounded-xl bg-ink-900/85 border border-ink-700 backdrop-blur-sm text-[11px] text-ink-300">
-          <span className="flex items-center gap-1.5"><IBrain size={13} className="text-ink-300" /> {agentCount} agents</span>
-          <span className="w-px h-3.5 bg-ink-700" />
-          <span>{nodes.length} nodes</span>
-          <span className="w-px h-3.5 bg-ink-700" />
-          <span>{edges.length} edges</span>
-          <span className="w-px h-3.5 bg-ink-700" />
-          <span className={`flex items-center gap-1.5 font-bold ${running ? "text-lc-accent" : execution.status === "completed" ? "text-sage" : ""}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${running ? "anim-blink" : ""}`} style={{ background: running ? "var(--color-lc-accent)" : execution.status === "completed" ? "var(--color-sage)" : "var(--color-ink-400)" }} />
-            {running ? "Running" : execution.status === "waiting_approval" ? "Awaiting approval" : execution.status === "completed" ? "Completed" : execution.status === "failed" ? "Failed" : "Ready"}
-          </span>
-        </div>
       </div>
 
       {/* approval banner */}

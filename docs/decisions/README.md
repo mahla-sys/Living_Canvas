@@ -26,6 +26,10 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
 | 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted (clause 3 superseded by 011) | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data |
 | 011 | `adr-011-accent-must-differ-in-hue-from-ink.md` | accepted | an accent must sit at least 60° from its own theme's ink hue (or, on an achromatic ramp, carry enough chroma), enforced by the palette gate; `botanical` is the default again |
+| 030 | `adr-030-design-system-tokens-and-extensibility.md` | accepted | Obsidian Laboratory tokens, 4-tier surface hierarchy, warm amber brand accent, unified typography, and theme extensibility |
+| 031 | `adr-031-floating-panel-architecture.md` | accepted | floating panel architecture, overlay drawers, and canvas chrome reduction |
+| 032 | `adr-032-activity-rail-and-canvas-chrome-ratio.md` | accepted | 48px activity rail, overlay drawers, 40px unbordered library rows, and canvas chrome ratio >= 80% |
+| 033 | `adr-033-ui-declutter-and-semantic-token-unification.md` | accepted | UI declutter, 50% text reduction, semantic token unification, and dot grid visibility |
 | 029 | `adr-029-mistral-api-integration.md` | accepted | integrates Mistral API provider and configures default Mistral API key |
 | 028 | `adr-028-remove-left-panel-canvas-manager-and-configure-api-key.md` | accepted | removes redundant Canvas Manager banner from left panel and configures default DeepSeek API key |
 | 027 | `adr-027-docked-right-panel-chat.md` | accepted | docks conversational interfaces inside right panel, provides top navigation options for inspector, chat, and canvas |

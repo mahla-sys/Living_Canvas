@@ -9,15 +9,21 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "vitest run src/lib/__tests__/viewport-playwright.test.ts",
+    "capture:ui": "node scripts/capture-ui.mjs",
+    "audit:ui": "node scripts/auto-designer.mjs"
   },
   "dependencies": {
+    "@google/genai": "^2.23.0",
     "@xyflow/react": "^12.11.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.1.7",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
