@@ -1,7 +1,7 @@
 ---
 title: Inbox — registered but undecided
 status: active
-updated: 2026-09-02
+updated: 2026-09-24
 sources: [docs/roadmap/infrastructure-horizon.md, docs/decisions/README.md]
 ---
 
@@ -24,6 +24,9 @@ ADR, and staying here would hide it.
 | 5 | Does `drawMode` belong in the store? | Today it is component state in `CanvasArea`, and the tool/colour/width live in `DrawToolbar` and reach the canvas through `window.__lcDraw` — a global mutable set in a `useEffect`. It works while one toolbar is mounted, but it is untestable from outside and it is the kind of side-channel that breaks silently. Moving it into `ui` state is a small change with a real payoff. | ADR if it grows; a refactor note otherwise |
 | 6 | Should strokes be per-canvas files or one file? | `strokes/<id>.json` is one file per stroke, which matches Law 1 but means a canvas with 200 strokes has 200 tiny files. Nobody has hit that yet. | revisit when it hurts |
 | 7 | Backend proxy for production API keys | Direct browser API keys are acceptable for personal/local use, but production deployments require a backend proxy to protect keys from client exposure and rate-limit egress. | ADR / backend service integration |
+| 8 | The a11y spec can never fail | `tests/a11y.spec.ts` asserts `expect(violations).toBeDefined()` — true by construction — and writes its result to a gitignored `artifacts/` dir. Either it gates on zero violations (then the known gaps — no focus ring, no keyboard traversal, unannounced toasts, §9.9 — go red) or it baselines and gates on *new* violations only. | an ADR with the bar chosen, then the assertion changed to match |
+| 9 | Provider CORS is unverified for most rows | Direct browser→provider calls work only if the provider's CORS policy allows it. Gemini's was verified live (ADR-037); DeepSeek and Mistral were integrated from a key, not from a live browser call. A hung or CORS-blocked first call now falls back to the simulator with a toast — visible, but the row is still unproven. | a live smoke test per provider row, or the rows leave `MODELS` |
+| 10 | `loadProjectFinderPipeline` duplicates the `project-finder` template | The engine hard-codes the same four agents the built-in template JSON describes, so the pipeline exists twice: a function and a file (ADR-039 made the file the interface). The function should load the template, not restate it. | a refactor note, then the function shrinks to a `loadTemplate` call |
 
 ## سند بنیادین Living Canvas (The Living Manifesto)
 
