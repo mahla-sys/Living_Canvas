@@ -73,7 +73,7 @@
   --lc-card-top: #182826;
   --lc-card-bottom: #121d1c;
   --lc-card-empty: rgba(15, 26, 25, 0.55);
-  --lc-dot: rgba(34, 56, 52, 0.25);
+  --lc-dot: rgba(34, 56, 52, 0.12);
   --lc-minimap-mask: rgba(11, 19, 18, 0.82);
   --lc-fail-band: rgba(23, 13, 11, 0.95);
   --lc-selection: color-mix(in srgb, var(--color-lc-accent) 35%, transparent);
@@ -547,7 +547,7 @@ body,
   --lc-card-top: #242424;
   --lc-card-bottom: #1a1a1a;
   --lc-card-empty: rgba(19, 19, 19, 0.55);
-  --lc-dot: rgba(64, 64, 64, 0.3);
+  --lc-dot: rgba(64, 64, 64, 0.15);
   --lc-minimap-mask: rgba(13, 13, 13, 0.82);
   --lc-fail-band: rgba(30, 12, 14, 0.95);
 

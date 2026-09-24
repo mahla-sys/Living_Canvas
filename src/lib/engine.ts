@@ -2477,28 +2477,103 @@ export async function seedWorkspace(api: EngineApi) {
   await boot("library/shapes/agent-card.json", JSON.stringify({ id: "agent-card", name: "Agent card", type: "shape", default_size: { width: 280, height: 160 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
   await boot("library/shapes/hex-process.json", JSON.stringify({ id: "hex-process", name: "Process hexagon", type: "shape", default_size: { width: 240, height: 140 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
 
-  // seed project-finder template in library
-  const pfSpec: TemplateSpec = {
-    template_id: "project-finder",
-    name: "Freelance Project & Proposal Pipeline",
-    description: "4-agent automated pipeline for scouting projects, evaluating feasibility, drafting bespoke proposals, and contract milestones.",
-    version: "1.0",
-    nodes: [
-      { id: "node-scout", nodeType: "agent", title: "1. Project & Client Scout", position: { x: 80, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline." },
-      { id: "node-filter", nodeType: "agent", title: "2. Feasibility & Risk Filter", position: { x: 420, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision." },
-      { id: "node-proposal", nodeType: "agent", title: "3. Proposal & Pitch Architect", position: { x: 760, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing." },
-      { id: "node-closer", nodeType: "agent", title: "4. Milestone & Deal Closer", position: { x: 1100, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "deal-closer", content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action." },
-      { id: "node-output", nodeType: "output-box", title: "Freelance Package Deliverable", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send." },
-    ],
-    edges: [
-      { id: "edge-001", source: "node-scout", target: "node-filter", edgeType: "flow", label: "scouted briefs", line_style: "solid" },
-      { id: "edge-002", source: "node-filter", target: "node-proposal", edgeType: "flow", label: "qualified projects", line_style: "solid" },
-      { id: "edge-003", source: "node-proposal", target: "node-closer", edgeType: "flow", label: "custom proposal", line_style: "solid" },
-      { id: "edge-004", source: "node-closer", target: "node-output", edgeType: "flow", label: "final package", line_style: "solid" },
-    ],
-  };
-  await boot("library/templates/project-finder/template.json", JSON.stringify(pfSpec, null, 2));
-  await boot("library/templates/project-finder/template.yaml", toYaml({ template_id: "project-finder", name: pfSpec.name, version: "1.0", nodes: 5, edges: 4 }));
+  // seed 5 built-in pipeline templates in library
+  const builtInTemplates: TemplateSpec[] = [
+    {
+      template_id: "project-finder",
+      name: "Freelance Project & Proposal Pipeline",
+      description: "4-agent automated pipeline for scouting projects, evaluating feasibility, drafting bespoke proposals, and contract milestones.",
+      version: "1.0",
+      nodes: [
+        { id: "node-scout", nodeType: "agent", title: "1. Project & Client Scout", position: { x: 80, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline." },
+        { id: "node-filter", nodeType: "agent", title: "2. Feasibility & Risk Filter", position: { x: 420, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision." },
+        { id: "node-proposal", nodeType: "agent", title: "3. Proposal & Pitch Architect", position: { x: 760, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing." },
+        { id: "node-closer", nodeType: "agent", title: "4. Milestone & Deal Closer", position: { x: 1100, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "deal-closer", content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action." },
+        { id: "node-output", nodeType: "output-box", title: "Freelance Package Deliverable", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send." },
+      ],
+      edges: [
+        { id: "edge-001", source: "node-scout", target: "node-filter", edgeType: "flow", label: "scouted briefs", line_style: "solid" },
+        { id: "edge-002", source: "node-filter", target: "node-proposal", edgeType: "flow", label: "qualified projects", line_style: "solid" },
+        { id: "edge-003", source: "node-proposal", target: "node-closer", edgeType: "flow", label: "custom proposal", line_style: "solid" },
+        { id: "edge-004", source: "node-closer", target: "node-output", edgeType: "flow", label: "final package", line_style: "solid" },
+      ],
+    },
+    {
+      template_id: "decision-engine",
+      name: "Problem Solving & Decision Engine",
+      description: "4-agent executive engine for framing problems, evaluating risks, designing measurable solutions, and proposing human-approved decisions.",
+      version: "1.0",
+      nodes: [
+        { id: "node-understand", nodeType: "agent", title: "1. Understand the Problem", position: { x: 80, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "understander", content: "Clarifies ambiguities and formulates a single, precise problem statement." },
+        { id: "node-risk", nodeType: "agent", title: "2. Risk & Feasibility Analyst", position: { x: 420, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "risk-analyst", content: "Evaluates proposal vulnerabilities and scores risks from 1 to 10." },
+        { id: "node-solution", nodeType: "agent", title: "3. Solution Designer", position: { x: 760, y: 180 }, shape: "card", color: "#8fbf7f", viewMode: "card", role: "solution-designer", content: "Creates a 3-step executable solution with concrete success criteria." },
+        { id: "node-decision", nodeType: "agent", title: "4. Decision Wrap-Up", position: { x: 1100, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "decision-maker", content: "Consolidates all agent outputs and formulates final approval request." },
+        { id: "node-output", nodeType: "output-box", title: "Approved Action Plan", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#e8b04b", viewMode: "card", content: "Executive Action Plan: Validated decisions and step-by-step implementation." },
+      ],
+      edges: [
+        { id: "edge-001", source: "node-understand", target: "node-risk", edgeType: "flow", label: "problem statement", line_style: "solid" },
+        { id: "edge-002", source: "node-risk", target: "node-solution", edgeType: "flow", label: "risk report", line_style: "solid" },
+        { id: "edge-003", source: "node-solution", target: "node-decision", edgeType: "flow", label: "designed solution", line_style: "solid" },
+        { id: "edge-004", source: "node-decision", target: "node-output", edgeType: "flow", label: "approved plan", line_style: "solid" },
+      ],
+    },
+    {
+      template_id: "code-builder",
+      name: "Full-Stack Code Builder Pipeline",
+      description: "Automated software development workflow: specification framing, code synthesis, and architectural validation.",
+      version: "1.0",
+      nodes: [
+        { id: "node-architect", nodeType: "agent", title: "1. System Architect", position: { x: 100, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "understander", content: "Analyzes system requirements, data structures, and interface contracts." },
+        { id: "node-coder", nodeType: "agent", title: "2. System Builder", position: { x: 460, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "builder", content: "Writes production TypeScript code and architectural components." },
+        { id: "node-tester", nodeType: "agent", title: "3. QA & Security Reviewer", position: { x: 820, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "risk-analyst", content: "Validates test coverage, edge cases, and security boundaries." },
+        { id: "node-output", nodeType: "output-box", title: "Production Code Package", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Engineered release ready for deployment and git integration." },
+      ],
+      edges: [
+        { id: "edge-001", source: "node-architect", target: "node-coder", edgeType: "flow", label: "specifications", line_style: "solid" },
+        { id: "edge-002", source: "node-coder", target: "node-tester", edgeType: "flow", label: "source code", line_style: "solid" },
+        { id: "edge-003", source: "node-tester", target: "node-output", edgeType: "flow", label: "verified build", line_style: "solid" },
+      ],
+    },
+    {
+      template_id: "market-research",
+      name: "Market Research & Competitive Scout",
+      description: "Market intelligence pipeline: trend scouting, competitor feature matrix, and differentiation strategy.",
+      version: "1.0",
+      nodes: [
+        { id: "node-scout", nodeType: "agent", title: "1. Market Trend Scout", position: { x: 100, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scans industry shifts, user pain points, and emerging opportunities." },
+        { id: "node-analysis", nodeType: "agent", title: "2. Competitive Analyst", position: { x: 460, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Maps competitor pricing, feature gaps, and weaknesses." },
+        { id: "node-strategy", nodeType: "agent", title: "3. Positioning Strategist", position: { x: 820, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "solution-designer", content: "Defines unique value proposition and go-to-market plan." },
+        { id: "node-output", nodeType: "output-box", title: "Strategic Market Report", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Comprehensive market intelligence brief with tactical actions." },
+      ],
+      edges: [
+        { id: "edge-001", source: "node-scout", target: "node-analysis", edgeType: "flow", label: "market data", line_style: "solid" },
+        { id: "edge-002", source: "node-analysis", target: "node-strategy", edgeType: "flow", label: "competitor matrix", line_style: "solid" },
+        { id: "edge-003", source: "node-strategy", target: "node-output", edgeType: "flow", label: "market report", line_style: "solid" },
+      ],
+    },
+    {
+      template_id: "content-engine",
+      name: "Content Strategy & Copywriting Engine",
+      description: "Multi-agent viral copywriting pipeline: research, compelling copy drafting, and conversion optimization.",
+      version: "1.0",
+      nodes: [
+        { id: "node-research", nodeType: "agent", title: "1. Topic & Hook Researcher", position: { x: 100, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Researches trending hooks, client audience angles, and core themes." },
+        { id: "node-copy", nodeType: "agent", title: "2. Persuasive Copywriter", position: { x: 460, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Drafts high-engagement posts, newsletters, and conversion copy." },
+        { id: "node-review", nodeType: "agent", title: "3. Quality & SEO Polish", position: { x: 820, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Refines readability, tone, hashtags, and call-to-action impact." },
+        { id: "node-output", nodeType: "output-box", title: "Ready-to-Publish Campaign", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Complete content batch formatted for immediate publishing." },
+      ],
+      edges: [
+        { id: "edge-001", source: "node-research", target: "node-copy", edgeType: "flow", label: "research & hooks", line_style: "solid" },
+        { id: "edge-002", source: "node-copy", target: "node-review", edgeType: "flow", label: "draft copy", line_style: "solid" },
+        { id: "edge-003", source: "node-review", target: "node-output", edgeType: "flow", label: "final copy batch", line_style: "solid" },
+      ],
+    },
+  ];
+
+  for (const tpl of builtInTemplates) {
+    await boot(`library/templates/${tpl.template_id}/template.json`, JSON.stringify(tpl, null, 2));
+    await boot(`library/templates/${tpl.template_id}/template.yaml`, toYaml({ template_id: tpl.template_id, name: tpl.name, version: "1.0", nodes: tpl.nodes.length, edges: tpl.edges.length }));
+  }
   // the output contracts the roles declare have to exist as files, or "hard validation" is a promise
   // with nothing behind it: seed the four schemas the built-in roles point at (§4.9, Q1).
   for (const [roleId, schema] of Object.entries(ROLE_SCHEMAS))

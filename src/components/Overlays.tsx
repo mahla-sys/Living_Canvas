@@ -122,14 +122,27 @@ export function TopBar() {
   const canvas = useStore((s) => s.canvas);
   const saveState = useStore((s) => s.saveState);
   const execution = useStore((s) => s.execution);
+  const templates = useStore((s) => s.templates);
   const actions = useStore((s) => s.actions);
   const leftOpen = useStore((s) => s.canvas.layout.leftOpen);
   const rightOpen = useStore((s) => s.canvas.layout.rightOpen);
+  const [pipeMenuOpen, setPipeMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const running = execution.status === "running";
   const waiting = execution.status === "waiting_approval";
   const paused = execution.status === "paused";
   const idle = execution.status === "idle" || execution.status === "completed" || execution.status === "stopped";
   const progress = execution.queue.length ? execution.completed.length / execution.queue.length : 0;
+
+  useEffect(() => {
+    const onClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setPipeMenuOpen(false);
+      }
+    };
+    if (pipeMenuOpen) document.addEventListener("pointerdown", onClickOutside);
+    return () => document.removeEventListener("pointerdown", onClickOutside);
+  }, [pipeMenuOpen]);
 
   return (
     <header className="h-[42px] w-full max-w-full shrink-0 flex items-center justify-between px-2.5 border-b border-border-subtle bg-surface-base text-text-primary select-none z-20 min-w-0">
@@ -184,16 +197,49 @@ export function TopBar() {
           </div>
         )}
 
-        <button
-          onClick={() => {
-            actions.loadFreelancePipeline();
-          }}
-          title="Load 4-Agent Freelance Project Finder & Proposal Pipeline"
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold text-text-secondary bg-surface-raised border border-border-default hover:border-lc-accent/40 hover:text-lc-accent transition-all cursor-pointer"
-        >
-          <ISpark size={13} className="text-lc-accent" />
-          Freelance Pipeline
-        </button>
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setPipeMenuOpen(!pipeMenuOpen)}
+            title="Browse & load ready-made AI pipelines"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold text-text-secondary bg-surface-raised border border-border-default hover:border-lc-accent/40 hover:text-lc-accent transition-all cursor-pointer"
+          >
+            <ISpark size={13} className="text-lc-accent" />
+            Pipelines
+          </button>
+
+          {pipeMenuOpen && (
+            <div className="absolute right-0 top-full mt-1.5 w-72 rounded-xl bg-surface-overlay border border-border-default shadow-xl z-50 p-2 anim-fade select-none">
+              <div className="px-2 py-1.5 border-b border-border-subtle mb-1 flex items-center justify-between">
+                <span className="text-[11px] font-bold text-text-primary uppercase tracking-wider">AI Pipeline Catalog</span>
+                <span className="text-[10px] text-text-tertiary">{templates.length} available</span>
+              </div>
+              <div className="max-h-72 overflow-y-auto space-y-1 lc-panel-scroller">
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => {
+                      actions.loadTemplate(t.id);
+                      setPipeMenuOpen(false);
+                    }}
+                    className="w-full text-left p-2 rounded-lg hover:bg-surface-hover transition-colors group cursor-pointer border border-transparent hover:border-border-subtle flex flex-col gap-0.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11.5px] font-semibold text-text-primary group-hover:text-lc-accent transition-colors truncate">
+                        {t.name}
+                      </span>
+                      <span className="text-[9px] font-mono text-text-tertiary px-1 rounded bg-surface-base">
+                        {t.nodes} nodes
+                      </span>
+                    </div>
+                    <span className="text-[9.5px] text-text-tertiary line-clamp-2 leading-tight">
+                      {t.description || "Pre-configured multi-agent workflow"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         <button
           onClick={() => {

@@ -1016,7 +1016,7 @@ export function CanvasInner() {
         nodesConnectable={!drawMode}
         elementsSelectable={!drawMode}
       >
-        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.8} color="var(--lc-dot, rgba(255,255,255,0.16))" />
+        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.2} color="var(--lc-dot, rgba(255,255,255,0.06))" />
         <StrokesLayer
           strokes={strokes}
           live={live}

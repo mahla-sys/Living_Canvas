@@ -53,63 +53,148 @@ function ContractGroup({ title, color, paths, nodeId }: { title: string; color: 
 function Palette() {
   const actions = useStore((s) => s.actions);
   const templates = useStore((s) => s.templates);
+  const [tplSearch, setTplSearch] = useState("");
+  const [saveName, setSaveName] = useState("");
+  const [savingOpen, setSavingOpen] = useState(false);
+
+  const filteredTemplates = useMemo(() => {
+    const q = tplSearch.trim().toLowerCase();
+    if (!q) return templates;
+    return templates.filter((t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
+  }, [templates, tplSearch]);
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saveName.trim()) return;
+    actions.saveTemplate(saveName.trim());
+    setSaveName("");
+    setSavingOpen(false);
+  };
+
   return (
     <div className="p-3 pb-24 space-y-4">
-      <div className="space-y-1">
-        {PALETTE.map((p) => (
-          <div
-            key={p.nodeType}
-            draggable
-            onDragStart={(e) => {
-              e.dataTransfer.setData("application/lc", p.nodeType);
-              e.dataTransfer.effectAllowed = "move";
-            }}
-            onClick={() => void actions.addNode(p.nodeType, { x: 420 + Math.random() * 420, y: 120 + Math.random() * 280 })}
-            className="group flex items-center gap-2.5 px-3 h-[40px] rounded-lg bg-surface-base hover:bg-surface-raised cursor-grab active:cursor-grabbing transition-colors duration-150 select-none border border-transparent hover:border-border-subtle"
-          >
-            <span
-              className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-all group-hover:scale-105 bg-surface-raised border border-border-subtle text-text-secondary group-hover:text-lc-accent group-hover:border-lc-accent/30 relative"
+      {/* Node Elements Section */}
+      <div>
+        <p className="text-[10.5px] font-bold uppercase tracking-wider text-text-tertiary px-1 mb-2">Node Palette</p>
+        <div className="space-y-1">
+          {PALETTE.map((p) => (
+            <div
+              key={p.nodeType}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/lc", p.nodeType);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onClick={() => void actions.addNode(p.nodeType, { x: 420 + Math.random() * 420, y: 120 + Math.random() * 280 })}
+              className="group flex items-center gap-2.5 px-3 h-[38px] rounded-lg bg-surface-base hover:bg-surface-raised cursor-grab active:cursor-grabbing transition-colors duration-150 select-none border border-transparent hover:border-border-subtle"
             >
-              {p.nodeType === "agent" ? <IBrain size={15} /> : p.nodeType === "output-box" ? <IBox size={15} /> : <IFile size={15} />}
-              <span className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full opacity-60" style={{ backgroundColor: nodeColor(p.nodeType) }} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[12px] font-semibold text-text-primary truncate">
-                {p.label}
-              </p>
+              <span
+                className="w-6 h-6 rounded-md flex items-center justify-center shrink-0 transition-all group-hover:scale-105 bg-surface-raised border border-border-subtle text-text-secondary group-hover:text-lc-accent group-hover:border-lc-accent/30 relative"
+              >
+                {p.nodeType === "agent" ? <IBrain size={13} /> : p.nodeType === "output-box" ? <IBox size={13} /> : <IFile size={13} />}
+                <span className="absolute bottom-0.5 right-0.5 w-1 h-1 rounded-full opacity-60" style={{ backgroundColor: nodeColor(p.nodeType) }} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[11.5px] font-semibold text-text-primary truncate">
+                  {p.label}
+                </p>
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
+      {/* AI Pipeline Library Section */}
       <div className="pt-3 border-t border-border-subtle">
-        <p className="text-[11px] font-bold text-text-secondary px-2 mb-2">Templates</p>
-        {templates.length > 0 ? (
-          <div className="space-y-1">
-            {templates.map((t) => (
-              <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-base hover:bg-surface-raised transition-colors group border border-transparent hover:border-border-subtle">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[11.5px] font-medium text-text-primary truncate">
-                    {t.name}
-                  </p>
-                  <p className="text-[9.5px] text-text-tertiary">
-                    {t.nodes} nodes · {t.edges} edges
-                  </p>
+        <div className="flex items-center justify-between px-1 mb-2">
+          <p className="text-[10.5px] font-bold uppercase tracking-wider text-text-tertiary">Pipeline Library</p>
+          <button
+            onClick={() => setSavingOpen(!savingOpen)}
+            title="Save current canvas as reusable template"
+            className="text-[10px] font-medium text-lc-accent hover:underline cursor-pointer flex items-center gap-1"
+          >
+            <ISpark size={10} /> {savingOpen ? "Cancel" : "+ Save Canvas"}
+          </button>
+        </div>
+
+        {savingOpen && (
+          <form onSubmit={handleSave} className="mb-3 p-2.5 rounded-lg bg-surface-raised border border-border-subtle anim-fade space-y-2">
+            <input
+              type="text"
+              placeholder="Template name (e.g. My Custom Pipeline)"
+              value={saveName}
+              onChange={(e) => setSaveName(e.target.value)}
+              className="w-full px-2.5 py-1 text-[11px] rounded bg-surface-base border border-border-default text-text-primary placeholder:text-text-quaternary focus:outline-none focus:border-lc-accent"
+              autoFocus
+            />
+            <div className="flex justify-end gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSavingOpen(false)}
+                className="px-2 py-0.5 text-[10px] rounded text-text-tertiary hover:text-text-secondary cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={!saveName.trim()}
+                className="px-2.5 py-0.5 text-[10px] font-semibold rounded bg-lc-accent text-void disabled:opacity-50 cursor-pointer"
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        )}
+
+        {templates.length > 2 && (
+          <input
+            type="text"
+            placeholder="Search pipelines…"
+            value={tplSearch}
+            onChange={(e) => setTplSearch(e.target.value)}
+            className="w-full mb-2 px-2.5 py-1 text-[10.5px] rounded-md bg-surface-base border border-border-subtle text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-lc-accent/40"
+          />
+        )}
+
+        {filteredTemplates.length > 0 ? (
+          <div className="space-y-1.5">
+            {filteredTemplates.map((t) => (
+              <div
+                key={t.id}
+                className="p-2.5 rounded-lg bg-surface-base hover:bg-surface-raised transition-all duration-150 group border border-border-subtle/50 hover:border-lc-accent/30"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11.5px] font-semibold text-text-primary truncate">
+                      {t.name}
+                    </p>
+                    <p className="text-[9.5px] text-text-tertiary line-clamp-2 mt-0.5 leading-snug">
+                      {t.description || "Multi-agent workflow pipeline"}
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-[9px] font-mono text-text-tertiary px-1.5 py-0.5 rounded bg-surface-base border border-border-subtle">
+                    {t.nodes} nodes
+                  </span>
                 </div>
-                <button
-                  onClick={() => actions.loadTemplate(t.id)}
-                  className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-md bg-surface-raised border border-border-subtle text-text-secondary opacity-0 group-hover:opacity-100 hover:text-lc-accent hover:border-lc-accent/50 transition-all cursor-pointer active:scale-95"
-                >
-                  Load
-                </button>
+                <div className="mt-2 flex items-center justify-between pt-1.5 border-t border-border-subtle/40">
+                  <span className="text-[9px] text-text-tertiary">
+                    {t.edges} connections
+                  </span>
+                  <button
+                    onClick={() => actions.loadTemplate(t.id)}
+                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-lc-accent/15 border border-lc-accent/40 text-lc-accent hover:bg-lc-accent hover:text-void transition-all cursor-pointer active:scale-95"
+                  >
+                    Load Pipeline
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         ) : (
           <div className="px-3 py-4 rounded-xl border border-dashed border-border-subtle bg-surface-base/40 text-center select-none">
             <ISpark size={15} className="mx-auto text-text-tertiary mb-1.5" />
-            <p className="text-[11px] font-semibold text-text-secondary">No templates yet</p>
-            <p className="text-[9.5px] text-text-tertiary mt-0.5 leading-4">Save a pipeline or graph from the canvas menu to reuse it anytime.</p>
+            <p className="text-[11px] font-semibold text-text-secondary">No matching templates</p>
+            <p className="text-[9.5px] text-text-tertiary mt-0.5 leading-4">Save your pipeline above or clear your search.</p>
           </div>
         )}
       </div>

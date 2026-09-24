@@ -176,19 +176,19 @@ src/
 ├── index.css                   599  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
 │   ├── core.ts                1230  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
-│   ├── engine.ts              3121  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
+│   ├── engine.ts              3196  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
 │   └── __tests__/             5020  L   289 tests in 26 files (§7)
 └── components/
     ├── CanvasArea.tsx          1087  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
-    ├── SidePanels.tsx          1553  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx            955  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    ├── SidePanels.tsx          1638  L   ★ library/files tabs, file tree, live folder tree, inspector
+    ├── Overlays.tsx            1001  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
     └── icons.tsx               146  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **16 092 lines** in 42 files (15 364 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **16 298 lines** in 42 files (15 570 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -465,7 +465,7 @@ Notable behaviour living here (small but load-bearing):
   tree builds `runs/` from `state.runs` (a projection of the folder, refreshed by `hydrate` and by each ledger
   open, §4.13).
 
-## 3.4 `src/lib/engine.ts` (3121 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (3196 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
@@ -543,14 +543,14 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 3 741 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 3 872 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
 | `CanvasArea.tsx` 1087 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
-| `SidePanels.tsx` 1553 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
-| `Overlays.tsx` 955 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
+| `SidePanels.tsx` 1638 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
+| `Overlays.tsx` 1001 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
 | `icons.tsx` 146 | 30+ inline SVGs | no icon library |
 
 ---
