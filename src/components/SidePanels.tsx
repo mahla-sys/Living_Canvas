@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useStore, buildFileContent } from "../store";
+import { useStore } from "../store";
 import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT, NODE_COLORS, makeAgentConfig } from "../state";
 import type { RFNode } from "../state";
 import { storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType, fmtClock, EMPTY_ARR, type ChatMsg } from "../lib/core";
@@ -292,7 +292,10 @@ function FileRow({ path, name }: { path: string; name?: string }) {
     <button
       data-lc-file
       data-lc-file-name={label}
-      onClick={() => actions.openFile(buildFileContent(path))}
+      /* ADR-044: the viewer shows what the storage adapter has, in every mode. The old
+         `buildFileContent` re-serialised these files from state, so the same path could read two
+         different ways — what is on disk and what a state copy would write. One reader, one truth. */
+      onClick={() => void actions.openStorageFile(`${ROOT}/${path}`)}
       className="w-full flex items-center gap-1.5 px-2 py-[4.5px] rounded-md text-ink-300 hover:text-lc-accent hover:bg-ink-800 transition-colors cursor-pointer group"
       title={path}
     >

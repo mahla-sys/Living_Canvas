@@ -19,10 +19,13 @@ import { isFsAccessSupported } from "../lib/fs-access";
 /* Every execution state gets a sentence, and the table is a total Record on purpose (ADR-017): if a value is
    added to `ExecutionState["status"]` and nobody writes its phrase, TypeScript refuses to build. A lookup with
    a fallback would have quietly printed the raw enum to the reader instead. */
-/* `saveState` gets the same treatment: "saved" is a value in the store, not something a reader parses. */
-const SAVE_PHRASE: Record<AppState["saveState"], string> = {
-  saved: "All changes saved",
-  saving: "Saving…",
+/* `saveState` gets the same treatment: "saved" is a value in the store, not something a reader parses.
+   "failed" (ADR-043) exists because a silent save that never lands is worse than a loud one: the bar
+   must say the files may be stale, not keep saying "Saving…" until the reader stops believing it. */
+const SAVE_PHRASE: Record<AppState["saveState"], { text: string; cls: string }> = {
+  saved: { text: "All changes saved", cls: "text-text-tertiary" },
+  saving: { text: "Saving…", cls: "text-text-tertiary" },
+  failed: { text: "Saving failed — files may be stale", cls: "text-ember font-semibold" },
 };
 
 const STATUS_PHRASE: Record<AppState["execution"]["status"], { label: string; tone: string }> = {
@@ -97,8 +100,8 @@ export function StatusBar() {
           )}
         </span>
         <span className="text-text-tertiary">·</span>
-        <span className="text-[10.5px] text-text-secondary" title="Whether the last change reached the files">
-          {SAVE_PHRASE[saveState]}
+        <span className={`text-[10.5px] ${SAVE_PHRASE[saveState].cls}`} title="Whether the last change reached the files">
+          {SAVE_PHRASE[saveState].text}
         </span>
       </div>
     </div>

@@ -86,6 +86,14 @@ describe("the status bar speaks in words", () => {
     expect(screen.getByText("Saving…")).toBeInTheDocument();
   });
 
+  it("a failed save says so instead of sitting on Saving… (ADR-043)", () => {
+    useStore.setState({ saveState: "failed" });
+    const { unmount } = render(<StatusBar />);
+    expect(screen.getByText(/saving failed/i)).toBeInTheDocument();
+    expect(screen.queryByText("Saving…")).not.toBeInTheDocument();
+    unmount();
+  });
+
   it("drops the ad-hoc glyph alphabet in favour of words", () => {
     const { container } = render(<StatusBar />);
     expect(container.textContent).not.toMatch(/[◧▨▫]/);
