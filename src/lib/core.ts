@@ -141,7 +141,7 @@ export interface Toast {
 }
 
 export interface Settings {
-  provider: "sim" | "deepseek" | "ollama" | "mistral";
+  provider: "sim" | "deepseek" | "ollama" | "mistral" | "gemini";
   apiKey: string;
   model: string;
   owner: string;
@@ -262,6 +262,7 @@ export function clearSettingsLocal(): void {
 export const DEEPSEEK_BASE = "https://api.deepseek.com";
 export const OLLAMA_BASE = "http://127.0.0.1:11434";
 export const MISTRAL_BASE = "https://api.mistral.ai/v1";
+export const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 export const DEFAULT_MODEL = "deepseek-chat";
 
 export interface ModelRoute {
@@ -269,7 +270,7 @@ export interface ModelRoute {
   endpoint: string;
   /** the model name as the provider expects it — an `ollama:` prefix is ours, so it is stripped */
   model: string;
-  provider: "deepseek" | "ollama" | "mistral";
+  provider: "deepseek" | "ollama" | "mistral" | "gemini";
 }
 
 /** Pure, so the routing table is testable without a network (`model-route.test.ts`). */
@@ -279,6 +280,10 @@ export function resolveModelRoute(id: string | null | undefined, fallback?: stri
   if (name.startsWith("ollama:")) {
     const local = name.slice("ollama:".length).trim();
     return { endpoint: `${OLLAMA_BASE}/v1/chat/completions`, model: local || "llama3.2", provider: "ollama" };
+  }
+  if (name.startsWith("gemini:") || name.startsWith("gemini-") || name === "gemini") {
+    const modelName = name.startsWith("gemini:") ? name.slice("gemini:".length).trim() : name;
+    return { endpoint: `${GEMINI_BASE}/chat/completions`, model: modelName || "gemini-2.5-flash", provider: "gemini" };
   }
   if (name.startsWith("mistral:") || name.startsWith("mistral-") || name === "mistral" || name.startsWith("codestral")) {
     const modelName = name.startsWith("mistral:") ? name.slice("mistral:".length).trim() : name;
@@ -305,7 +310,7 @@ export const PANEL_MAX = 520;
 export const PANEL_DEFAULT_LEFT = 268;
 export const PANEL_DEFAULT_RIGHT = 292;
 /** the status strip along the bottom: tall enough for one line of 9.5px type, short enough to not cost canvas */
-export const STATUS_BAR_HEIGHT = 22;
+export const STATUS_BAR_HEIGHT = 26;
 
 /** `true` only for a finite number — `Number.isFinite` rejects `NaN`, `Infinity` and the string `"300"`.
  *  Note the argument order: `clamp(value, min, max)` (src/lib/core.ts#clamp), which `tsc` cannot check for

@@ -10,7 +10,7 @@ import { useStore } from "../store";
 import { roleById, NODE_TYPE_LABEL, CANVAS_ID } from "../state";
 import type { RFNode, RFEdge } from "../state";
 import { uid, nowIso, mdInline, EMPTY_ARR, GRID_GAP, type AgentStatus, type LCNodeData, type Stroke, type StrokePoint } from "../lib/core";
-import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash } from "./icons";
+import { ICheck, ILock, IWarn, IPlay, IX, IBrain, IBox, IFile, IChat, ISpark, IPen, IHighlight, IEraser, IUndo, IWand, ITrash, IHand, ICursor, IRect, IDiamond, ICircle, IText, IDatabase, ILayers, INode } from "./icons";
 
 /* ---------------- mini markdown ---------------- */
 
@@ -62,7 +62,8 @@ function TypeIcon({ type, size = 14 }: { type: LCNodeData["nodeType"]; size?: nu
 /* ---------------- custom node ---------------- */
 
 function shapeStyle(d: LCNodeData): React.CSSProperties {
-  const c = d.color;
+  const c = d.color || "#8ba39d"; // lc-data-colour
+  const s = d.style ?? { strokeWidth: 2, strokeColor: c, fillStyle: "solid" as const, opacity: 100 };
   const clip =
     d.shape === "diamond" ? "polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)"
     : d.shape === "hexagon" ? "polygon(12% 0%, 88% 0%, 100% 50%, 88% 100%, 12% 100%, 0% 50%)"
@@ -70,12 +71,9 @@ function shapeStyle(d: LCNodeData): React.CSSProperties {
   return {
     clipPath: clip,
     borderRadius: d.shape === "circle" ? "9999px" : d.shape === "card" ? "14px" : "8px",
-    border: d.shape === "rectangle" || d.shape === "card" || d.shape === "empty" ? `${Math.max(1, d.style.strokeWidth / 2)}px solid ${d.style.strokeColor}4d` : "none",
-    // the surface itself is a class (`lc-card-surface` / `lc-card-empty`) so a theme can reach it;
-    // `d.color` stays inline on purpose — a node's colour is canvas data, written into the node file,
-    // and re-tinting it per theme would rewrite what somebody drew (§1.1, docs/ui-spec.md §3)
+    border: d.shape === "rectangle" || d.shape === "card" || d.shape === "empty" ? `${Math.max(1, (s.strokeWidth ?? 2) / 2)}px solid ${s.strokeColor ?? c}4d` : "none",
     boxShadow: `0 0 0 1px ${c}33, 0 10px 30px -12px ${c}40, inset 3px 0 0 0 ${c}`,
-    opacity: d.style.opacity / 100,
+    opacity: (s.opacity ?? 100) / 100,
   };
 }
 
@@ -97,12 +95,14 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const status: AgentStatus = agent?.status ?? "idle";
   const running = status === "running";
   const waiting = status === "waiting" || execWaiting;
-  const locked = data.lock.status === "locked";
+  const locked = data.lock?.status === "locked";
+  const anim = data.animation ?? { type: "none", speed: 1 };
+  const style = data.style ?? { strokeWidth: 2, strokeColor: data.color || "#8ba39d", fillStyle: "solid" as const, opacity: 100 }; // lc-data-colour
 
   const ring = running ? "anim-running" : waiting ? "anim-waiting" : "";
   const wide = data.viewMode === "card" || data.viewMode === "markdown";
-  const breathe = data.animation.type === "breathe" && !running ? "anim-breathe" : "";
-  const breatheDur = { animationDuration: `${3.2 / data.animation.speed}s` };
+  const breathe = anim.type === "breathe" && !running ? "anim-breathe" : "";
+  const breatheDur = { animationDuration: `${3.2 / (anim.speed || 1)}s` };
 
   const shell = (inner: React.ReactNode, w?: string) => (
     <div
@@ -131,7 +131,7 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
       
       {/* Background shape backdrop with clip-path, border, boxShadow, fill */}
       <div
-        className={`absolute inset-0 pointer-events-none transition-shadow duration-200 ${data.style.fillStyle === "empty" ? "lc-card-empty" : "lc-card-surface"}`}
+        className={`absolute inset-0 pointer-events-none transition-shadow duration-200 ${style.fillStyle === "empty" ? "lc-card-empty" : "lc-card-surface"}`}
         style={shapeStyle(data)}
       />
 
@@ -235,7 +235,21 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
             className="nodrag nowheel w-full min-h-[110px] resize-y rounded-lg bg-ink-950/70 border border-lc-accent/50 px-2 py-1.5 text-[11.5px] leading-5 text-ink-100 font-mono focus:outline-none focus:border-lc-accent"
           />
         ) : data.content ? (
-          <Md text={data.content} compact />
+          <>
+            <Md text={data.content} compact />
+            {(data.title.includes("Start") || data.title.includes("Freelance") || data.content.includes("Freelance") || data.content.includes("Living Canvas")) && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  actions.loadFreelancePipeline();
+                }}
+                className="nodrag mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-lc-accent text-void text-[11.5px] font-bold shadow-xs hover:brightness-105 active:scale-98 transition-all cursor-pointer"
+              >
+                <ISpark size={13} /> Load Freelance Pipeline
+              </button>
+            )}
+          </>
         ) : (
           <p className="text-[11px] text-ink-400">No content — double-click here, or write it in the inspector.</p>
         )}
@@ -248,23 +262,23 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const lastLogs = running ? logs.slice(-2) : [];
 
   return shell(
-    <div className="w-[264px]">
-      <div className="flex items-center gap-2 px-3.5 pt-3 pb-2">
+    <div className="w-[280px]">
+      <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-2.5">
         <span
-          className="w-8 h-8 rounded-[9px] flex items-center justify-center shrink-0"
+          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 shadow-xs"
           style={{ background: `${data.color}1f`, color: data.color, border: `1px solid ${data.color}44` }}
         >
           <TypeIcon type={data.nodeType} size={16} />
         </span>
         <div className="min-w-0 flex-1">
-          <h3 className="text-[13.5px] font-extrabold text-ink-50 leading-5 truncate">{data.title}</h3>
-          <p className="text-[10px] text-ink-400 flex items-center gap-1.5">
+          <h3 className="text-[13.5px] font-bold text-text-primary leading-snug truncate">{data.title}</h3>
+          <p className="text-[10px] text-text-tertiary flex items-center gap-1.5 mt-0.5">
             <span className="uppercase tracking-wide font-mono">{data.nodeType}</span>
-            {role && <span className="text-ink-300">· {role.name}</span>}
+            {role && <span className="text-text-secondary">· {role.name}</span>}
           </p>
         </div>
         {agent && (
-          <span className="flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0" style={{ color: STATUS_COLOR[status], background: `${STATUS_COLOR[status]}18` }}>
+          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-md shrink-0" style={{ color: STATUS_COLOR[status], background: `${STATUS_COLOR[status]}18` }}>
             <span className={`w-1.5 h-1.5 rounded-full ${running || waiting ? "anim-blink" : ""}`} style={{ background: STATUS_COLOR[status] }} />
             {STATUS_LABEL[status]}
           </span>
@@ -273,36 +287,36 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
 
       {agent && (
         <div className="px-3.5 pb-2.5 flex flex-wrap gap-1">
-          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-ink-800 text-ink-300 border border-ink-700">{agent.model}</span>
-          {agent.tools.slice(0, 3).map((t) => (
-            <span key={t} className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-ink-800 text-ink-300 border border-ink-700">{t}</span>
+          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-surface-base text-text-secondary border border-border-subtle">{agent.model}</span>
+          {agent.tools.slice(0, 3).map((t, idx) => (
+            <span key={`${t}-${idx}`} className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-surface-base text-text-secondary border border-border-subtle">{t}</span>
           ))}
-          {agent.tools.length > 3 && <span className="text-[9.5px] text-ink-400 self-center">+{agent.tools.length - 3}</span>}
+          {agent.tools.length > 3 && <span className="text-[9.5px] text-text-tertiary self-center">+{agent.tools.length - 3}</span>}
         </div>
       )}
 
       {running && lastLogs.length > 0 && (
-        <div className="mx-3.5 mb-2.5 px-2 py-1.5 rounded-md bg-ink-950/80 border border-lc-accent/20">
+        <div className="mx-3.5 mb-2.5 px-2.5 py-1.5 rounded-md bg-surface-base border border-lc-accent/30">
           {lastLogs.map((l, i) => (
-            <p key={i} className="text-[9.5px] font-mono text-lc-accent/90 truncate leading-4">{l.replace(/^\[[^\]]+\]\s*/, "")}</p>
+            <p key={i} className="text-[9.5px] font-mono text-lc-accent truncate leading-4">{l.replace(/^\[[^\]]+\]\s*/, "")}</p>
           ))}
         </div>
       )}
 
-      <div className="flex items-center justify-between px-3.5 py-2 border-t border-ink-700/70 bg-ink-950/40">
-        <span className="text-[10px] text-ink-400">
+      <div className="flex items-center justify-between px-3.5 py-2 border-t border-border-subtle bg-surface-base/50">
+        <span className="text-[10px] text-text-tertiary">
           {data.nodeType === "agent"
             ? <span className="flex items-center gap-2">
                 <span className="flex items-center gap-1"><IFile size={10} /> {outputs} outputs</span>
                 {agent && <span className="flex items-center gap-1"><ISpark size={10} /> confidence {Math.round(confidence * 100) / 100}</span>}
               </span>
             : data.content
-              ? <span className="truncate block max-w-[170px]">{data.content.replace(/[#*\n-]/g, " ").slice(0, 42)}…</span>
+              ? <span className="truncate block max-w-[180px] text-text-secondary">{data.content.replace(/[#*\n-]/g, " ").slice(0, 42)}…</span>
               : NODE_TYPE_LABEL[data.nodeType]}
         </span>
         <button
           onClick={() => actions.setChatNode(chatOpen ? null : id)}
-          className="nodrag text-ink-400 hover:text-lc-accent transition-colors cursor-pointer"
+          className="nodrag text-text-tertiary hover:text-lc-accent transition-colors cursor-pointer"
           title={agent ? "Chat with the agent" : "Note"}
         >
           <IChat size={14} />
@@ -360,7 +374,7 @@ const edgeTypes: EdgeTypes = { lc: LcEdge as never };
 
 /* lc-data-colour: a stroke's colour is written into `strokes/<id>.json`, so it is canvas *data* (§4.8).
    A theme that re-tinted it would rewrite what the user drew — Law 1 seen from the other side. */
-const DRAW_COLORS = ["#e8b04b", "#e06a4e", "#6fb3c7", "#8fbf7f", "#b98bc2", "#eef2ef"]; // lc-data-colour
+const DRAW_COLORS = ["#8fbf7f", "#6fb3c7", "#e8b04b", "#b98bc2", "#e06a4e", "#eef2ef"]; // lc-data-colour
 const DRAW_WIDTHS = [2, 4, 7];
 
 function strokePath(pts: StrokePoint[]): string {
@@ -485,24 +499,7 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
     return new Set(strokes.map((_, i) => find(i))).size;
   }, [strokes]);
 
-  if (!drawMode) {
-    return (
-      <button
-        onClick={() => setDrawMode(true)}
-        aria-label="Draw on the canvas"
-        title="Draw on the canvas"
-        className="absolute bottom-6 right-6 z-30 w-12 h-12 rounded-full flex items-center justify-center bg-surface-raised border border-border-subtle text-text-primary shadow-[0_8px_30px_-6px_rgba(0,0,0,0.6)] hover:border-lc-accent/60 hover:text-lc-accent transition-all cursor-pointer backdrop-blur-sm group active:scale-95"
-      >
-        <IPen size={18} className="text-lc-accent group-hover:scale-110 transition-transform" />
-        <span className="sr-only">Draw on the canvas</span>
-        {strokes.length > 0 && (
-          <span className="absolute -top-1 -right-1 text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-lc-accent text-void font-bold shadow-sm">
-            {strokes.length}
-          </span>
-        )}
-      </button>
-    );
-  }
+  if (!drawMode) return null;
 
   const ToolBtn = ({ active, onClick, children, title }: { active?: boolean; onClick: () => void; children: React.ReactNode; title: string }) => (
     <button
@@ -609,6 +606,233 @@ function DrawToolbar({ drawMode, setDrawMode }: { drawMode: boolean; setDrawMode
       </div>
     </>
   );
+}
+
+function ExcalidrawToolbar({
+  drawMode,
+  setDrawMode,
+}: {
+  drawMode: boolean;
+  setDrawMode: (v: boolean) => void;
+}) {
+  const actions = useStore((s) => s.actions);
+  const strokes = useStore((s) => s.strokes);
+  const [tool, setTool] = useState<"select" | "hand" | "rect" | "diamond" | "circle" | "pen">("select");
+  const { zoomIn, zoomOut, fitView, getZoom } = useReactFlow();
+  const [zoomPct, setZoomPct] = useState(100);
+
+  useEffect(() => {
+    if (drawMode) setTool("pen");
+    else if (tool === "pen") setTool("select");
+  }, [drawMode]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setZoomPct(Math.round((getZoom() || 1) * 100));
+    }, 300);
+    return () => clearInterval(timer);
+  }, [getZoom]);
+
+  const selectTool = (t: "select" | "hand" | "rect" | "diamond" | "circle" | "pen", addType?: "note" | "shape" | "agent") => {
+    setTool(t);
+    if (t === "pen") {
+      setDrawMode(true);
+    } else {
+      setDrawMode(false);
+      if (addType) {
+        void actions.addNode(addType, { x: 380 + Math.random() * 180, y: 160 + Math.random() * 120 });
+      }
+    }
+  };
+
+  const Btn = ({
+    active,
+    onClick,
+    title,
+    ariaLabel,
+    num,
+    children,
+  }: {
+    active?: boolean;
+    onClick: () => void;
+    title: string;
+    ariaLabel?: string;
+    num: string;
+    children: React.ReactNode;
+  }) => (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={ariaLabel || title}
+      className={`relative w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+        active
+          ? "bg-lc-accent/20 text-lc-accent border border-lc-accent/50 shadow-sm"
+          : "text-text-secondary hover:text-text-primary hover:bg-surface-hover border border-transparent"
+      }`}
+    >
+      {children}
+      <span className="absolute bottom-0.5 right-1 text-[8px] font-mono text-text-tertiary select-none">
+        {num}
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 px-2.5 py-1.5 rounded-2xl bg-surface-base/95 border border-border-default shadow-[0_12px_40px_-10px_rgba(0,0,0,0.65)] backdrop-blur-md anim-pop select-none">
+      {/* Undo & Clear */}
+      <button
+        onClick={() => actions.undoStroke()}
+        disabled={strokes.length === 0}
+        title="Undo last stroke"
+        className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        <IUndo size={14} />
+      </button>
+
+      {strokes.length > 0 && (
+        <button
+          onClick={() => actions.clearStrokes()}
+          title="Clear all strokes"
+          className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-ember hover:bg-surface-hover transition-all cursor-pointer"
+        >
+          <ITrash size={14} />
+        </button>
+      )}
+
+      <span className="w-px h-5 bg-border-subtle mx-0.5" />
+
+      {/* Selection & Pan */}
+      <Btn
+        active={!drawMode && tool === "select"}
+        onClick={() => selectTool("select")}
+        title="Selection pointer (1)"
+        num="1"
+      >
+        <ICursor size={15} />
+      </Btn>
+
+      <Btn
+        active={!drawMode && tool === "hand"}
+        onClick={() => selectTool("hand")}
+        title="Hand pan tool (2)"
+        num="2"
+      >
+        <IHand size={15} />
+      </Btn>
+
+      <span className="w-px h-5 bg-border-subtle mx-0.5" />
+
+      {/* Shapes */}
+      <Btn
+        active={tool === "rect"}
+        onClick={() => selectTool("rect", "shape")}
+        title="Rectangle Shape (3)"
+        num="3"
+      >
+        <IRect size={15} />
+      </Btn>
+
+      <Btn
+        active={tool === "diamond"}
+        onClick={() => selectTool("diamond", "shape")}
+        title="Diamond Shape (4)"
+        num="4"
+      >
+        <IDiamond size={15} />
+      </Btn>
+
+      <Btn
+        active={tool === "circle"}
+        onClick={() => selectTool("circle", "shape")}
+        title="Circle Shape (5)"
+        num="5"
+      >
+        <ICircle size={15} />
+      </Btn>
+
+      <span className="w-px h-5 bg-border-subtle mx-0.5" />
+
+      {/* Elements */}
+      <Btn
+        active={drawMode}
+        onClick={() => selectTool("pen")}
+        title="Freehand Draw / Pen (6)"
+        ariaLabel="Draw on the canvas"
+        num="6"
+      >
+        <IPen size={15} />
+      </Btn>
+
+      <Btn
+        onClick={() => selectTool("select", "note")}
+        title="Note / Text block (7)"
+        num="7"
+      >
+        <IText size={15} />
+      </Btn>
+
+      <Btn
+        onClick={() => selectTool("select", "agent")}
+        title="AI Agent node (8)"
+        num="8"
+      >
+        <IBrain size={15} />
+      </Btn>
+
+      <span className="w-px h-5 bg-border-subtle mx-0.5" />
+
+      {/* Zoom */}
+      <button
+        onClick={() => void zoomOut()}
+        title="Zoom Out"
+        className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-all cursor-pointer font-bold text-sm"
+      >
+        −
+      </button>
+
+      <button
+        onClick={() => void fitView({ duration: 500 })}
+        title="Reset Zoom / Fit View"
+        className="px-2 py-1 rounded-md text-[11px] font-mono text-text-primary hover:bg-surface-hover transition-colors cursor-pointer"
+      >
+        {zoomPct}%
+      </button>
+
+      <button
+        onClick={() => void zoomIn()}
+        title="Zoom In"
+        className="w-7 h-7 rounded-lg flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-all cursor-pointer font-bold text-sm"
+      >
+        +
+      </button>
+    </div>
+  );
+}
+
+function BreadcrumbBar() {
+  const title = useStore((s) => s.canvas.title);
+  return (
+    <div className="absolute top-3 left-4 z-20 flex items-center gap-1.5 text-[11px] font-medium text-text-tertiary select-none pointer-events-none">
+      <span className="flex items-center gap-1 text-text-secondary">
+        <IDatabase size={12} className="text-text-tertiary" />
+        Obsidian Vault
+      </span>
+      <span className="text-text-tertiary/60">/</span>
+      <span className="flex items-center gap-1 text-text-secondary">
+        <ILayers size={12} className="text-text-tertiary" />
+        Canvas
+      </span>
+      <span className="text-text-tertiary/60">/</span>
+      <span className="flex items-center gap-1 text-text-primary font-semibold">
+        <INode size={12} className="text-lc-accent" />
+        {title}
+      </span>
+    </div>
+  );
+}
+
+function ZoomControls() {
+  return null;
 }
 
 /* ---------------- canvas ---------------- */
@@ -726,6 +950,30 @@ export function CanvasInner() {
     [execution, nodes]
   );
 
+  const safeNodes = useMemo(() => {
+    const seen = new Set<string>();
+    return nodes.map((n, i) => {
+      let id = n.id || `node-${i + 1}`;
+      if (seen.has(id)) {
+        id = `${id}-${i}`;
+      }
+      seen.add(id);
+      return n.id === id ? n : { ...n, id };
+    });
+  }, [nodes]);
+
+  const safeEdges = useMemo(() => {
+    const seen = new Set<string>();
+    return edges.map((e, i) => {
+      let id = e.id || `edge-${i + 1}`;
+      if (seen.has(id)) {
+        id = `${id}-${i}`;
+      }
+      seen.add(id);
+      return e.id === id ? e : { ...e, id };
+    });
+  }, [edges]);
+
   const drawToolNow = drawCfg().tool;
 
   return (
@@ -738,8 +986,8 @@ export function CanvasInner() {
       style={drawMode ? { cursor: drawToolNow === "eraser" ? "cell" : "crosshair", touchAction: "none" } : undefined}
     >
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={safeNodes}
+        edges={safeEdges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodesChange={actions.onNodesChange}
@@ -768,7 +1016,7 @@ export function CanvasInner() {
         nodesConnectable={!drawMode}
         elementsSelectable={!drawMode}
       >
-        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.5} color="var(--lc-dot, rgba(255,255,255,0.08))" />
+        <Background variant={BackgroundVariant.Dots} gap={GRID_GAP} size={1.8} color="var(--lc-dot, rgba(255,255,255,0.16))" />
         <StrokesLayer
           strokes={strokes}
           live={live}
@@ -777,6 +1025,10 @@ export function CanvasInner() {
           liveTool={drawToolNow === "highlight" ? "highlight" : "pen"}
         />
       </ReactFlow>
+
+      <BreadcrumbBar />
+      <ExcalidrawToolbar drawMode={drawMode} setDrawMode={setDrawMode} />
+      <ZoomControls />
 
       {drawMode && (
         <>

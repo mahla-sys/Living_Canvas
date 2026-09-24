@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
+  define: {
+    "import.meta.env.VITE_GEMINI_API_KEY": JSON.stringify(process.env.GEMINI_API_KEY || ""),
+  },
   plugins: [react(), tailwindcss()],
   build: {
     /* Measured before this change: one 538 kB chunk (166 kB gzip) that had to download, parse and

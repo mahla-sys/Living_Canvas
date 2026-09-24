@@ -26,6 +26,11 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
 | 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted (clause 3 superseded by 011) | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data |
 | 011 | `adr-011-accent-must-differ-in-hue-from-ink.md` | accepted | an accent must sit at least 60° from its own theme's ink hue (or, on an achromatic ramp, carry enough chroma), enforced by the palette gate; `botanical` is the default again |
+| 038 | `adr-038-project-finder-pipeline-template.md` | accepted | built-in Freelance Project Finder and Proposal Architect pipeline template and seed |
+| 037 | `adr-037-gemini-connection-testing-and-model-fix.md` | accepted | Gemini connection testing probe, effective key detection, standard model naming, and dual authorization headers |
+| 036 | `adr-036-obsidian-visual-refinement.md` | accepted | Obsidian aesthetic refinement, palette harmony, canvas dot grid visibility, and chrome decluttering |
+| 035 | `adr-035-obsidian-excalidraw-minimal-workspace.md` | accepted | Obsidian dark minimalist shell, left activity ribbon, Excalidraw top floating tool capsule, removal of floating hamburger |
+| 034 | `adr-034-gemini-provider-and-dynamic-model-routing.md` | accepted | Gemini provider, dynamic model route matching with active provider, and auto-select newly added nodes |
 | 030 | `adr-030-design-system-tokens-and-extensibility.md` | accepted | Obsidian Laboratory tokens, 4-tier surface hierarchy, warm amber brand accent, unified typography, and theme extensibility |
 | 031 | `adr-031-floating-panel-architecture.md` | accepted | floating panel architecture, overlay drawers, and canvas chrome reduction |
 | 032 | `adr-032-activity-rail-and-canvas-chrome-ratio.md` | accepted | 48px activity rail, overlay drawers, 40px unbordered library rows, and canvas chrome ratio >= 80% |

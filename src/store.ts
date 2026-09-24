@@ -22,7 +22,7 @@ import {
   createEdge as engCreateEdge, deleteEdge as engDeleteEdge,
   runPipeline, runSingle, resumeRun, rejectRun, stopRun, resetExecution, flowClosure, pauseRun, stepRun,
   sendChat, takeSnapshot, restoreSnapshot, initWorkspace, resetWorkspace,
-  saveTemplate, loadTemplate, saveRoleFromNode, contractSelfTest, testFallback,
+  saveTemplate, loadTemplate, loadProjectFinderPipeline, saveRoleFromNode, contractSelfTest, testFallback,
   addStroke as engAddStroke, removeStroke as engRemoveStroke, undoStroke as engUndoStroke,
   clearStrokes as engClearStrokes, convertStrokesToGraph as engConvertStrokes,
   pickCanvasFolder, detachWorkspaceFolder, exportToJsonFile, exportToFolder,
@@ -97,6 +97,7 @@ interface Actions {
   saveSettingsLocal: () => void;
   saveTemplate: (name: string) => void;
   loadTemplate: (id: string) => void;
+  loadFreelancePipeline: () => void;
   saveRole: (nodeId: string) => void;
   /** active storage mode: idb | fs | http | memory */
   storageMode: () => "idb" | "fs" | "http" | "memory";
@@ -235,7 +236,10 @@ function buildActions(a: EngineApi): Actions {
 
     addNode: async (t, pos) => {
       const id = await engCreateNode(a, t, pos);
-      useStore.setState((s) => ({ ui: { ...s.ui, leftTab: s.ui.leftTab } }));
+      useStore.setState((s) => ({
+        nodes: s.nodes.map((n) => ({ ...n, selected: n.id === id })),
+        ui: { ...s.ui, leftTab: s.ui.leftTab },
+      }));
       return id;
     },
 
@@ -268,8 +272,14 @@ function buildActions(a: EngineApi): Actions {
       touch(a);
     },
 
-    selectNode: () => undefined,
-    selectEdge: () => undefined,
+    selectNode: (id) =>
+      useStore.setState((s) => ({
+        nodes: s.nodes.map((n) => ({ ...n, selected: n.id === id })),
+      })),
+    selectEdge: (id) =>
+      useStore.setState((s) => ({
+        edges: s.edges.map((e) => ({ ...e, selected: e.id === id })),
+      })),
     setLeftTab: (t) => useStore.setState((s) => ({ ui: { ...s.ui, leftTab: t } })),
     setInspectorTab: (t) => useStore.setState((s) => ({ ui: { ...s.ui, inspectorTab: t } })),
     openFile: (f) => useStore.setState((s) => ({ ui: { ...s.ui, fileViewer: f } })),
@@ -359,6 +369,7 @@ function buildActions(a: EngineApi): Actions {
 
     saveTemplate: (name) => void saveTemplate(a, name),
     loadTemplate: (id) => void loadTemplate(a, id),
+    loadFreelancePipeline: () => void loadProjectFinderPipeline(a),
     saveRole: (nodeId) => void saveRoleFromNode(a, nodeId),
     selfTest: (nodeId) => void contractSelfTest(a, nodeId),
     testFallback: () => void testFallback(a),

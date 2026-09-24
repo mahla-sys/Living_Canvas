@@ -76,7 +76,7 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
-const enterDrawMode = () => fireEvent.click(screen.getByRole("button", { name: /draw on the canvas/i }));
+const enterDrawMode = () => fireEvent.click(screen.getByRole("button", { name: /draw on the canvas|pen/i }));
 
 describe("drawing on the canvas", () => {
   it("enters draw mode and offers the tools", () => {

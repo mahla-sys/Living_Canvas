@@ -119,3 +119,28 @@ export const IUndo = (p: P) => (
 export const IWand = (p: P) => (
   <svg {...base(p)}><path d="M5 19L15.5 8.5M14 4l.8 2.2L17 7l-2.2.8L14 10l-.8-2.2L11 7l2.2-.8zM19 11l.6 1.6L21.2 13l-1.6.6L19 15.2l-.6-1.6L16.8 13l1.6-.4zM8 3.5l.6 1.5 1.5.6-1.5.6L8 7.7l-.6-1.5-1.5-.6 1.5-.6z" /></svg>
 );
+export const IHand = (p: P) => (
+  <svg {...base(p)}><path d="M18 11V6a2 2 0 0 0-4 0v5M14 10V4a2 2 0 0 0-4 0v7M10 10.5V6a2 2 0 0 0-4 0v8a7 7 0 0 0 14 0v-4a2 2 0 0 0-4 0v1" /></svg>
+);
+export const ICursor = (p: P) => (
+  <svg {...base(p)}><path d="M4 4l7 17 2.5-6.5L20 12z" /></svg>
+);
+export const IRect = (p: P) => (
+  <svg {...base(p)}><rect x="4" y="5" width="16" height="14" rx="2" /></svg>
+);
+export const IDiamond = (p: P) => (
+  <svg {...base(p)}><path d="M12 3l9 9-9 9-9-9z" /></svg>
+);
+export const ICircle = (p: P) => (
+  <svg {...base(p)}><ellipse cx="12" cy="12" rx="9" ry="7" /></svg>
+);
+export const IArrow = (p: P) => (
+  <svg {...base(p)}><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+);
+export const IText = (p: P) => (
+  <svg {...base(p)}><path d="M4 7V4h16v3M12 4v16M8 20h8" /></svg>
+);
+export const IRedo = (p: P) => (
+  <svg {...base(p)}><path d="M16 5l4 4-4 4" /><path d="M20 9h-9.5a6 6 0 0 0 0 12H15" /></svg>
+);
+

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useStore } from "./store";
 import CanvasArea from "./components/CanvasArea";
-import { LeftPanel, RightPanel, FileViewer } from "./components/SidePanels";
+import { LeftRibbon, LeftPanel, RightPanel, FileViewer } from "./components/SidePanels";
 import { TopBar, ActivityConsole, HistoryModal, SettingsModal, PortModal, Toasts, BootOverlay, StatusBar } from "./components/Overlays";
 
 export default function App() {
@@ -9,6 +9,9 @@ export default function App() {
   const theme = useStore((s) => s.settings.theme);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      (window as unknown as { useStore: typeof useStore }).useStore = useStore;
+    }
     void init();
   }, [init]);
 
@@ -83,7 +86,8 @@ export default function App() {
     <div className="h-full w-full max-h-full max-w-full flex flex-col bg-ink-950 text-ink-100 overflow-hidden select-none min-h-0 min-w-0" style={{ fontFamily: "var(--font-body)", maxHeight: "100dvh" }}>
       <TopBar />
       <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden">
-        {/* LTR order: library on the left, canvas in the middle, inspector on the right */}
+        {/* LTR order: ribbon + library on left, canvas in middle, inspector on right */}
+        <LeftRibbon />
         <LeftPanel />
         <main className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
           <div className="flex-1 min-h-0 min-w-0 overflow-hidden">

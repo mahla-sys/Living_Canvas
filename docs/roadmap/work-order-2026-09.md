@@ -45,6 +45,8 @@ is verified and mutation-tested; the rendered geometry is not.
 | 2.6 | Function Calling & Canvas Tools | `adr-022` | active |
 | 2.7 | Design Tokens & Obsidian Laboratory Palette | `adr-030` | ✅ 12 tests |
 | 2.8 | UI Declutter & Semantic Token Unification | `adr-033` | active |
+| 2.9 | Obsidian Visual Refinement & Palette Harmony | `adr-036` | active |
+| 2.10 | Freelance Project Finder & Proposal Pipeline | `adr-038` | active |
 
 2.2's **Status** tab shows real execution data only. CPU/memory stays deferred — browsers expose no CPU
 figure, and `performance.memory` is Chrome-only and approximate. Registered as inbox item 1. It carries four

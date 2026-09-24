@@ -70,6 +70,12 @@ describe("resolveModelRoute — the provider comes from the model name, not from
     expect(r.provider).toBe("mistral");
     expect(r.endpoint).toContain("api.mistral.ai");
   });
+
+  it("a gemini model name routes to the gemini openai-compatible endpoint", () => {
+    const r = resolveModelRoute("gemini-2.5-flash", "deepseek-chat");
+    expect(r.provider).toBe("gemini");
+    expect(r.endpoint).toContain("generativelanguage.googleapis.com");
+  });
 });
 
 describe("every model the UI offers is one the app can actually call", () => {
@@ -84,27 +90,31 @@ describe("every model the UI offers is one the app can actually call", () => {
   it("the shipped list is exactly the providers that exist — a removed model stays removed", () => {
     /* `glm-4-flash` was in this list while the only endpoint was DeepSeek, so choosing it produced a 400
        and a silent fall back to the simulator. It comes back with a Zhipu route, not with a placeholder. */
-    expect(MODELS).toEqual([DEFAULT_MODEL, "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"]);
+    expect(MODELS).toEqual([DEFAULT_MODEL, "gemini-2.5-flash", "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"]);
   });
 });
 
 /* ---------------- the end-to-end half: the model reaches the request ---------------- */
 
 import { setStorage, MemoryStorageAdapter } from "../core";
-import { sendChat } from "../engine";
+import { sendChat, testFallback } from "../engine";
 import { emptyExecution, makeNodeData, makeAgentConfig, CANVAS_ID } from "../../state";
 import type { AppState, RFNode } from "../../state";
 import { beforeEach, afterEach } from "vitest";
 
 describe("the model a node names is the model that is called (the control is not decorative)", () => {
   const REAL_FETCH = globalThis.fetch;
-  let calls: { url: string; body: Record<string, unknown> }[] = [];
+  let calls: { url: string; body: Record<string, unknown>; headers?: Record<string, string> }[] = [];
 
   beforeEach(() => {
     setStorage(new MemoryStorageAdapter());
     calls = [];
-    globalThis.fetch = (async (url: unknown, init?: { body?: string }) => {
-      calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown> });
+    globalThis.fetch = (async (url: unknown, init?: { body?: string; headers?: Record<string, string> }) => {
+      calls.push({
+        url: String(url),
+        body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+        headers: init?.headers,
+      });
       return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 });
     }) as typeof fetch;
   });
@@ -165,5 +175,19 @@ describe("the model a node names is the model that is called (the control is not
     await sendChat(apiWith("", 900), "n1", "hi");
     expect(calls[0].body.model).toBe("deepseek-chat");
     expect(calls[0].url).toBe(`${DEEPSEEK_BASE}/chat/completions`);
+  });
+
+  it("testFallback probes Gemini endpoint and passes x-goog-api-key header", async () => {
+    const api = apiWith("gemini-2.5-flash", 900);
+    api.set((st) => ({
+      ...st,
+      settings: { ...st.settings, provider: "gemini", apiKey: "AIzaSyFakeKey123", model: "gemini-2.5-flash" },
+    }));
+    await testFallback(api);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toContain("generativelanguage.googleapis.com");
+    expect(calls[0].body.model).toBe("gemini-2.5-flash");
+    expect(calls[0].headers?.["x-goog-api-key"]).toBe("AIzaSyFakeKey123");
+    expect(calls[0].headers?.Authorization).toBe("Bearer AIzaSyFakeKey123");
   });
 });

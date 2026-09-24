@@ -5,7 +5,7 @@
 import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout,
+  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout, DEFAULT_MODEL,
   type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType, type EdgeType, type LCEdgeData,
   type ModelRoute,
 } from "./core";
@@ -332,19 +332,23 @@ export const MemoryManager = {
 
 export async function testFallback(api: EngineApi) {
   const s = api.get();
-  if ((s.settings.provider !== "deepseek" && s.settings.provider !== "mistral") || !s.settings.apiKey.trim()) {
+  const settings = s.settings;
+  const isReal = settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini";
+  const effectiveKey = (settings?.apiKey?.trim()) || (settings?.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim() : "");
+  if (!isReal || !effectiveKey) {
     emit(api, "system", "fallback test: no API key configured — internal simulator is active (phase 1 default)");
     toast(api, "info", "No key configured; the system runs on the internal simulator.");
     return;
   }
-  const route = resolveModelRoute(s.settings.model, s.settings.model);
+  const route = resolveModelRoute(settings.model, settings.model);
   emit(api, "system", `fallback test: calling ${route.provider}/${route.model} for real…`);
   try {
-    const text = await askModel(route, s.settings.apiKey.trim(), [
+    const text = await askModel(route, effectiveKey, [
       { role: "user", content: "Answer in one word: hello" },
     ], 16);
     emit(api, "system", `fallback test passed — model answered “${String(text).slice(0, 50)}”`);
-    toast(api, "success", "DeepSeek connection is up ✓");
+    const providerName = route.provider.charAt(0).toUpperCase() + route.provider.slice(1);
+    toast(api, "success", `${providerName} connection is up ✓`);
   } catch (err) {
     emit(api, "system", `fallback test: “${String(err)}” — runs fall back to the simulator automatically (§12.6)`);
     toast(api, "warn", "Connection failed; runs continue on the simulator without interruption.");
@@ -1092,9 +1096,17 @@ export async function askModel(
       payload.tool_choice = "auto";
     }
 
+    const reqHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    };
+    if (route.provider === "gemini") {
+      reqHeaders["x-goog-api-key"] = apiKey;
+    }
+
     const res = await fetch(route.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      headers: reqHeaders,
       body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(`${route.provider} API ${res.status}`);
@@ -1559,8 +1571,14 @@ async function executeNode(api: EngineApi, nodeId: string) {
 
     // step 4 — generation. `agent.model` is the model that runs (ADR-008); `settings.model` is only the
     // fallback for a node whose file predates the field or whose author left it empty.
-    const route = resolveModelRoute(agent?.model, api.get().settings.model);
-    await appendLog(api, nodeId, agent && (api.get().settings.provider === "deepseek" || api.get().settings.provider === "mistral") && api.get().settings.apiKey
+    const settings = api.get()?.settings;
+    const isRealProvider = settings ? (settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini") : false;
+    const effectiveKey = (settings?.apiKey) || (settings?.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY) : "");
+    const effectiveModel = (agent?.model === DEFAULT_MODEL && settings?.provider !== "deepseek" && settings?.model && settings.model !== DEFAULT_MODEL)
+      ? settings.model
+      : (agent?.model || settings?.model);
+    const route = resolveModelRoute(effectiveModel, settings?.model);
+    await appendLog(api, nodeId, agent && isRealProvider && effectiveKey
       ? `calling ${route.provider}/${route.model} (max_tokens ${agent?.max_tokens ?? 900})…`
       : "generating a response in the phase 1 simulator…");
     let fields: Record<string, string>;
@@ -1571,9 +1589,9 @@ async function executeNode(api: EngineApi, nodeId: string) {
       agent,
       outputDelivered: false,
     };
-    if (agent && (api.get().settings.provider === "deepseek" || api.get().settings.provider === "mistral") && api.get().settings.apiKey) {
+    if (agent && isRealProvider && effectiveKey) {
       try {
-        const text = await askModel(route, api.get().settings.apiKey, [
+        const text = await askModel(route, effectiveKey, [
           { role: "system", content: agent.system_prompt },
           { role: "user", content: `Canvas summary and memory:\n${memoryTxt.slice(0, 1200)}\n\nOutput of the previous node:\n${upstream.slice(0, 800)}\n\nWrite the output with these fields: ${required.join(", ")}.` },
         ], {
@@ -1582,9 +1600,10 @@ async function executeNode(api: EngineApi, nodeId: string) {
           toolContext: toolCtx,
         });
         fields = { summary: text, ...simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner) };
-      } catch (err) {
-        await appendLog(api, nodeId, `API error: ${String(err)} — falling back to the simulator (§12.6 fallback)`);
-        toast(api, "warn", "DeepSeek unreachable; used the internal simulator.");
+      } catch (err: unknown) {
+        const errMsg = (err as Error)?.message ?? String(err);
+        await appendLog(api, nodeId, `API error (${route.provider}): ${errMsg} — falling back to the simulator (§12.6 fallback)`);
+        toast(api, "warn", `${route.provider} unreachable (${errMsg}); used the internal simulator.`);
         fields = simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner);
       }
     } else {
@@ -1984,23 +2003,30 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
 
   let reply: string;
   const settings = api.get().settings;
-  if ((settings.provider === "deepseek" || settings.provider === "mistral") && settings.apiKey && node.data.agent) {
+  const isReal = settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini";
+  const effectiveKey = settings.apiKey || (settings.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY) : "");
+  if (isReal && effectiveKey && node.data.agent) {
     try {
       const history = (api.get().chats[nodeId] ?? []).slice(-8).map((m) => ({
         role: m.role === "user" ? "user" as const : "assistant" as const,
         content: m.text,
       }));
+      const effectiveModel = (node.data.agent.model === DEFAULT_MODEL && settings.provider !== "deepseek" && settings.model !== DEFAULT_MODEL)
+        ? settings.model
+        : (node.data.agent.model || settings.model);
+      const route = resolveModelRoute(effectiveModel, settings.model);
       reply = await askModel(
-        resolveModelRoute(node.data.agent.model, settings.model),
-        settings.apiKey,
+        route,
+        effectiveKey,
         [
           { role: "system", content: node.data.agent.system_prompt },
           ...history,
         ],
         node.data.agent.max_tokens
       );
-    } catch {
-      toast(api, "warn", "Model unavailable; the reply was simulated.");
+    } catch (err: unknown) {
+      const errMsg = (err as Error)?.message ?? "unavailable";
+      toast(api, "warn", `Model error (${errMsg}); the reply was simulated.`);
       reply = simChatReply(node.data.agent.role_id, node.data.title, text, api.get().memory.agents[nodeId]);
     }
   } else {
@@ -2194,7 +2220,14 @@ export async function createNode(
     ...(nodeType === "output-box" ? { shape: "hexagon" as const } : {}),
     ...opts,
   });
-  if (data.agent) data.agent = makeAgentConfig(id, data.agent.role_id, { require_approval: data.agent.require_approval });
+  if (data.agent) {
+    const settings = api.get()?.settings;
+    const activeModel = settings?.model || (settings?.provider === "gemini" ? "gemini-3.6-flash" : settings?.provider === "mistral" ? "mistral-small-latest" : "deepseek-chat");
+    data.agent = makeAgentConfig(id, data.agent.role_id, {
+      require_approval: data.agent.require_approval,
+      model: data.agent.model && data.agent.model !== DEFAULT_MODEL ? data.agent.model : activeModel,
+    });
+  }
   const node: RFNode = { id, type: "lc", position, data };
   api.set((st) => ({ nodes: [...st.nodes, node] }));
   if (nodeType === "agent") {
@@ -2432,7 +2465,7 @@ export async function seedWorkspace(api: EngineApi) {
   await boot("memory/user.md", memoryToMd(st.memory.user));
   for (const [id, doc] of Object.entries(st.memory.agents)) await boot(`memory/agents/${id}.md`, memoryToMd(doc));
   await boot("history/index.yaml", toYaml({ canvas_id: st.canvasId, snapshot_count: 0, snapshots: [] }));
-  for (const role of ["understander", "risk-analyst", "solution-designer", "decision-maker"]) {
+  for (const role of ["understander", "risk-analyst", "solution-designer", "decision-maker", "manager", "builder", "project-scout", "feasibility-filter", "proposal-architect", "deal-closer"]) {
     const r = roleById(role);
     await boot(`library/roles/${role}.json`, JSON.stringify({
       id: r.id, name: r.name, description: r.description, system_prompt: `prompts/${r.id}.md`,
@@ -2443,6 +2476,29 @@ export async function seedWorkspace(api: EngineApi) {
   }
   await boot("library/shapes/agent-card.json", JSON.stringify({ id: "agent-card", name: "Agent card", type: "shape", default_size: { width: 280, height: 160 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
   await boot("library/shapes/hex-process.json", JSON.stringify({ id: "hex-process", name: "Process hexagon", type: "shape", default_size: { width: 240, height: 140 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
+
+  // seed project-finder template in library
+  const pfSpec: TemplateSpec = {
+    template_id: "project-finder",
+    name: "Freelance Project & Proposal Pipeline",
+    description: "4-agent automated pipeline for scouting projects, evaluating feasibility, drafting bespoke proposals, and contract milestones.",
+    version: "1.0",
+    nodes: [
+      { id: "node-scout", nodeType: "agent", title: "1. Project & Client Scout", position: { x: 80, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline." },
+      { id: "node-filter", nodeType: "agent", title: "2. Feasibility & Risk Filter", position: { x: 420, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision." },
+      { id: "node-proposal", nodeType: "agent", title: "3. Proposal & Pitch Architect", position: { x: 760, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing." },
+      { id: "node-closer", nodeType: "agent", title: "4. Milestone & Deal Closer", position: { x: 1100, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "deal-closer", content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action." },
+      { id: "node-output", nodeType: "output-box", title: "Freelance Package Deliverable", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-scout", target: "node-filter", edgeType: "flow", label: "scouted briefs", line_style: "solid" },
+      { id: "edge-002", source: "node-filter", target: "node-proposal", edgeType: "flow", label: "qualified projects", line_style: "solid" },
+      { id: "edge-003", source: "node-proposal", target: "node-closer", edgeType: "flow", label: "custom proposal", line_style: "solid" },
+      { id: "edge-004", source: "node-closer", target: "node-output", edgeType: "flow", label: "final package", line_style: "solid" },
+    ],
+  };
+  await boot("library/templates/project-finder/template.json", JSON.stringify(pfSpec, null, 2));
+  await boot("library/templates/project-finder/template.yaml", toYaml({ template_id: "project-finder", name: pfSpec.name, version: "1.0", nodes: 5, edges: 4 }));
   // the output contracts the roles declare have to exist as files, or "hard validation" is a promise
   // with nothing behind it: seed the four schemas the built-in roles point at (§4.9, Q1).
   for (const [roleId, schema] of Object.entries(ROLE_SCHEMAS))
@@ -2594,7 +2650,8 @@ export async function loadTemplate(api: EngineApi, id: string) {
     toast(api, "error", "Template file not found.");
     return;
   }
-  if (!window.confirm(`The current canvas will be replaced by the template “${spec.name}”. Continue?`)) return;
+  const isPristine = st.nodes.length <= 1 && (st.nodes.length === 0 || st.nodes[0]?.data.nodeType === "note");
+  if (!isPristine && !window.confirm(`The current canvas will be replaced by the template “${spec.name}”. Continue?`)) return;
 
   // clean up artifacts of the previous graph
   for (const n of st.nodes) await storage.deleteFile(`${ROOT}/nodes/${n.id}.md`).catch(() => undefined);
@@ -2636,6 +2693,90 @@ export async function loadTemplate(api: EngineApi, id: string) {
   touch(api);
   emit(api, "system", `template “${spec.name}” loaded — ${nodes.length} nodes, ${edges.length} edges`);
   toast(api, "success", `Template “${spec.name}” loaded onto the canvas.`);
+}
+
+export async function loadProjectFinderPipeline(api: EngineApi) {
+  const st = api.get();
+  if (st.execution.status === "running" || st.execution.status === "waiting_approval") {
+    toast(api, "warn", "Pipelines cannot be loaded mid-run.");
+    return;
+  }
+  const owner = st.settings.owner;
+  const scout = makeNodeData("agent", "1. Project & Client Scout", owner, {
+    color: "#e8b04b",
+    shape: "card",
+    content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline.",
+    agent: makeAgentConfig("node-scout", "project-scout"),
+  });
+
+  const filter = makeNodeData("agent", "2. Feasibility & Risk Filter", owner, {
+    color: "#6fb3c7",
+    shape: "card",
+    content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision.",
+    agent: makeAgentConfig("node-filter", "feasibility-filter"),
+  });
+
+  const proposal = makeNodeData("agent", "3. Proposal & Pitch Architect", owner, {
+    color: "#b98bc2",
+    shape: "card",
+    content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing.",
+    agent: makeAgentConfig("node-proposal", "proposal-architect"),
+  });
+
+  const closer = makeNodeData("agent", "4. Milestone & Deal Closer", owner, {
+    color: "#e06a4e",
+    shape: "card",
+    content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action.",
+    agent: makeAgentConfig("node-closer", "deal-closer"),
+  });
+
+  const outBox = makeNodeData("output-box", "Freelance Package Deliverable", owner, {
+    color: "#8fbf7f",
+    shape: "hexagon",
+    content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send.",
+  });
+
+  const nodes: RFNode[] = [
+    { id: "node-scout", type: "lc", position: { x: 80, y: 180 }, data: scout },
+    { id: "node-filter", type: "lc", position: { x: 420, y: 180 }, data: filter },
+    { id: "node-proposal", type: "lc", position: { x: 760, y: 180 }, data: proposal },
+    { id: "node-closer", type: "lc", position: { x: 1100, y: 180 }, data: closer },
+    { id: "node-output", type: "lc", position: { x: 1440, y: 180 }, data: outBox },
+  ];
+
+  const edges: RFEdge[] = [
+    { id: "edge-001", source: "node-scout", target: "node-filter", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "scouted briefs" }) },
+    { id: "edge-002", source: "node-filter", target: "node-proposal", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "qualified projects" }) },
+    { id: "edge-003", source: "node-proposal", target: "node-closer", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "custom proposal" }) },
+    { id: "edge-004", source: "node-closer", target: "node-output", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "final package" }) },
+  ];
+
+  for (const n of st.nodes) await storage.deleteFile(`${ROOT}/nodes/${n.id}.md`).catch(() => undefined);
+  for (const e of st.edges) await storage.deleteFile(`${ROOT}/edges/${e.id}.yaml`).catch(() => undefined);
+
+  const agents = { ...st.memory.agents };
+  for (const n of nodes) {
+    if (n.data.agent && !agents[n.id]) {
+      agents[n.id] = makeMemDoc(
+        `memory/agents/${n.id}.md`, `Memory of ${n.data.title}`,
+        "- latest inputs: —\n- decisions taken: —\n- notes for the next run: —", 0.7, "agent"
+      );
+      await storage.writeFile(`${ROOT}/memory/agents/${n.id}.md`, memoryToMd(agents[n.id])).catch(() => undefined);
+    }
+  }
+
+  api.set({
+    nodes, edges,
+    memory: { ...st.memory, agents },
+    execution: emptyExecution(),
+    canvas: { ...st.canvas, title: "Freelance Project & Proposal Pipeline", updated_at: nowIso() },
+  });
+
+  for (const n of nodes) await writeNodeArtifact(api, n.id, true);
+  for (const e of edges) await writeEdgeArtifact(api, e.id, true);
+  touch(api);
+  emit(api, "system", "loaded Freelance Project & Proposal Pipeline (4 agents + output box)");
+  toast(api, "success", "Freelance Project Finder & Proposal Pipeline loaded onto canvas!");
 }
 
 /** save_role tool — keeps an agent's customised role in the library */

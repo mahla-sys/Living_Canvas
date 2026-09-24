@@ -26,7 +26,7 @@ const left = renderToStaticMarkup(createElement(LeftPanel));
 const right = renderToStaticMarkup(createElement(RightPanel));
 const strip = renderToStaticMarkup(createElement(StatusBar));
 
-describe("the status strip is mounted chrome, 22px, with a document half and a moment half", () => {
+describe("the status strip is mounted chrome, 26px, with a document half and a moment half", () => {
   it("renders at exactly STATUS_BAR_HEIGHT and is findable by the app's own marker", () => {
     expect(strip).toContain("data-lc-statusbar=\"true\"");
     expect(strip).toContain(`height:${STATUS_BAR_HEIGHT}px`);

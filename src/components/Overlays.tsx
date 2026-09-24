@@ -4,7 +4,7 @@ import { APP_VERSION, makeAgentConfig, type AppState } from "../state";
 import { fmtClock, fmtDate, THEMES, GRID_GAP, STATUS_BAR_HEIGHT, type BusEvent } from "../lib/core";
 import {
   IPlay, IStop, ICamera, IHistory, IGear, IX, ICheck, IWarn,
-  ITerminal, IRestore, IDatabase, ISpark, ITrash, IChevD, IFolder, IFile, ILayers, INode, IPlus,
+  ITerminal, IRestore, IDatabase, ISpark, ITrash, IFolder, IFile, ILayers, INode, IPlus,
 } from "./icons";
 import { storageMode } from "../lib/core";
 import { isFsAccessSupported } from "../lib/fs-access";
@@ -49,47 +49,57 @@ export function StatusBar() {
   const actions = useStore((s) => s.actions);
   const mode = storageMode();
 
-  const chip = "text-[10px] font-mono leading-none px-2 py-1 rounded border border-border-subtle bg-surface-raised text-text-secondary";
   return (
     <div
       data-lc-statusbar
-      className="h-[22px] w-full max-w-full shrink-0 flex items-center justify-between gap-3 px-2.5 border-t border-border-subtle bg-surface-base text-text-secondary select-none min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller"
+      className="h-[26px] w-full max-w-full shrink-0 flex items-center justify-between gap-4 px-3 border-t border-border-subtle bg-surface-base text-text-secondary select-none min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller text-[11px]"
       style={{ height: STATUS_BAR_HEIGHT }}
     >
       {/* left — the document */}
       <div className="flex items-center gap-2 min-w-0">
-        <span className="truncate text-[10px] font-bold text-text-primary">{title}</span>
-        <span className={chip}>{nodeCount} nodes</span>
-        <span className={chip}>{edgeCount} edges</span>
+        <span className="flex items-center gap-1.5 font-bold text-text-primary truncate">
+          <INode size={13} className="text-lc-accent shrink-0" />
+          {title}
+        </span>
+        <span className="text-text-tertiary">·</span>
+        <span className="text-[10.5px] text-text-secondary flex items-center gap-1">
+          <span className="font-semibold text-text-primary">{nodeCount}</span> nodes
+        </span>
+        <span className="text-text-tertiary">·</span>
+        <span className="text-[10.5px] text-text-secondary flex items-center gap-1">
+          <span className="font-semibold text-text-primary">{edgeCount}</span> edges
+        </span>
         <button
           onClick={() => actions.setPortOpen(true)}
           title="Where the files live — and how to move them"
-          className={`${chip} text-sky-lc font-medium hover:border-sky-lc/60 cursor-pointer`}
+          className="text-[10px] font-mono px-2 py-0.5 rounded bg-surface-raised border border-border-subtle text-text-secondary hover:text-text-primary hover:border-lc-accent/40 cursor-pointer transition-colors"
         >
           {mode}
         </button>
       </div>
 
       {/* right — the moment */}
-      <div className="flex items-center gap-2 shrink-0">
-        {chordDepth > 0 && <span className="text-[9.5px] font-mono text-text-secondary">Ctrl+K … press Z</span>}
+      <div className="flex items-center gap-3 shrink-0">
+        {chordDepth > 0 && <span className="text-[10px] font-mono text-text-secondary">Ctrl+K … press Z</span>}
         {focus && (
           <button
             onClick={actions.toggleFocusMode}
             title="Leave focus mode — or press Escape twice"
-            className="text-[9.5px] font-bold text-lc-accent px-1.5 py-0.5 rounded border border-lc-accent/50 cursor-pointer hover:bg-lc-accent/10"
+            className="text-[10px] font-bold text-lc-accent px-1.5 py-0.5 rounded border border-lc-accent/50 cursor-pointer hover:bg-lc-accent/10"
           >
             Focus mode — Esc Esc
           </button>
         )}
-        {/* the phrase, not the enum — and the queue position while there is a queue to be in */}
-        <span className={`text-[9.5px] ${STATUS_PHRASE[status].tone}`} data-lc-run-phrase>
+        <span className={`text-[10.5px] ${STATUS_PHRASE[status].tone}`} data-lc-run-phrase>
           {STATUS_PHRASE[status].label}
           {queue.length > 0 && (status === "running" || status === "paused") && (
             <span className="font-mono text-text-secondary ms-1.5">{completed} of {queue.length}</span>
           )}
         </span>
-        <span className={chip} title="Whether the last change reached the files">{SAVE_PHRASE[saveState]}</span>
+        <span className="text-text-tertiary">·</span>
+        <span className="text-[10.5px] text-text-secondary" title="Whether the last change reached the files">
+          {SAVE_PHRASE[saveState]}
+        </span>
       </div>
     </div>
   );
@@ -102,9 +112,8 @@ export function StatusBar() {
    tried to read the toolbar. Both animations are gone and the colour is the accent role, not amber. */
 function Logo() {
   return (
-    <span className="relative w-8 h-8 rounded-[9px] bg-ink-800 border border-lc-accent/35 flex items-center justify-center overflow-visible">
-      <span className="w-2.5 h-2.5 rounded-full bg-lc-accent" />
-      <span className="absolute inset-1 rounded-[6px] border border-lc-accent/30" />
+    <span className="w-5 h-5 rounded-md bg-lc-accent/15 border border-lc-accent/30 flex items-center justify-center shrink-0">
+      <INode size={11} className="text-lc-accent" />
     </span>
   );
 }
@@ -121,53 +130,34 @@ export function TopBar() {
   const paused = execution.status === "paused";
   const idle = execution.status === "idle" || execution.status === "completed" || execution.status === "stopped";
   const progress = execution.queue.length ? execution.completed.length / execution.queue.length : 0;
-  // the scoped-run affordance only appears once there is a selection to run (ADR-012)
-  const selectedCount = useStore((s) => s.nodes.filter((n) => n.selected).length);
 
   return (
-    <header className="h-[54px] w-full max-w-full shrink-0 flex items-center gap-3 px-4 border-b border-ink-700 bg-ink-900/90 backdrop-blur-sm min-w-0 overflow-x-auto overflow-y-hidden lc-panel-scroller">
-      <div className="flex items-center gap-2 shrink-0 me-1">
+    <header className="h-[42px] w-full max-w-full shrink-0 flex items-center justify-between px-2.5 border-b border-border-subtle bg-surface-base text-text-primary select-none z-20 min-w-0">
+      {/* Left navigation & Obsidian Tab */}
+      <div className="flex items-center gap-1.5 min-w-0">
         <button
           onClick={() => actions.togglePanel("left")}
-          title={`${leftOpen ? "Hide" : "Show"} library panel (⌘1)`}
-          className={`p-2 rounded-lg border transition-all cursor-pointer ${
-            leftOpen ? "border-ink-600 text-ink-200 bg-ink-800 hover:border-lc-accent/60" : "border-transparent text-ink-500 hover:text-ink-300 hover:bg-ink-800"
+          title={`${leftOpen ? "Collapse" : "Expand"} sidebar (⌘1)`}
+          className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
+            leftOpen ? "text-lc-accent bg-surface-raised" : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
           }`}
         >
-          <ILayers size={16} />
+          <ILayers size={15} />
         </button>
-      </div>
 
-      <div className="flex items-center gap-2.5 shrink-0">
-        <Logo />
-        <div className="leading-none">
-          <p className="font-display text-[18px] text-ink-50 tracking-wide">Living Canvas</p>
-          <p className="text-[10px] text-text-tertiary mt-0.5" data-lc-topbar-subtitle>
-            <span className="font-mono">v{APP_VERSION}</span>
-          </p>
+        <div className="w-px h-4 bg-border-subtle mx-0.5" />
+
+        {/* Obsidian active file tab */}
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-t-lg bg-surface-raised border-t border-x border-border-default text-text-primary text-[12px] font-medium shadow-xs min-w-0">
+          <Logo />
+          <span className="sr-only">Living Canvas</span>
+          <span className="truncate max-w-[180px] font-semibold">{canvas.title}</span>
+          <span
+            className={`w-1.5 h-1.5 rounded-full shrink-0 ${saveState === "saving" ? "bg-lc-accent anim-blink" : "bg-lc-success"}`}
+            title={saveState === "saving" ? "saving…" : "saved"}
+          />
         </div>
-      </div>
 
-      <div className="w-px h-6 bg-ink-700 mx-1" />
-
-      <div className="min-w-0">
-        <p className="text-[13px] font-extrabold text-ink-100 truncate">{canvas.title}</p>
-        <p className="text-[10px] text-text-secondary flex items-center gap-1.5 mt-0.5">
-          <span className={`w-1.5 h-1.5 rounded-full ${saveState === "saving" ? "bg-lc-accent anim-blink" : "bg-lc-success"}`} />
-          {saveState === "saving" ? "saving…" : "saved"}
-        </p>
-      </div>
-
-      {running && (
-        <div className="hidden md:flex items-center gap-2 ms-2">
-          <div className="w-24 h-1.5 rounded-full bg-ink-700 overflow-hidden">
-            <div className="h-full bg-lc-accent rounded-full transition-all duration-700" style={{ width: `${Math.round(progress * 100)}%` }} />
-          </div>
-          <span className="text-[10px] font-bold text-lc-accent">{execution.completed.length}/{execution.queue.length}</span>
-        </div>
-      )}
-
-      <div className="ms-auto flex items-center gap-1.5">
         <button
           onClick={() => {
             if (window.confirm("Start a new canvas? This resets the workspace to a fresh canvas.")) {
@@ -175,10 +165,34 @@ export function TopBar() {
             }
           }}
           title="New canvas"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-ink-200 hover:text-lc-accent hover:bg-ink-800 border border-ink-600 transition-all cursor-pointer active:scale-95"
+          className="w-7 h-7 ms-1 rounded-md flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-colors cursor-pointer"
         >
-          <IPlus size={13} />
-          New
+          <IPlus size={14} />
+        </button>
+
+        <span className="sr-only" data-lc-topbar-subtitle>v{APP_VERSION}</span>
+      </div>
+
+      {/* Right controls: Copilot, Run Engine, Inspector toggle */}
+      <div className="flex items-center gap-2 shrink-0">
+        {running && (
+          <div className="hidden sm:flex items-center gap-2 me-1">
+            <div className="w-20 h-1.5 rounded-full bg-surface-raised overflow-hidden border border-border-subtle">
+              <div className="h-full bg-lc-accent rounded-full transition-all duration-500" style={{ width: `${Math.round(progress * 100)}%` }} />
+            </div>
+            <span className="text-[10px] font-mono font-bold text-lc-accent">{execution.completed.length}/{execution.queue.length}</span>
+          </div>
+        )}
+
+        <button
+          onClick={() => {
+            actions.loadFreelancePipeline();
+          }}
+          title="Load 4-Agent Freelance Project Finder & Proposal Pipeline"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold text-text-secondary bg-surface-raised border border-border-default hover:border-lc-accent/40 hover:text-lc-accent transition-all cursor-pointer"
+        >
+          <ISpark size={13} className="text-lc-accent" />
+          Freelance Pipeline
         </button>
 
         <button
@@ -201,100 +215,82 @@ export function TopBar() {
               });
             }
           }}
-          title="Chat with Canvas Manager Copilot"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-lc-accent bg-lc-accent/10 border border-lc-accent/40 hover:bg-lc-accent/20 transition-all cursor-pointer active:scale-95"
+          title="Chat with Copilot"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold text-text-secondary bg-surface-raised border border-border-default hover:border-lc-accent/40 hover:text-lc-accent transition-all cursor-pointer"
         >
-          <ISpark size={13} />
+          <ISpark size={13} className="text-lc-accent" />
           Copilot
         </button>
 
-        <button
-          onClick={() => actions.setPortOpen(true)}
-          title="Export / Import and folder attach"
-          className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-[11px] font-bold text-ink-300 hover:text-lc-accent hover:bg-ink-800 border border-ink-600 transition-all cursor-pointer"
-        >
-          <IFolder size={14} />
-          Files
-        </button>
-        <button onClick={actions.snapshot} title="Manual checkpoint (§10)" className="p-2 rounded-lg text-ink-300 hover:text-lc-accent hover:bg-ink-800 border border-transparent hover:border-ink-600 transition-all cursor-pointer">
-          <ICamera size={16} />
-        </button>
-        <button onClick={() => actions.setHistoryOpen(true)} title="History and rollback" className="p-2 rounded-lg text-ink-300 hover:text-lc-accent hover:bg-ink-800 border border-transparent hover:border-ink-600 transition-all cursor-pointer">
-          <IHistory size={16} />
-        </button>
-        <button onClick={() => actions.setSettingsOpen(true)} title="Settings" className="p-2 rounded-lg text-ink-300 hover:text-lc-accent hover:bg-ink-800 border border-transparent hover:border-ink-600 transition-all cursor-pointer">
-          <IGear size={16} />
-        </button>
-        
-        <div className="w-px h-6 bg-ink-700 mx-1" />
-        
-        <button
-          onClick={() => actions.togglePanel("right")}
-          title={`${rightOpen ? "Hide" : "Show"} inspector panel (⌘2)`}
-          className={`p-2 rounded-lg border transition-all cursor-pointer ${
-            rightOpen ? "border-ink-600 text-ink-200 bg-ink-800 hover:border-lc-accent/60" : "border-transparent text-ink-500 hover:text-ink-300 hover:bg-ink-800"
-          }`}
-        >
-          <INode size={16} />
-        </button>
+        <div className="w-px h-4 bg-border-subtle mx-0.5" />
 
-        <div className="w-px h-6 bg-ink-700 mx-1" />
         {running ? (
-          <button onClick={actions.stop} className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-transparent border border-ember/50 text-ember text-[11.5px] font-bold hover:bg-ember/10 transition-all cursor-pointer">
-            <IStop size={14} /> Stop run
+          <button
+            onClick={actions.stop}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-ember/15 border border-ember/40 text-ember text-[11px] font-bold hover:bg-ember/25 transition-all cursor-pointer"
+          >
+            <IStop size={13} /> Stop
           </button>
         ) : waiting ? (
-          <button onClick={actions.resume} className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-transparent border border-lc-warn/60 text-lc-warn text-[11.5px] font-bold anim-waiting transition-all cursor-pointer">
-            <IWarn size={14} /> Approve &amp; continue
+          <button
+            onClick={actions.resume}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-lc-warn/15 border border-lc-warn/40 text-lc-warn text-[11px] font-bold transition-all cursor-pointer"
+          >
+            <IWarn size={13} /> Approve
           </button>
         ) : (
-          <button onClick={actions.runAll} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-lc-accent text-ink-950 text-[12px] font-black hover:brightness-110 hover:shadow-[0_6px_24px_-6px_var(--lc-accent-glow)] transition-all cursor-pointer active:scale-[0.98]">
-            <IPlay size={14} /> Run pipeline
+          <button
+            onClick={actions.runAll}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-lc-accent text-void text-[11px] font-bold shadow-xs hover:brightness-105 transition-all cursor-pointer active:scale-95"
+          >
+            <IPlay size={13} /> Run
           </button>
         )}
-        {/* Pause and Step only exist while there is something to pause or step (ADR-013). Pause is
-            cooperative, so the label says what is actually happening: the current node finishes first. */}
+
         {(running || paused) && (
           <button
             onClick={actions.pause}
             disabled={!running}
             data-lc-pause
-            title="Finish the current node, then stop the queue"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-ink-200 text-[11.5px] font-extrabold hover:border-lc-warn/60 hover:text-lc-warn transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Pause pipeline execution"
+            className="px-2 py-1 rounded-md bg-surface-raised border border-border-default text-text-secondary text-[11px] font-medium hover:text-text-primary transition-colors cursor-pointer"
           >
             {paused ? "Paused" : "Pause"}
           </button>
         )}
+
         {(paused || idle) && (
           <button
             onClick={actions.step}
             data-lc-step
             title="Run exactly one node, then pause"
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-ink-200 text-[11.5px] font-extrabold hover:border-lc-accent/60 hover:text-lc-accent transition-colors cursor-pointer"
+            className="px-2 py-1 rounded-md bg-surface-base border border-border-subtle text-text-secondary text-[11px] font-medium hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer"
           >
             Step
           </button>
         )}
+
         {paused && (
           <button
             onClick={actions.resume}
             data-lc-resume
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-lc-accent/15 border border-lc-accent/50 text-lc-accent text-[11.5px] font-extrabold hover:bg-lc-accent/25 transition-colors cursor-pointer"
+            className="flex items-center gap-1 px-2 py-1 rounded-md bg-lc-accent/15 border border-lc-accent/40 text-lc-accent text-[11px] font-semibold hover:bg-lc-accent/25 transition-colors cursor-pointer"
           >
-            <IPlay size={13} /> Resume
+            <IPlay size={12} /> Resume
           </button>
         )}
-        {selectedCount > 0 && (
-          <button
-            onClick={actions.runSelected}
-            disabled={running || waiting}
-            data-lc-run-selected
-            title="Run only the selected nodes — the choice is not saved anywhere (ADR-012)"
-            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-ink-850 border border-lc-accent/45 text-lc-accent text-[11.5px] font-extrabold hover:bg-lc-accent/10 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Run selected ({selectedCount})
-          </button>
-        )}
+
+        <div className="w-px h-4 bg-border-subtle mx-0.5" />
+
+        <button
+          onClick={() => actions.togglePanel("right")}
+          title={`${rightOpen ? "Collapse" : "Expand"} inspector (⌘2)`}
+          className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors cursor-pointer ${
+            rightOpen ? "text-lc-accent bg-surface-raised" : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
+          }`}
+        >
+          <INode size={15} />
+        </button>
       </div>
     </header>
   );
@@ -321,24 +317,31 @@ export function ActivityConsole() {
   const open = useStore((s) => s.ui.consoleOpen);
   const focus = useStore((s) => s.ui.focusMode);
   const actions = useStore((s) => s.actions);
-  // focus mode is about the board: the log is chrome, and chrome is what leaves
-  if (focus) return null;
+
+  if (focus || !open) return null;
   return (
-    <div className={`shrink-0 border-t border-border-subtle bg-surface-base transition-all duration-300 ${open ? "h-[168px]" : "h-[32px]"} flex flex-col`}>
-      <button onClick={actions.toggleConsole} className="flex items-center gap-2 px-3.5 h-[32px] shrink-0 text-text-secondary hover:text-text-primary transition-colors cursor-pointer">
-        <ITerminal size={13} className="text-lc-accent" />
-        <span className="text-[11px] font-bold text-text-primary">Events</span>
-        <span className="text-[9.5px] font-mono text-text-secondary bg-surface-raised border border-border-subtle rounded px-1.5">{events.length}</span>
-        <span className="text-[9px] font-mono text-text-tertiary border border-border-subtle rounded px-1 hidden sm:inline">⌘L</span>
-        <IChevD size={13} className={`ms-auto transition-transform duration-300 ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open && (
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 pb-2 space-y-[3px]">
-          {events.length === 0 && <p className="text-[10.5px] text-text-tertiary py-2">No event yet — start working on the canvas.</p>}
-          {events.map((e: BusEvent) => {
-            // one lookup per row, because the two alpha tints are derived from the same role
-            const tagColor = TAG_COLOR[e.type] ?? "var(--lc-text-secondary)";
-            return (
+    <div className="shrink-0 border-t border-border-subtle bg-surface-base h-[168px] flex flex-col anim-fade">
+      <div className="flex items-center justify-between px-3.5 h-[34px] shrink-0 border-b border-border-subtle bg-surface-raised">
+        <div className="flex items-center gap-2">
+          <ITerminal size={13} className="text-lc-accent" />
+          <span className="text-[11px] font-bold text-text-primary">Execution Ledger & Events</span>
+          <span className="text-[9.5px] font-mono text-text-secondary bg-surface-base border border-border-subtle rounded px-1.5">{events.length}</span>
+          <span className="text-[9px] font-mono text-text-tertiary border border-border-subtle rounded px-1 hidden sm:inline">⌘L</span>
+        </div>
+        <button
+          onClick={actions.toggleConsole}
+          className="text-text-tertiary hover:text-text-primary p-1 rounded hover:bg-surface-base transition-colors cursor-pointer"
+          title="Close ledger"
+        >
+          <IX size={13} />
+        </button>
+      </div>
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3.5 py-2 space-y-[3px]">
+        {events.length === 0 && <p className="text-[10.5px] text-text-tertiary py-2">No event yet — start working on the canvas.</p>}
+        {events.map((e: BusEvent) => {
+          // one lookup per row, because the two alpha tints are derived from the same role
+          const tagColor = TAG_COLOR[e.type] ?? "var(--lc-text-secondary)";
+          return (
             <div key={e.id} className="flex items-center gap-2 text-[10.5px] anim-rise">
               <span className="font-mono text-text-tertiary shrink-0 w-[52px]">{fmtClock(e.at)}</span>
               <span
@@ -349,10 +352,9 @@ export function ActivityConsole() {
               </span>
               <span className="text-text-secondary truncate">{e.message}</span>
             </div>
-            );
-          })}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -367,6 +369,16 @@ export function HistoryModal() {
   const open = useStore((s) => s.ui.historyOpen);
   const snapshots = useStore((s) => s.snapshots);
   const actions = useStore((s) => s.actions);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") actions.setHistoryOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, actions]);
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-950/75 backdrop-blur-[3px] anim-fade" onClick={() => actions.setHistoryOpen(false)}>
@@ -416,6 +428,16 @@ export function SettingsModal() {
   const open = useStore((s) => s.ui.settingsOpen);
   const settings = useStore((s) => s.settings);
   const actions = useStore((s) => s.actions);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") actions.setSettingsOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, actions]);
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-ink-950/75 backdrop-blur-[3px] anim-fade" onClick={() => actions.setSettingsOpen(false)}>
@@ -428,11 +450,14 @@ export function SettingsModal() {
         <div data-lc-modal-body className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-4">
           <div>
             <p className="text-[11px] font-bold text-ink-300 mb-2">AI provider (§15)</p>
-            <div className="grid grid-cols-3 gap-2">
-              {([["sim", "Simulator", "no key needed"], ["deepseek", "DeepSeek", "deepseek-chat"], ["mistral", "Mistral", "mistral-small"]] as const).map(([k, t, d]) => (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {([["sim", "Simulator", "no key needed"], ["gemini", "Gemini", "gemini-2.5-flash"], ["mistral", "Mistral", "mistral-small"], ["deepseek", "DeepSeek", "deepseek-chat"]] as const).map(([k, t, d]) => (
                 <button
                   key={k}
-                  onClick={() => actions.updateSettings({ provider: k })}
+                  onClick={() => {
+                    const model = k === "gemini" ? "gemini-2.5-flash" : k === "mistral" ? "mistral-small-latest" : k === "deepseek" ? "deepseek-chat" : settings.model;
+                    actions.updateSettings({ provider: k, model });
+                  }}
                   className={`text-start p-2.5 rounded-xl border transition-all cursor-pointer ${settings.provider === k ? "border-lc-accent/60 bg-lc-accent/10" : "border-ink-600 bg-ink-850 hover:border-ink-500"}`}
                 >
                   <p className={`text-[11.5px] font-extrabold flex items-center gap-1 ${settings.provider === k ? "text-lc-accent" : "text-ink-100"}`}>
@@ -444,14 +469,14 @@ export function SettingsModal() {
             </div>
           </div>
 
-          {(settings.provider === "deepseek" || settings.provider === "mistral") && (
+          {(settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini") && (
             <div className="space-y-3 anim-rise">
               <label className="block">
                 <span className="block text-[11px] font-bold text-ink-300 mb-1">API key</span>
                 <input
                   type="password" value={settings.apiKey}
                   onChange={(e) => actions.updateSettings({ apiKey: e.target.value })}
-                  placeholder="sk-…"
+                  placeholder={settings.provider === "gemini" ? "Auto-detected from environment" : "sk-…"}
                   className="w-full px-3 py-2 rounded-xl bg-ink-850 border border-ink-600 text-[12px] font-mono text-ink-100 focus:border-lc-accent/60 focus:outline-none"
                 />
               </label>
@@ -537,14 +562,26 @@ export function SettingsModal() {
           </div>
 
           <div className="flex items-center gap-2 pt-1">
-            <button onClick={actions.saveSettingsLocal} className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-lc-accent text-ink-950 text-[12px] font-black hover:brightness-110 transition-all cursor-pointer">
-              <ICheck size={14} /> Save settings
+            <button
+              onClick={() => {
+                actions.saveSettingsLocal();
+                actions.setSettingsOpen(false);
+              }}
+              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-lc-accent text-ink-950 text-[12px] font-black hover:brightness-110 transition-all cursor-pointer active:scale-[0.99]"
+            >
+              <ICheck size={14} /> Save settings & Close
+            </button>
+            <button
+              onClick={() => actions.setSettingsOpen(false)}
+              className="flex items-center justify-center px-4 py-2.5 rounded-xl bg-ink-800 border border-ink-600 text-ink-200 text-[11.5px] font-bold hover:bg-ink-750 transition-colors cursor-pointer"
+            >
+              Close
             </button>
             <button
               onClick={() => { if (confirm("The whole workspace is cleared and rebuilt. Continue?")) { actions.setSettingsOpen(false); void actions.reset(); } }}
-              className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-ember/10 border border-ember/40 text-ember text-[11.5px] font-bold hover:bg-ember/20 transition-colors cursor-pointer"
+              className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-ember/10 border border-ember/40 text-ember text-[11.5px] font-bold hover:bg-ember/20 transition-colors cursor-pointer"
             >
-              <ITrash size={13} /> Reset the canvas
+              <ITrash size={13} /> Reset
             </button>
           </div>
         </div>
@@ -712,6 +749,15 @@ export function PortModal() {
   const [error, setError] = useState<string | null>(null);
   const fsOk = isFsAccessSupported();
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") actions.setPortOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, actions]);
 
   if (!open) return null;
   const close = () => actions.setPortOpen(false);

@@ -186,7 +186,7 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
 /* Every entry must have an endpoint behind it (`resolveModelRoute`, ADR-008). `glm-4-flash` was removed
    rather than left to 400 and degrade to the simulator: a dropdown that offers a model the app cannot
    reach is the same lie as a validator nobody runs. Adding it back is one row in that table. */
-export const MODELS = [DEFAULT_MODEL, "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"];
+export const MODELS = [DEFAULT_MODEL, "gemini-2.5-flash", "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"];
 
 /* ---------------- roles (§3.8) ---------------- */
 
@@ -260,6 +260,46 @@ export const ROLES: RoleDef[] = [
     model: "deepseek-chat",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "technical_plan"],
+  },
+  {
+    id: "project-scout",
+    name: "Project & Client Scout",
+    description: "Scans freelance project boards and extracts project requirements, budget, and scope",
+    system_prompt:
+      "You are the \"Project & Client Scout\" agent. Search, scan, and parse freelance opportunities (Upwork, Contra, Freelancer, RemoteOK). Extract client background, budget, required tech stack, deliverables, timeline, and client expectations. Output contains summary, client_brief, and project_requirements.",
+    model: "deepseek-chat",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "client_brief", "project_requirements"],
+  },
+  {
+    id: "feasibility-filter",
+    name: "Feasibility & Risk Filter",
+    description: "Evaluates project profitability, client credibility, technical fit, and risk score",
+    system_prompt:
+      "You are the \"Feasibility & Risk Filter\" agent. Evaluate the scouted freelance project. Assess technical difficulty, client payment history/reputation, budget feasibility, and profit margin. Output contains summary, risk_score (1-10), technical_fit, and decision (BID or PASS).",
+    model: "deepseek-chat",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "risk_score", "technical_fit", "decision"],
+  },
+  {
+    id: "proposal-architect",
+    name: "Proposal & Pitch Architect",
+    description: "Crafts persuasive, personalized proposals tailored to the client's problem with high conversion rate",
+    system_prompt:
+      "You are the \"Proposal & Pitch Architect\" agent. Write a compelling, bespoke freelance proposal. Start with an attention-grabbing hook understanding the client's exact problem, follow with the precise solution and tech stack, attach relevant portfolio proof, and present transparent pricing and delivery milestones. Output contains summary, proposal_letter, and portfolio_highlights.",
+    model: "deepseek-chat",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "proposal_letter", "portfolio_highlights"],
+  },
+  {
+    id: "deal-closer",
+    name: "Milestone & Deal Closer",
+    description: "Formulates project milestones, delivery roadmap, kick-off questions, and closing terms",
+    system_prompt:
+      "You are the \"Milestone & Deal Closer\" agent. Create a structured project delivery roadmap with milestones, clear acceptance criteria, onboarding checklist, and closing call-to-action to finalize the contract. Output contains summary, delivery_roadmap, and onboarding_checklist.",
+    model: "deepseek-chat",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "delivery_roadmap", "onboarding_checklist"],
   },
 ];
 
@@ -351,6 +391,59 @@ export const ROLE_SCHEMAS: Record<string, unknown> = {
     properties: {
       summary: { type: "string", minLength: 20, description: "one paragraph: summary of what was built" },
       technical_plan: { type: "string", minLength: 20, description: "the technical implementation details or code" },
+    },
+  },
+  "project-scout": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "project-scout output",
+    description: "Scouted freelance project information and client brief",
+    type: "object",
+    required: ["summary", "client_brief", "project_requirements"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 30, description: "overview of scouted opportunity" },
+      client_brief: { type: "string", minLength: 40, description: "client background, budget and timeline" },
+      project_requirements: { type: "string", minLength: 40, description: "core tech stack, features and deliverables" },
+    },
+  },
+  "feasibility-filter": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "feasibility-filter output",
+    description: "feasibility score, client reputation check, and BID/PASS decision",
+    type: "object",
+    required: ["summary", "risk_score", "technical_fit", "decision"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 30, description: "feasibility analysis overview" },
+      risk_score: { type: "integer", minimum: 1, maximum: 10, description: "risk score from 1 to 10" },
+      technical_fit: { type: "string", minLength: 20, description: "compatibility with skill set and capacity" },
+      decision: { type: "string", minLength: 3, description: "BID or PASS decision with reasoning" },
+    },
+  },
+  "proposal-architect": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "proposal-architect output",
+    description: "tailored winning freelance proposal and pitch letter",
+    type: "object",
+    required: ["summary", "proposal_letter", "portfolio_highlights"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 30, description: "proposal strategy summary" },
+      proposal_letter: { type: "string", minLength: 80, description: "full personalized proposal text with hook and solution" },
+      portfolio_highlights: { type: "string", minLength: 30, description: "relevant proof, past projects and results" },
+    },
+  },
+  "deal-closer": {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "deal-closer output",
+    description: "milestone schedule, kickoff checklist, and contract closing terms",
+    type: "object",
+    required: ["summary", "delivery_roadmap", "onboarding_checklist"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 30, description: "closing strategy overview" },
+      delivery_roadmap: { type: "string", minLength: 50, description: "phased milestone schedule with deliverables" },
+      onboarding_checklist: { type: "string", minLength: 30, description: "kickoff questions, access requirements and CTA" },
     },
   },
 };
@@ -488,8 +581,13 @@ export const emptyExecution = (): ExecutionState => ({
   errors: {},
 });
 
-const SETTINGS_BASE: Settings = {
-  provider: "mistral", apiKey: "HsRVetWmpgwTz613v2uIUPTeanfWQGho", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,
+const envGemini = typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim() : "";
+
+const SETTINGS_BASE: Settings = envGemini ? {
+  provider: "gemini", apiKey: envGemini, model: "gemini-2.5-flash", owner: "mahla", simDelay: 620,
+  backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
+} : {
+  provider: "mistral", apiKey: "HsRVetWmpgwTz613v2uIUPTeanfWQGho", model: "mistral-small-latest", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 };
 
@@ -573,7 +671,7 @@ export function buildSeed(owner: string) {
     layout: { ...DEFAULT_LAYOUT },
   };
 
-  const n1 = mkNode(start.id as string, "lc", 150, 150, start);
+  const n1 = mkNode("node-001", "lc", 150, 150, start);
 
   return { nodes: [n1] as RFNode[], edges: [] as RFEdge[], memory, canvas };
 }

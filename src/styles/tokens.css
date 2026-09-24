@@ -9,7 +9,7 @@
 [data-theme="neutral"] {
   /* ---------- Surfaces (warm-neutral obsidian, NOT teal, NOT blue) ---------- */
   --lc-void:            #0A0A0C;   /* Canvas background */
-  --lc-dot:             rgba(255, 255, 255, 0.08); /* Canvas dot grid */
+  --lc-dot:             rgba(255, 255, 255, 0.16); /* Canvas dot grid */
   --lc-surface-base:    #101114;   /* Panels: sidebar, inspector */
   --lc-surface-raised:  #16181D;   /* Cards, nodes, inputs */
   --lc-surface-overlay: #1D2025;   /* Modals, tooltips, menus */
@@ -78,6 +78,7 @@
    ========================================================== */
 [data-theme="botanical"] {
   --lc-void:            #0A0F0D;
+  --lc-dot:             rgba(123, 199, 157, 0.22);
   --lc-surface-base:    #0F1614;
   --lc-surface-raised:  #151D1A;
   --lc-surface-overlay: #1B2420;
@@ -95,6 +96,7 @@
    ========================================================== */
 [data-theme="plum"] {
   --lc-void:            #0D0912;
+  --lc-dot:             rgba(184, 140, 214, 0.22);
   --lc-surface-base:    #140F1A;
   --lc-surface-raised:  #1A1422;
   --lc-surface-overlay: #211A2A;

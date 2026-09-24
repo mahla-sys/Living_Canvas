@@ -170,25 +170,25 @@ instead of growing the exceptions.
 ```
 src/
 ├── main.tsx                    113  L   boot, global error surface, React error boundary
-├── App.tsx                      107  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
-├── state.ts                    579  L   ★ constants, types re-exports, factories, role schemas, seed
-├── store.ts                    477  L   ★ zustand store + Actions façade (the only UI-facing API)
+├── App.tsx                      111  L   layout: LeftPanel | canvas+console | RightPanel, then overlays
+├── state.ts                    677  L   ★ constants, types re-exports, factories, role schemas, seed
+├── store.ts                    488  L   ★ zustand store + Actions façade (the only UI-facing API)
 ├── index.css                   599  L   design tokens (dark botanical), .lc-md-*, .lc-import-*, chip
 ├── lib/
-│   ├── core.ts                1225  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
-│   ├── engine.ts              2980  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
+│   ├── core.ts                1230  L   ★ types · YAML · frontmatter · StorageAdapter×4 · HTML safety · schemas
+│   ├── engine.ts              3121  L   ★ all behaviour: events, files, run, contracts, tools, ledger, strokes
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             4996  L   287 tests in 26 files (§7)
+│   └── __tests__/             5020  L   289 tests in 26 files (§7)
 └── components/
-    ├── CanvasArea.tsx          835  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
-    ├── SidePanels.tsx          1449  L   ★ library/files tabs, file tree, live folder tree, inspector
-    ├── Overlays.tsx            909  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
-    └── icons.tsx               121  L   inline SVG icon set (no icon dependency)
+    ├── CanvasArea.tsx          1087  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
+    ├── SidePanels.tsx          1553  L   ★ library/files tabs, file tree, live folder tree, inspector
+    ├── Overlays.tsx            955  L   ★ TopBar, console, chat, history, settings, PortModal, toasts
+    └── icons.tsx               146  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **15 370 lines** in 41 files (14 644 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **16 092 lines** in 42 files (15 364 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
@@ -207,7 +207,7 @@ decision that must not change behaviour (§10 Q3).
 
 # 3. Branches — one section per module
 
-## 3.1 `src/lib/core.ts` (1225 lines) — types, serialisers, storage, HTML safety, schemas
+## 3.1 `src/lib/core.ts` (1230 lines) — types, serialisers, storage, HTML safety, schemas
 
 No imports from inside the project. This is the only file allowed to know how a file looks on disk and how
 a folder is listed. Seven sections, in this order:
@@ -402,7 +402,7 @@ problem kills a node (`engine.validateAgainstContract`, §5.8 does). A malformed
 reported as the *schema's* failure (`“a” declares an invalid pattern in the schema`), not swallowed. Full format
 and ownership in §4.9.1.
 
-## 3.2 `src/state.ts` (579 lines) — constants, factories, role schemas, seed
+## 3.2 `src/state.ts` (677 lines) — constants, factories, role schemas, seed
 
 Pure data + construction; no behaviour, no async, no I/O (one exception: `defaultSettings()` reads
 `localStorage["lc-settings"]`, see debt §9.5).
@@ -428,7 +428,7 @@ ship a five-node pipeline and register it as a template on first boot, which mea
 screenshot, and the "load a template" flow all pointed at fabricated data. `loadTemplates()` returns exactly
 what is in `library/templates/`, which for a new canvas is nothing.
 
-## 3.3 `src/store.ts` (477 lines) — zustand store and the `actions` façade
+## 3.3 `src/store.ts` (488 lines) — zustand store and the `actions` façade
 
 ```ts
 export const useStore = create<AppState & { actions: Actions }>()((set, get) => ({ ...initialState, actions }))
@@ -441,7 +441,7 @@ Two halves, and the discipline is the point:
    `touch(api)` afterwards refreshes the cache and the chips. Selection changes are the one class of change that
    touches no file. No other component may mutate a node/edge array — and this is why the two rows above exist:
    `touch` alone writes `state.json`, `canvas-overview.md` and `canvas.yaml`, never a node file.
-2. **The `actions` object** — the entire API the UI is allowed to call (66 members). Each is a two-line
+2. **The `actions` object** — the entire API the UI is allowed to call (67 members). Each is a two-line
    delegation: resolve `api = { get, set }`, forward to `engine`, done. Nothing in `actions` writes a file
    or builds a string itself.
 
@@ -465,7 +465,7 @@ Notable behaviour living here (small but load-bearing):
   tree builds `runs/` from `state.runs` (a projection of the folder, refreshed by `hydrate` and by each ledger
   open, §4.13).
 
-## 3.4 `src/lib/engine.ts` (2980 lines) — every behaviour
+## 3.4 `src/lib/engine.ts` (3121 lines) — every behaviour
 
 `export interface EngineApi { get(): AppState; set(partial | (s)=>partial) }` — the shape `store` hands to
 engine functions so engine never imports zustand. Sections, in file order:
@@ -543,15 +543,15 @@ Two hard rules in here, both learned the expensive way:
 
 ## 3.7 `src/components/` — the view
 
-Four files, 3 314 lines. They hold **no business logic**: they read slices with `useStore` selectors and
+Four files, 3 741 lines. They hold **no business logic**: they read slices with `useStore` selectors and
 call `actions.*`.
 
 | file | components | responsibilities |
 |---|---|---|
-| `CanvasArea.tsx` 835 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
-| `SidePanels.tsx` 1449 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
-| `Overlays.tsx` 909 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
-| `icons.tsx` 121 | 30+ inline SVGs | no icon library |
+| `CanvasArea.tsx` 1087 | `Md`, `LcNode`, `AgentNodeCard`, `NoteNode`, `ShapeNode`, `LcEdge`, `DrawLayer`, `ConvertDialog`, `CanvasArea` (default) | registers React Flow `nodeTypes`/`edgeTypes`; renders node Markdown **only** through `mdInline`; the freehand layer (pointer capture → stroke → `actions.addStroke`); cluster→node conversion dialog; the human-approval banner; status/legend chips |
+| `SidePanels.tsx` 1553 | `Palette`, `Folder`, `FileRow`, `RealFileRow`, `LiveFolderTree`, `FileTree`, `TemplatesSection`, `LeftPanel`, `Section`, `Field`, `NodeInspector`, `EdgeInspector`, `CanvasInspector`, `RightPanel`, `FileViewer` | left panel = library (`palette`) or files; in folder mode the file tree is read from disk (`storage.listDirectory`), not from state; the inspector edits display/content/agent config/context contract, and runs the contract self-test |
+| `Overlays.tsx` 955 | `TopBar`, `ActivityConsole`, `ChatPanel`, `HistoryModal`, `SettingsModal`, `PortModal`, `Toasts`, `BootOverlay`, `ModeRow`, `ActBtn` | `PortModal` is the Export/Import + folder-attach surface (preview → confirm). The save chip shows `idb / fs / http / memory` |
+| `icons.tsx` 146 | 30+ inline SVGs | no icon library |
 
 ---
 
@@ -1259,7 +1259,7 @@ Accessibility/keyboard: only two handlers exist (Enter in the chat composer, Ent
 
 # 7. Immune system — tests
 
-`npx vitest run` → **26 files, 287 tests**, no config file (vitest reads `vite.config.js`).
+`npx vitest run` → **26 files, 289 tests**, no config file (vitest reads `vite.config.js`).
 
 **On jsdom, a reversal worth stating plainly.** This section used to say the suite runs with no jsdom, and
 called that a principle. It was not one — it was a limitation dressed as a rule, and three bugs got through
@@ -1435,7 +1435,7 @@ second graph to click. Cost measured: a boot that lists `nodes/*.md`; the seed's
 milliseconds, and if a few hundred nodes ever makes that slow the answer is a derived index that is *rebuilt*,
 never a second truth.
 
-**Q4 — How far should `core.ts` stay one file?** 1225 lines holding types, YAML, HTML safety, the output-schema subset and four
+**Q4 — How far should `core.ts` stay one file?** 1230 lines holding types, YAML, HTML safety, the output-schema subset and four
 adapters. It is honest today (one place where file shapes are decided) and it will hurt at ~1.5k. Natural
 split when it does: `types.ts` (no imports), `yaml.ts`, `html.ts`, `storage/*.ts`. Law 5 keeps the edges
 acyclic either way. Do it when adding the fifth adapter, not before.
@@ -1507,7 +1507,7 @@ this pass it is the only complete one:
 
 ```
 npm run dev         vite, 0.0.0.0:3000 (allowedHosts: true)
-npm test            vitest run            → 26 files / 287 tests
+npm test            vitest run            → 26 files / 289 tests
 npm run test:watch
 npm run typecheck   tsc --noEmit  (noUnusedLocals is ON — dead code fails)
 npm run build       tsc --noEmit && vite build → ~537 kB js / 166 kB gzip, 69 kB css / 12 kB gzip (ceiling 600)

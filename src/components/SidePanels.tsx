@@ -6,7 +6,7 @@ import { storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType, f
 import {
   IBrain, IBox, IFile, IFolder, IChevD, IChevR, ITrash, IPlay, IChat, ILock,
   ISpark, IDatabase, IHistory, IX, IEye, INode, IPulse, ICheck, IStop, IWarn,
-  ISend, IGear,
+  ISend, IGear, ITerminal, ILayers,
 } from "./icons";
 
 /* lc-data-colour: the picker writes the chosen value into the node file, so these are canvas data, not
@@ -54,7 +54,7 @@ function Palette() {
   const actions = useStore((s) => s.actions);
   const templates = useStore((s) => s.templates);
   return (
-    <div className="p-3 pb-24 space-y-3">
+    <div className="p-3 pb-24 space-y-4">
       <div className="space-y-1">
         {PALETTE.map((p) => (
           <div
@@ -65,16 +65,13 @@ function Palette() {
               e.dataTransfer.effectAllowed = "move";
             }}
             onClick={() => void actions.addNode(p.nodeType, { x: 420 + Math.random() * 420, y: 120 + Math.random() * 280 })}
-            className="group flex items-center gap-2.5 px-3 h-[40px] rounded-lg bg-surface-base hover:bg-surface-raised cursor-grab active:cursor-grabbing transition-colors duration-150 select-none"
+            className="group flex items-center gap-2.5 px-3 h-[40px] rounded-lg bg-surface-base hover:bg-surface-raised cursor-grab active:cursor-grabbing transition-colors duration-150 select-none border border-transparent hover:border-border-subtle"
           >
             <span
-              className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-transform group-hover:scale-105"
-              style={{
-                background: `color-mix(in srgb, ${nodeColor(p.nodeType)} 12%, transparent)`,
-                color: nodeColor(p.nodeType),
-              }}
+              className="w-7 h-7 rounded-md flex items-center justify-center shrink-0 transition-all group-hover:scale-105 bg-surface-raised border border-border-subtle text-text-secondary group-hover:text-lc-accent group-hover:border-lc-accent/30 relative"
             >
               {p.nodeType === "agent" ? <IBrain size={15} /> : p.nodeType === "output-box" ? <IBox size={15} /> : <IFile size={15} />}
+              <span className="absolute bottom-1 right-1 w-1.5 h-1.5 rounded-full opacity-60" style={{ backgroundColor: nodeColor(p.nodeType) }} />
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-[12px] font-semibold text-text-primary truncate">
@@ -85,28 +82,36 @@ function Palette() {
         ))}
       </div>
 
-      <div className="pt-3 mt-3 border-t border-border-subtle">
+      <div className="pt-3 border-t border-border-subtle">
         <p className="text-[11px] font-bold text-text-secondary px-2 mb-2">Templates</p>
-        <div className="space-y-1">
-          {templates.map((t) => (
-            <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-base hover:bg-surface-raised transition-colors group">
-              <div className="min-w-0 flex-1">
-                <p className="text-[11.5px] font-medium text-text-primary truncate">
-                  {t.name}
-                </p>
-                <p className="text-[9.5px] text-text-tertiary">
-                  {t.nodes} nodes · {t.edges} edges
-                </p>
+        {templates.length > 0 ? (
+          <div className="space-y-1">
+            {templates.map((t) => (
+              <div key={t.id} className="flex items-center justify-between px-3 py-2 rounded-lg bg-surface-base hover:bg-surface-raised transition-colors group border border-transparent hover:border-border-subtle">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11.5px] font-medium text-text-primary truncate">
+                    {t.name}
+                  </p>
+                  <p className="text-[9.5px] text-text-tertiary">
+                    {t.nodes} nodes · {t.edges} edges
+                  </p>
+                </div>
+                <button
+                  onClick={() => actions.loadTemplate(t.id)}
+                  className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-md bg-surface-raised border border-border-subtle text-text-secondary opacity-0 group-hover:opacity-100 hover:text-lc-accent hover:border-lc-accent/50 transition-all cursor-pointer active:scale-95"
+                >
+                  Load
+                </button>
               </div>
-              <button
-                onClick={() => actions.loadTemplate(t.id)}
-                className="shrink-0 text-[10px] font-bold px-2 py-1 rounded-md bg-surface-raised border border-border-subtle text-text-secondary opacity-0 group-hover:opacity-100 hover:text-lc-accent hover:border-lc-accent/50 transition-all cursor-pointer active:scale-95"
-              >
-                Load
-              </button>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="px-3 py-4 rounded-xl border border-dashed border-border-subtle bg-surface-base/40 text-center select-none">
+            <ISpark size={15} className="mx-auto text-text-tertiary mb-1.5" />
+            <p className="text-[11px] font-semibold text-text-secondary">No templates yet</p>
+            <p className="text-[9.5px] text-text-tertiary mt-0.5 leading-4">Save a pipeline or graph from the canvas menu to reuse it anytime.</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -525,6 +530,85 @@ function ResizeHandle({ side }: { side: "left" | "right" }) {
   );
 }
 
+
+export function LeftRibbon() {
+  const tab = useStore((s) => s.ui.leftTab);
+  const leftOpen = useStore((s) => s.canvas.layout.leftOpen);
+  const consoleOpen = useStore((s) => s.ui.consoleOpen);
+  const actions = useStore((s) => s.actions);
+  const focus = useStore((s) => s.ui.focusMode);
+
+  if (focus) return null;
+
+  const toggleTab = (targetTab: "files" | "palette") => {
+    if (leftOpen && tab === targetTab) {
+      actions.togglePanel("left");
+    } else {
+      if (!leftOpen) actions.togglePanel("left");
+      actions.setLeftTab(targetTab);
+    }
+  };
+
+  return (
+    <div data-lc-ribbon="true" aria-label="Activity Ribbon" className="w-[40px] shrink-0 border-e border-border-subtle bg-surface-base flex flex-col items-center py-2.5 gap-2 select-none z-20">
+      <button
+        onClick={() => toggleTab("files")}
+        title="File Explorer (⌘1)"
+        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+          leftOpen && tab === "files"
+            ? "bg-lc-accent/15 text-lc-accent border border-lc-accent/40"
+            : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
+        }`}
+      >
+        <IFolder size={16} />
+      </button>
+
+      <button
+        onClick={() => toggleTab("palette")}
+        title="Node Library & Templates"
+        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+          leftOpen && tab === "palette"
+            ? "bg-lc-accent/15 text-lc-accent border border-lc-accent/40"
+            : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
+        }`}
+      >
+        <ISpark size={16} />
+      </button>
+
+      <button
+        onClick={() => actions.toggleConsole()}
+        title="Execution Ledger & Logs (⌘L)"
+        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+          consoleOpen
+            ? "bg-lc-accent/15 text-lc-accent border border-lc-accent/40"
+            : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
+        }`}
+      >
+        <ITerminal size={16} />
+      </button>
+
+      <button
+        onClick={() => actions.setPortOpen(true)}
+        title="Memory Vault & Storage Mode"
+        className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-all cursor-pointer"
+      >
+        <IDatabase size={16} />
+      </button>
+
+      <div className="mt-auto flex flex-col items-center gap-2">
+        <div className="w-4 h-px bg-border-subtle my-0.5" />
+        <button
+          onClick={() => actions.setSettingsOpen(true)}
+          title="Workspace Settings & Themes"
+          className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-all cursor-pointer"
+        >
+          <IGear size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function LeftPanel() {
   const tab = useStore((s) => s.ui.leftTab);
   const actions = useStore((s) => s.actions);
@@ -544,15 +628,15 @@ export function LeftPanel() {
           scrollerRef.current.scrollTop += e.deltaY;
         }
       }}
-      className="shrink-0 border-e border-ink-700 bg-ink-900/80 flex flex-col h-full max-h-full min-h-0 overflow-hidden"
+      className="shrink-0 border-e border-border-subtle bg-surface-base flex flex-col h-full max-h-full min-h-0 overflow-hidden"
     >
-      <div className="flex shrink-0 border-b border-ink-700 bg-ink-900">
+      <div className="flex shrink-0 p-1.5 gap-1 border-b border-border-subtle bg-surface-base">
         {([["palette", "Library", ISpark], ["files", "Files", IFolder]] as const).map(([key, label, Icon]) => (
           <button
             key={key}
             onClick={() => actions.setLeftTab(key)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[11.5px] font-bold transition-colors cursor-pointer border-b-2 ${
-              tab === key ? "text-lc-accent border-lc-accent bg-surface-raised" : "text-text-secondary border-transparent hover:text-text-primary"
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[11px] font-bold transition-all cursor-pointer ${
+              tab === key ? "text-lc-accent bg-surface-raised shadow-xs" : "text-text-secondary hover:text-text-primary hover:bg-surface-raised/40"
             }`}
           >
             <Icon size={13} /> {label}
@@ -565,6 +649,13 @@ export function LeftPanel() {
         className="flex-1 min-h-0 overflow-y-auto overscroll-contain lc-panel-scroller"
       >
         {tab === "palette" ? <Palette /> : <FileTree />}
+      </div>
+      <div className="px-3 py-2 border-t border-border-subtle bg-surface-base flex items-center justify-between text-[11px] font-medium text-text-tertiary select-none shrink-0">
+        <span className="flex items-center gap-1.5 hover:text-text-primary cursor-pointer transition-colors">
+          <IFolder size={13} />
+          Obsidian Vault
+        </span>
+        <IChevD size={12} />
       </div>
     </aside>
     <ResizeHandle side="left" />
@@ -1075,11 +1166,16 @@ function CanvasInspector() {
       <Section title="Live stats" icon={<IPulse size={12} />}>
         <div className="grid grid-cols-3 gap-1.5 text-center">
           {[
-            [nodes.length, "nodes"], [edges.length, "edges"], [snapshots.length, "checkpoints"],
-          ].map(([n, l]) => (
-            <div key={l as string} className="py-2.5 rounded-lg bg-surface-raised border border-border-subtle">
-              <p className="text-[18px] font-display text-lc-accent leading-6">{n as number}</p>
-              <p className="text-[9.5px] text-text-secondary">{l}</p>
+            { count: nodes.length, label: "nodes", icon: <INode size={13} />, color: "text-lc-accent", bg: "bg-lc-accent/10 border-lc-accent/25" },
+            { count: edges.length, label: "edges", icon: <ILayers size={13} />, color: "text-text-primary", bg: "bg-surface-raised border-border-subtle" },
+            { count: snapshots.length, label: "checkpoints", icon: <IHistory size={13} />, color: "text-text-secondary", bg: "bg-surface-raised border-border-subtle" },
+          ].map((item) => (
+            <div key={item.label} className={`py-2 px-1 rounded-lg border ${item.bg} flex flex-col items-center justify-center`}>
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className={item.color}>{item.icon}</span>
+                <span className="text-[15px] font-bold text-text-primary font-mono">{item.count}</span>
+              </div>
+              <p className="text-[9.5px] text-text-tertiary capitalize">{item.label}</p>
             </div>
           ))}
         </div>
@@ -1316,7 +1412,7 @@ export function RightPanel() {
 
   useEffect(() => {
     if (selectedNode || selectedEdge) {
-      if (!chatNodeId) setPanelMode("inspector");
+      setPanelMode("inspector");
     }
   }, [selectedNode?.id, selectedEdge?.id]);
 
@@ -1332,17 +1428,17 @@ export function RightPanel() {
           scrollerRef.current.scrollTop += e.deltaY;
         }
       }}
-      className="shrink-0 border-s border-ink-700 bg-ink-900/80 flex flex-col h-full max-h-full min-h-0 overflow-hidden"
+      className="shrink-0 border-s border-border-subtle bg-surface-base flex flex-col h-full max-h-full min-h-0 overflow-hidden"
     >
       {/* Top navigation tabs for RightPanel */}
-      <div className="flex items-center border-b border-border-subtle bg-surface-base shrink-0 px-1 py-1" data-lc-rightpanel-tabs>
+      <div className="flex items-center border-b border-border-subtle bg-surface-base shrink-0 px-1.5 py-1 gap-1" data-lc-rightpanel-tabs>
         <button
           onClick={() => {
             setPanelMode("inspector");
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
             panelMode === "inspector"
-              ? "bg-surface-raised text-lc-accent shadow-sm"
+              ? "bg-surface-raised text-lc-accent shadow-xs"
               : "text-text-secondary hover:text-text-primary"
           }`}
         >
@@ -1364,7 +1460,7 @@ export function RightPanel() {
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
             panelMode === "chat"
-              ? "bg-surface-raised text-lc-accent shadow-sm"
+              ? "bg-surface-raised text-lc-accent shadow-xs"
               : "text-text-secondary hover:text-text-primary"
           }`}
         >
@@ -1379,12 +1475,20 @@ export function RightPanel() {
           }}
           className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-[10.5px] font-bold transition-colors cursor-pointer ${
             panelMode === "canvas"
-              ? "bg-surface-raised text-lc-accent shadow-sm"
+              ? "bg-surface-raised text-lc-accent shadow-xs"
               : "text-text-secondary hover:text-text-primary"
           }`}
         >
           <IGear size={12} />
           <span className="truncate">Canvas</span>
+        </button>
+
+        <button
+          onClick={() => actions.togglePanel("right")}
+          title="Collapse inspector (⌘2)"
+          className="w-7 h-7 rounded-md flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-raised transition-colors cursor-pointer shrink-0"
+        >
+          <IX size={13} />
         </button>
       </div>
 
