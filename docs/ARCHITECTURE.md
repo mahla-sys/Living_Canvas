@@ -180,7 +180,7 @@ src/
 │   ├── portable.ts             444  L   ★ bundle build/parse, rebuild-canvas-from-files, download helpers
 │   ├── fs-access.ts            348  L   ★ File System Access adapter, ensureStructure, read/write a folder
 │   ├── test-helpers.ts          61  L   test-only wrappers around the REAL serialisers
-│   └── __tests__/             5611  L   305 tests in 31 files (§7)
+│   └── __tests__/             5612  L   305 tests in 31 files (§7)
 └── components/
     ├── CanvasArea.tsx          1087  L   ★ React Flow: node shapes, drawing layer, approval + refusal band
     ├── SidePanels.tsx          1641  L   ★ library/files tabs, file tree, live folder tree, inspector
@@ -188,7 +188,7 @@ src/
     └── icons.tsx               146  L   inline SVG icon set (no icon dependency)
 ```
 
-★ = the file you must understand before changing that area. Total: **17 119 lines** in 47 files (16 391 of it TypeScript). `package.json` carries **4 runtime dependencies**
+★ = the file you must understand before changing that area. Total: **17 120 lines** in 47 files (16 392 of it TypeScript). `package.json` carries **4 runtime dependencies**
 (react, react-dom, @xyflow/react, zustand) and 8 dev ones — the eleven unused libraries are gone, and
 the two scripts in `scripts/` are not dependencies either: plain node files that CI calls (§11.3).
 Everything is client-side; there is no build-time codegen, no runtime dependency on a server, and no
