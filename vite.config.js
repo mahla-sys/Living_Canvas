@@ -5,6 +5,7 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   define: {
     "import.meta.env.VITE_GEMINI_API_KEY": JSON.stringify(process.env.GEMINI_API_KEY || ""),
+    "import.meta.env.VITE_MISTRAL_API_KEY": JSON.stringify(process.env.MISTRAL_API_KEY || ""),
   },
   plugins: [react(), tailwindcss()],
   build: {

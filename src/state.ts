@@ -3,7 +3,7 @@
    ============================================================ */
 import type { Node, Edge } from "@xyflow/react";
 import {
-  DEFAULT_THEME, DEFAULT_MODEL, isThemeId, readSettingsLocal,
+  DEFAULT_THEME, DEFAULT_MODEL, isThemeId, readSettingsLocal, envProviderKey,
   PANEL_DEFAULT_LEFT, PANEL_DEFAULT_RIGHT
 } from "./lib/core";
 import type {
@@ -674,16 +674,22 @@ export const emptyExecution = (): ExecutionState => ({
   errors: {},
 });
 
-const envGemini = typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim() : "";
+const envGemini = envProviderKey("gemini");
+const envMistral = envProviderKey("mistral");
 
 /**
  * No credential ever lives in the repository (ADR-047). The default is the internal simulator; a real
  * provider is a reader choice — the key is typed into Settings (reader-scoped, never a canvas file) or
- * arrives through the build-time `VITE_GEMINI_API_KEY`. An earlier build hardcoded a Mistral key here and
- * shipped it in git history; that key was removed and rotated on 2026-09-24.
+ * arrives through the build-time `VITE_GEMINI_API_KEY` / `VITE_MISTRAL_API_KEY`. An earlier build
+ * hardcoded a Mistral key here and shipped it in git history; that key was removed and rotated on
+ * 2026-09-24. When a Mistral key is present the app boots straight into the live provider so the AI
+ * answers from inside the app without any manual Settings step (roadmap phase A).
  */
 const SETTINGS_BASE: Settings = envGemini ? {
   provider: "gemini", apiKey: envGemini, model: "gemini-2.5-flash", owner: "mahla", simDelay: 620,
+  backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
+} : envMistral ? {
+  provider: "mistral", apiKey: envMistral, model: "mistral-small-latest", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 } : {
   provider: "sim", apiKey: "", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,

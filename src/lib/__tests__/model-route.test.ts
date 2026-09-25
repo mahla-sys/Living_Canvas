@@ -45,7 +45,9 @@ describe("resolveModelRoute — the provider comes from the model name, not from
   it("with no model anywhere it still produces a callable route rather than an empty request", () => {
     const r = resolveModelRoute("", "");
     expect(r.model).toBe(DEFAULT_MODEL);
-    expect(r.provider).toBe("deepseek");
+    /* DEFAULT_MODEL is "mistral-small-latest" (ADR-047, 2026-09-25): the shipped default must be a
+       provider we can actually answer with, so the fallback follows the name, not a legacy constant. */
+    expect(r.provider).toBe("mistral");
   });
 
   it("`ollama:` with nothing after it does not send an empty model name", () => {

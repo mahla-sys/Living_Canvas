@@ -5,9 +5,9 @@
 import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout, DEFAULT_MODEL,
+  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout, DEFAULT_MODEL, envProviderKey,
   type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType, type EdgeType, type LCEdgeData,
-  type ModelRoute, type OutputSchema, type SchemaField,
+  type ModelRoute, type OutputSchema, type SchemaField, type Settings,
 } from "./core";
 import {
   FsAccessStorageAdapter, isFsAccessSupported, pickCanvasDirectory, ensurePermission,
@@ -351,7 +351,7 @@ export async function testFallback(api: EngineApi) {
   const s = api.get();
   const settings = s.settings;
   const isReal = settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini";
-  const effectiveKey = (settings?.apiKey?.trim()) || (settings?.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim() : "");
+  const effectiveKey = (settings?.apiKey?.trim()) || envProviderKey(settings.provider);
   if (!isReal || !effectiveKey) {
     emit(api, "system", "fallback test: no API key configured — internal simulator is active (phase 1 default)");
     toast(api, "info", "No key configured; the system runs on the internal simulator.");
@@ -1753,7 +1753,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
     // fallback for a node whose file predates the field or whose author left it empty.
     const settings = api.get()?.settings;
     const isRealProvider = settings ? (settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini") : false;
-    const effectiveKey = (settings?.apiKey) || (settings?.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY) : "");
+    const effectiveKey = (settings?.apiKey) || envProviderKey(settings.provider as Settings["provider"]);
     const effectiveModel = (agent?.model === DEFAULT_MODEL && settings?.provider !== "deepseek" && settings?.model && settings.model !== DEFAULT_MODEL)
       ? settings.model
       : (agent?.model || settings?.model);
@@ -2274,7 +2274,7 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
   let reply: string;
   const settings = api.get().settings;
   const isReal = settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini";
-  const effectiveKey = settings.apiKey || (settings.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY) : "");
+  const effectiveKey = settings.apiKey || envProviderKey(settings.provider);
   if (isReal && effectiveKey && node.data.agent) {
     try {
       const history = (api.get().chats[nodeId] ?? []).slice(-8).map((m) => ({
