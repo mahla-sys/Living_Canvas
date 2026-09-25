@@ -26,6 +26,14 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
 | 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted (clause 3 superseded by 011) | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data |
 | 011 | `adr-011-accent-must-differ-in-hue-from-ink.md` | accepted | an accent must sit at least 60° from its own theme's ink hue (or, on an achromatic ramp, carry enough chroma), enforced by the palette gate; `botanical` is the default again |
+| 047 | `adr-047-no-credentials-in-the-repository.md` | accepted | the two committed API keys are redacted and must be rotated; `SETTINGS_BASE` ships no key and defaults to the simulator |
+| 046 | `adr-046-destructive-tools-wait-for-a-human.md` | accepted | `delete_node`/`delete_edge` in an autonomous run pause on `waiting_approval`; approve deletes, reject denies the tool, stop cancels |
+| 045 | `adr-045-model-requests-abort-and-time-out.md` | accepted | every model request has a 120 s ceiling and the run's abort controller; a stopped run's response never reaches the files |
+| 044 | `adr-044-the-file-viewer-reads-storage.md` | accepted | `buildFileContent` deleted; the viewer reads the storage adapter in every mode — one reader of file content |
+| 043 | `adr-043-a-failed-save-is-visible.md` | accepted | `saveState` gains `failed`; the save chain's silent `.catch(() => undefined)` is gone |
+| 042 | `adr-042-snapshot-restore-syncs-the-files.md` | accepted | restore rewrites `nodes/`+`edges/` from the restored graph and deletes what it no longer owns; the record survives |
+| 041 | `adr-041-the-real-provider-never-mixes-simulator-content.md` | accepted | the model's prose is the summary, verbatim; the reversed spread that overwrote real answers with sim text is gone |
+| 040 | `adr-040-simulator-derives-from-the-contract.md` | accepted | the simulator derives its fields from the role's own schema; `templates-sim.test.ts` runs every built-in template green |
 | 039 | `adr-039-obsidian-canvas-aesthetic-and-pipeline-library.md` | accepted | Obsidian canvas dark aesthetic, refined low-contrast borders, and multi-domain pipeline template library |
 | 038 | `adr-038-project-finder-pipeline-template.md` | accepted | built-in Freelance Project Finder and Proposal Architect pipeline template and seed |
 | 037 | `adr-037-gemini-connection-testing-and-model-fix.md` | accepted | Gemini connection testing probe, effective key detection, standard model naming, and dual authorization headers |
@@ -36,8 +44,8 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 031 | `adr-031-floating-panel-architecture.md` | accepted | floating panel architecture, overlay drawers, and canvas chrome reduction |
 | 032 | `adr-032-activity-rail-and-canvas-chrome-ratio.md` | accepted | 48px activity rail, overlay drawers, 40px unbordered library rows, and canvas chrome ratio >= 80% |
 | 033 | `adr-033-ui-declutter-and-semantic-token-unification.md` | accepted | UI declutter, 50% text reduction, semantic token unification, and dot grid visibility |
-| 029 | `adr-029-mistral-api-integration.md` | accepted | integrates Mistral API provider and configures default Mistral API key |
-| 028 | `adr-028-remove-left-panel-canvas-manager-and-configure-api-key.md` | accepted | removes redundant Canvas Manager banner from left panel and configures default DeepSeek API key |
+| 029 | `adr-029-mistral-api-integration.md` | accepted | integrates the Mistral API provider; the embedded-key clause is void, key redacted and rotated (see 047) |
+| 028 | `adr-028-remove-left-panel-canvas-manager-and-configure-api-key.md` | accepted | removes the Canvas Manager banner; the embedded-key clause is void, key redacted and rotated (see 047) |
 | 027 | `adr-027-docked-right-panel-chat.md` | accepted | docks conversational interfaces inside right panel, provides top navigation options for inspector, chat, and canvas |
 | 026 | `adr-026-topbar-actions-and-status-cleanup.md` | accepted | removes redundant bottom panel toggles, adds topbar new canvas and manager copilot actions |
 | 025 | `adr-025-bootstrap-self-building.md` | proposed | UI-awareness tools and Manager agent for self-building |

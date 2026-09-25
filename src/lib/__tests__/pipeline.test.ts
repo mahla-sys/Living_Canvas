@@ -217,7 +217,11 @@ describe("agent.model decides the endpoint — with the network stubbed, not the
     globalThis.fetch = vi.fn(async (url: string, init?: { body?: string }) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { model?: string };
       calls.push({ url: String(url), model: String(body.model ?? "") });
-      return new Response(JSON.stringify({ choices: [{ message: { content: "A stubbed answer for the contract test." } }] }), {
+      /* The stub's reply is a plain-text answer, and since ADR-041 that text really is the node's
+         summary: it has to clear the schema's summary floor (40 chars for every built-in role) or the
+         contract — correctly — rejects it. (The old 39-char string only passed because the model's
+         answer used to be discarded.) */
+      return new Response(JSON.stringify({ choices: [{ message: { content: "A stubbed model answer for the contract test, long enough to clear the summary floor." } }] }), {
         status: 200, headers: { "Content-Type": "application/json" },
       });
     }) as unknown as typeof fetch;

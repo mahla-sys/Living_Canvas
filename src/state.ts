@@ -98,11 +98,103 @@ export interface TemplateInfo {
 }
 
 /*
- * There is no built-in demo template on purpose. The canvas used to ship a four-agent "Fast pipeline"
- * both as seed data and as `BUILTIN_TEMPLATE`; every graph in a fresh workspace was that test fixture, so a
- * first-time user could not tell shipped behaviour from sample content. Templates are now only what the
- * user saves into `library/templates/` (§4.9), and `loadTemplates()` starts empty.
+ * The template library ships five built-in pipeline templates (ADR-039); they are seeded into
+ * `library/templates/` on first boot, so in the files they are no different from a saved one — the
+ * constant here is the seed's source, and it is also what the gate in `templates-sim.test.ts` runs:
+ * every built-in template must execute green on the internal simulator, because a template that cannot
+ * run without a provider key is a template that cannot be tried.
  */
+export const BUILTIN_TEMPLATES: TemplateSpec[] = [
+  {
+    template_id: "project-finder",
+    name: "Freelance Project & Proposal Pipeline",
+    description: "4-agent automated pipeline for scouting projects, evaluating feasibility, drafting bespoke proposals, and contract milestones.",
+    version: "1.0",
+    nodes: [
+      { id: "node-scout", nodeType: "agent", title: "1. Project & Client Scout", position: { x: 80, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline." },
+      { id: "node-filter", nodeType: "agent", title: "2. Feasibility & Risk Filter", position: { x: 420, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision." },
+      { id: "node-proposal", nodeType: "agent", title: "3. Proposal & Pitch Architect", position: { x: 760, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing." },
+      { id: "node-closer", nodeType: "agent", title: "4. Milestone & Deal Closer", position: { x: 1100, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "deal-closer", content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action." },
+      { id: "node-output", nodeType: "output-box", title: "Freelance Package Deliverable", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-scout", target: "node-filter", edgeType: "flow", label: "scouted briefs", line_style: "solid" },
+      { id: "edge-002", source: "node-filter", target: "node-proposal", edgeType: "flow", label: "qualified projects", line_style: "solid" },
+      { id: "edge-003", source: "node-proposal", target: "node-closer", edgeType: "flow", label: "custom proposal", line_style: "solid" },
+      { id: "edge-004", source: "node-closer", target: "node-output", edgeType: "flow", label: "final package", line_style: "solid" },
+    ],
+  },
+  {
+    template_id: "decision-engine",
+    name: "Problem Solving & Decision Engine",
+    description: "4-agent executive engine for framing problems, evaluating risks, designing measurable solutions, and proposing human-approved decisions.",
+    version: "1.0",
+    nodes: [
+      { id: "node-understand", nodeType: "agent", title: "1. Understand the Problem", position: { x: 80, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "understander", content: "Clarifies ambiguities and formulates a single, precise problem statement." },
+      { id: "node-risk", nodeType: "agent", title: "2. Risk & Feasibility Analyst", position: { x: 420, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "risk-analyst", content: "Evaluates proposal vulnerabilities and scores risks from 1 to 10." },
+      { id: "node-solution", nodeType: "agent", title: "3. Solution Designer", position: { x: 760, y: 180 }, shape: "card", color: "#8fbf7f", viewMode: "card", role: "solution-designer", content: "Creates a 3-step executable solution with concrete success criteria." },
+      { id: "node-decision", nodeType: "agent", title: "4. Decision Wrap-Up", position: { x: 1100, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "decision-maker", content: "Consolidates all agent outputs and formulates final approval request." },
+      { id: "node-output", nodeType: "output-box", title: "Approved Action Plan", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#e8b04b", viewMode: "card", content: "Executive Action Plan: Validated decisions and step-by-step implementation." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-understand", target: "node-risk", edgeType: "flow", label: "problem statement", line_style: "solid" },
+      { id: "edge-002", source: "node-risk", target: "node-solution", edgeType: "flow", label: "risk report", line_style: "solid" },
+      { id: "edge-003", source: "node-solution", target: "node-decision", edgeType: "flow", label: "designed solution", line_style: "solid" },
+      { id: "edge-004", source: "node-decision", target: "node-output", edgeType: "flow", label: "approved plan", line_style: "solid" },
+    ],
+  },
+  {
+    template_id: "code-builder",
+    name: "Full-Stack Code Builder Pipeline",
+    description: "Automated software development workflow: specification framing, code synthesis, and architectural validation.",
+    version: "1.0",
+    nodes: [
+      { id: "node-architect", nodeType: "agent", title: "1. System Architect", position: { x: 100, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "understander", content: "Analyzes system requirements, data structures, and interface contracts." },
+      { id: "node-coder", nodeType: "agent", title: "2. System Builder", position: { x: 460, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "builder", content: "Writes production TypeScript code and architectural components." },
+      { id: "node-tester", nodeType: "agent", title: "3. QA & Security Reviewer", position: { x: 820, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "risk-analyst", content: "Validates test coverage, edge cases, and security boundaries." },
+      { id: "node-output", nodeType: "output-box", title: "Production Code Package", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Engineered release ready for deployment and git integration." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-architect", target: "node-coder", edgeType: "flow", label: "specifications", line_style: "solid" },
+      { id: "edge-002", source: "node-coder", target: "node-tester", edgeType: "flow", label: "source code", line_style: "solid" },
+      { id: "edge-003", source: "node-tester", target: "node-output", edgeType: "flow", label: "verified build", line_style: "solid" },
+    ],
+  },
+  {
+    template_id: "market-research",
+    name: "Market Research & Competitive Scout",
+    description: "Market intelligence pipeline: trend scouting, competitor feature matrix, and differentiation strategy.",
+    version: "1.0",
+    nodes: [
+      { id: "node-scout", nodeType: "agent", title: "1. Market Trend Scout", position: { x: 100, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scans industry shifts, user pain points, and emerging opportunities." },
+      { id: "node-analysis", nodeType: "agent", title: "2. Competitive Analyst", position: { x: 460, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Maps competitor pricing, feature gaps, and weaknesses." },
+      { id: "node-strategy", nodeType: "agent", title: "3. Positioning Strategist", position: { x: 820, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "solution-designer", content: "Defines unique value proposition and go-to-market plan." },
+      { id: "node-output", nodeType: "output-box", title: "Strategic Market Report", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Comprehensive market intelligence brief with tactical actions." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-scout", target: "node-analysis", edgeType: "flow", label: "market data", line_style: "solid" },
+      { id: "edge-002", source: "node-analysis", target: "node-strategy", edgeType: "flow", label: "competitor matrix", line_style: "solid" },
+      { id: "edge-003", source: "node-strategy", target: "node-output", edgeType: "flow", label: "market report", line_style: "solid" },
+    ],
+  },
+  {
+    template_id: "content-engine",
+    name: "Content Strategy & Copywriting Engine",
+    description: "Multi-agent viral copywriting pipeline: research, compelling copy drafting, and conversion optimization.",
+    version: "1.0",
+    nodes: [
+      { id: "node-research", nodeType: "agent", title: "1. Topic & Hook Researcher", position: { x: 100, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Researches trending hooks, client audience angles, and core themes." },
+      { id: "node-copy", nodeType: "agent", title: "2. Persuasive Copywriter", position: { x: 460, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Drafts high-engagement posts, newsletters, and conversion copy." },
+      { id: "node-review", nodeType: "agent", title: "3. Quality & SEO Polish", position: { x: 820, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Refines readability, tone, hashtags, and call-to-action impact." },
+      { id: "node-output", nodeType: "output-box", title: "Ready-to-Publish Campaign", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Complete content batch formatted for immediate publishing." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-research", target: "node-copy", edgeType: "flow", label: "research & hooks", line_style: "solid" },
+      { id: "edge-002", source: "node-copy", target: "node-review", edgeType: "flow", label: "draft copy", line_style: "solid" },
+      { id: "edge-003", source: "node-review", target: "node-output", edgeType: "flow", label: "final copy batch", line_style: "solid" },
+    ],
+  },
+];
 
 export interface AppState {
   booted: boolean;
@@ -132,8 +224,9 @@ export interface AppState {
   execution: ExecutionState;
   events: BusEvent[];
   toasts: Toast[];
-  settings: Settings;
-  saveState: "saved" | "saving";
+    settings: Settings;
+    /** "failed" (ADR-043): a write that did not land is a state the reader must see, not a silent retry. */
+    saveState: "saved" | "saving" | "failed";
   typing: Record<string, boolean>;
   ui: {
     leftTab: "palette" | "files";
@@ -583,11 +676,17 @@ export const emptyExecution = (): ExecutionState => ({
 
 const envGemini = typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim() : "";
 
+/**
+ * No credential ever lives in the repository (ADR-047). The default is the internal simulator; a real
+ * provider is a reader choice — the key is typed into Settings (reader-scoped, never a canvas file) or
+ * arrives through the build-time `VITE_GEMINI_API_KEY`. An earlier build hardcoded a Mistral key here and
+ * shipped it in git history; that key was removed and rotated on 2026-09-24.
+ */
 const SETTINGS_BASE: Settings = envGemini ? {
   provider: "gemini", apiKey: envGemini, model: "gemini-2.5-flash", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 } : {
-  provider: "mistral", apiKey: "HsRVetWmpgwTz613v2uIUPTeanfWQGho", model: "mistral-small-latest", owner: "mahla", simDelay: 620,
+  provider: "sim", apiKey: "", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 };
 

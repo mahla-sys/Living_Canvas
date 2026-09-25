@@ -5,14 +5,14 @@ import { create } from "zustand";
 import type { NodeChange, EdgeChange, Connection } from "@xyflow/react";
 import { applyNodeChanges, applyEdgeChanges } from "@xyflow/react";
 import {
-  storage, nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, toYaml, logText, frontmatter,
+  storage,
   nowIso, storageMode, clamp, createChord, createDoubleTap, writeSettingsLocal,
   PANEL_MIN, PANEL_MAX,
   type Settings, type LCNodeData, type LCEdgeData, type Stroke, type NodeType,
 } from "./lib/core";
 import type { CanvasFiles } from "./lib/portable";
 import {
-  ROOT, CANVAS_ID, defaultSettings, emptyExecution, makeNodeData, makeEdgeData, roleById, MODELS,
+  ROOT, CANVAS_ID, defaultSettings, emptyExecution, makeNodeData, makeEdgeData, MODELS,
   DEFAULT_LAYOUT,
   type AppState, type RFNode, type RFEdge, type FileViewerState,
 } from "./state";
@@ -406,83 +406,5 @@ function buildActions(a: EngineApi): Actions {
 }
 
 export const getApi = () => api;
-
-/* ---------- file viewer content builders (used by UI) ---------- */
-
-export function buildFileContent(path: string): FileViewerState | null {
-  const s = useStore.getState();
-  const lang: FileViewerState["lang"] = path.endsWith(".json") ? "json" : path.endsWith(".yaml") ? "yaml" : path.endsWith(".log") ? "log" : "md";
-  let content: string | null = null;
-
-  const nodeMatch = path.match(/^nodes\/(.+)\.md$/);
-  const edgeMatch = path.match(/^edges\/(.+)\.yaml$/);
-  const agentMemMatch = path.match(/^memory\/agents\/(.+)\.md$/);
-  const outputMatch = path.match(/^outputs\/(?:shared\/)?([^/]+)\/(.+)$/);
-  const logMatch = path.match(/^logs\/([^/]+)\/(.+)\.log$/);
-  const chatMatch = path.match(/^chats\/chat-(.+)\.md$/);
-  const snapMatch = path.match(/^history\/(snapshot-.+)\.json$/);
-  const strokeMatch = path.match(/^strokes\/(.+)\.json$/);
-
-  if (path === "manifest.json")
-    content = JSON.stringify({ version: "1.0", canvas_id: s.canvasId, structure_version: "1.3", last_validated: nowIso().slice(0, 10) }, null, 2);
-  else if (path === "canvas.yaml")
-    content = toYaml({ ...s.canvas, id: s.canvasId });
-  else if (path === "canvas-overview.md") {
-    const done = s.execution.completed.length;
-    const last = done ? s.nodes.find((n) => n.id === s.execution.completed[done - 1]) : null;
-    content = frontmatter(
-      { canvas_id: s.canvasId, title: s.canvas.title, last_updated: nowIso(), summary: `Canvas "${s.canvas.title}" — run status: ${s.execution.status}`, current_step: last?.data.title ?? "—", node_count: s.nodes.length, edge_count: s.edges.length },
-      `# Canvas summary\n\nAgents read this file before reading the whole canvas.\n\n- run: **${s.execution.status}**\n- nodes: ${s.nodes.length} — edges: ${s.edges.length}`
-    );
-  } else if (path === "state.json")
-    // the cache is inspectable but not canonical: clicking it shows what would be written, nothing more
-    content = JSON.stringify({
-      canvas: s.canvas, memory: s.memory, outputs: s.outputs, chats: s.chats, logs: s.logs,
-      snapshots: s.snapshots, execution: s.execution, saved_at: "(preview of the debounced cache)",
-    }, null, 2);
-  else if (path === "history/index.yaml")
-    content = toYaml({ canvas_id: s.canvasId, snapshot_count: s.snapshots.length, snapshots: s.snapshots.map((m) => ({ id: m.id, at: m.at, label: m.label })) });
-  else if (nodeMatch) {
-    const n = s.nodes.find((x) => x.id === nodeMatch[1]);
-    if (n) content = nodeToMarkdown(n.id, n.data);
-  } else if (edgeMatch) {
-    const e = s.edges.find((x) => x.id === edgeMatch[1]);
-    if (e?.data) content = edgeToYaml(e.id, e.source, e.target, e.data);
-  } else if (path === "memory/global.md") content = memoryToMd(s.memory.global);
-  else if (path === "memory/decisions.md") content = memoryToMd(s.memory.decisions);
-  else if (path === "memory/progress.md") content = memoryToMd(s.memory.progress);
-  else if (path === "memory/user.md") content = memoryToMd(s.memory.user);
-  else if (agentMemMatch && s.memory.agents[agentMemMatch[1]]) content = memoryToMd(s.memory.agents[agentMemMatch[1]]);
-  else if (outputMatch) {
-    const [, nodeId, file] = outputMatch;
-    const entries = s.outputs[nodeId] ?? [];
-    if (file === "index.yaml") content = outputsIndexYaml(nodeId, entries);
-    else content = entries.find((e) => e.file === file)?.content ?? null;
-  } else if (logMatch && s.logs[logMatch[1]]) content = logText(s.logs[logMatch[1]]);
-  else if (chatMatch) {
-    const msgs = s.chats[chatMatch[1]];
-    const n = s.nodes.find((x) => x.id === chatMatch[1]);
-    if (msgs && n) content = chatToMd(chatMatch[1], n.data.title, msgs);
-  } else if (snapMatch) {
-    const meta = s.snapshots.find((m) => m.id === snapMatch[1]);
-    content = meta ? JSON.stringify({ note: "the full checkpoint payload lives in IndexedDB", id: meta.id, at: meta.at, label: meta.label, status: meta.status, node_count: meta.node_count }, null, 2) : null;
-  } else if (path.startsWith("library/roles/")) {
-    const rid = path.replace("library/roles/", "").replace(".json", "");
-    const r = roleById(rid);
-    content = JSON.stringify({ id: r.id, name: r.name, description: r.description, model: r.model, tools: r.tools, version: "1.0", default_output_contract: { format: "markdown", required_fields: r.required_fields, save_to: "outputs/{node_id}/" } }, null, 2);
-  } else if (strokeMatch) {
-    const st = s.strokes.find((x) => x.id === strokeMatch[1]);
-    content = st ? JSON.stringify(st, null, 2) : null;
-  } else {
-    const tplMatch = path.match(/^library\/templates\/([^/]+)\/template\.yaml$/);
-    if (tplMatch) {
-      const t = s.templates.find((x) => x.id === tplMatch[1]);
-      if (t) content = toYaml({ template_id: t.id, name: t.name, version: "1.0", description: t.description, nodes: t.nodes, edges: t.edges, builtin: t.builtin, saved_at: t.saved_at });
-    }
-  }
-
-  if (content === null) return null;
-  return { path, content, lang };
-}
 
 export { MODELS, makeNodeData, makeEdgeData };

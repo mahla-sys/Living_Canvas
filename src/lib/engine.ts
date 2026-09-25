@@ -7,7 +7,7 @@ import {
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
   validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout, DEFAULT_MODEL,
   type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType, type EdgeType, type LCEdgeData,
-  type ModelRoute,
+  type ModelRoute, type OutputSchema, type SchemaField,
 } from "./core";
 import {
   FsAccessStorageAdapter, isFsAccessSupported, pickCanvasDirectory, ensurePermission,
@@ -20,7 +20,7 @@ import {
 import {
   ROOT, CANVAS_ID, APP_VERSION, STRUCTURE_VERSION, buildSeed, emptyExecution, roleById,
   makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc, DEFAULT_LAYOUT,
-  ROLE_SCHEMAS, schemaPathFor, makeRoleSchema,
+  ROLE_SCHEMAS, schemaPathFor, makeRoleSchema, BUILTIN_TEMPLATES,
   type AppState, type RFNode, type RFEdge, type TemplateSpec, type TemplateInfo,
 } from "../state";
 
@@ -164,6 +164,7 @@ async function writeCore(s: AppState) {
 }
 
 let saveChain: Promise<void> = Promise.resolve();
+let lastSaveFailToastAt = 0;
 
 async function saveNow(api: EngineApi) {
   await writeCore(api.get());
@@ -173,11 +174,27 @@ async function saveNow(api: EngineApi) {
 }
 
 /**
+ * A failed write is a state the reader must see (ADR-043). The old `.catch(() => undefined)` swallowed
+ * the error, so a revoked folder permission or a full disk left the bar on "Saving…" forever with no
+ * word. Now the chain lands on `failed` and says so once (throttled, because a failing store fails every
+ * debounce).
+ */
+function markSaveFailed(api: EngineApi) {
+  api.set({ saveState: "failed" });
+  const now = Date.now();
+  if (now - lastSaveFailToastAt > 4000) {
+    lastSaveFailToastAt = now;
+    emit(api, "system", "save to storage failed — the files on disk may be stale");
+    toast(api, "error", "Saving to storage failed — the files on disk may be stale.");
+  }
+}
+
+/**
  * debounced save (§5.2). every write sits on the chain so flush can actually
  * wait for all pending writes — before an Export and before a reload.
  */
 const debouncedSave = debounce((api: EngineApi) => {
-  saveChain = saveChain.then(() => saveNow(api)).catch(() => undefined);
+  saveChain = saveChain.then(() => saveNow(api)).catch(() => markSaveFailed(api));
 }, 700);
 
 export function touch(api: EngineApi) {
@@ -192,7 +209,7 @@ export function touch(api: EngineApi) {
  */
 const debouncedSaveLayout = debounce((api: EngineApi) => {
   const s = api.get();
-  saveChain = saveChain.then(() => writeCanvasYaml(s)).catch(() => undefined);
+  saveChain = saveChain.then(() => writeCanvasYaml(s)).catch(() => markSaveFailed(api));
 }, 500);
 
 /** Called at the end of a panel drag / toggle. State is already updated; this only schedules the file. */
@@ -469,6 +486,51 @@ export async function validateAgainstContract(
   return [...problems, ...validateAgainstSchema(fields, parsed.schema).map((m) => `${rel}: ${m}`)];
 }
 
+/**
+ * The schema a role's contract names, or `null` when there is none or the file is unreadable. The
+ * simulator uses it to shape its content (ADR-040); an unreadable schema means presence-only content,
+ * because the validator would then only check presence anyway.
+ */
+export async function loadRoleSchema(agent: AgentConfig): Promise<OutputSchema | null> {
+  const validator = agent.context_contract.output_contract.validator;
+  if (!validator) return null;
+  const rel = validator.replace(/^\/+/, "");
+  if (!isPathAllowed(["library/schemas/"], rel)) return null;
+  try {
+    const parsed = parseOutputSchema(await storage.readFile(`${ROOT}/${rel}`));
+    return parsed.ok ? parsed.schema : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The model was asked to reply with one JSON object of the required fields. Accept the reply whole, or
+ * as the outermost brace block of a longer answer. Anything else comes back `null` — the caller then
+ * falls back to `{ summary: text }` and lets the contract name exactly what is missing (ADR-041: no
+ * simulator word may dress as a model's).
+ */
+export function extractFieldsFromReply(text: string): Record<string, string> | null {
+  const t = String(text ?? "").trim();
+  if (!t) return null;
+  const candidates = [t];
+  const start = t.indexOf("{");
+  const end = t.lastIndexOf("}");
+  if (start !== -1 && end > start) candidates.push(t.slice(start, end + 1));
+  for (const c of candidates) {
+    let data: unknown;
+    try { data = JSON.parse(c); } catch { continue; }
+    if (!data || typeof data !== "object" || Array.isArray(data)) continue;
+    const out: Record<string, string> = {};
+    let any = false;
+    for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") { out[k] = String(v); any = true; }
+    }
+    if (any) return out;
+  }
+  return null;
+}
+
 export async function writeOutputs(api: EngineApi, nodeId: string, entries: OutputEntry[], shared = false) {
   const dir = shared ? `${ROOT}/outputs/shared/${nodeId}` : `${ROOT}/outputs/${nodeId}`;
   await Promise.all(entries.map((e) => storage.writeFile(`${dir}/${e.file}`, e.content)));
@@ -711,6 +773,9 @@ export interface ToolContext {
   nodeId: string;
   agent?: AgentConfig | null;
   outputDelivered?: boolean;
+  /** the validated fields the model actually delivered, so the executor's downstream steps
+   *  (numericScope, memory lines) read the model's data, not a placeholder (ADR-041) */
+  deliveredFields?: Record<string, string>;
 }
 
 export interface AskModelOptions {
@@ -719,6 +784,12 @@ export interface AskModelOptions {
   tools?: CanvasToolDefinition[];
   toolContext?: ToolContext;
   onToolExecute?: (name: string, args: Record<string, unknown>, result: ToolCallResult) => Promise<void> | void;
+  /** Aborts the in-flight request when the run stops or rolls back (ADR-045). */
+  signal?: AbortSignal;
+  /** Per-request ceiling in ms; a hung provider must not hold the queue forever (ADR-045). */
+  timeoutMs?: number;
+  /** Checked before every request; the executor passes "the run has not been cancelled". */
+  shouldContinue?: () => boolean;
 }
 
 export async function executeTool(
@@ -727,7 +798,7 @@ export async function executeTool(
   agent: AgentConfig | null | undefined,
   toolName: string,
   args: Record<string, unknown>,
-  context?: { outputDelivered?: boolean }
+  context?: ToolContext
 ): Promise<ToolCallResult> {
   const tName = toolName as ToolName;
 
@@ -893,6 +964,16 @@ export async function executeTool(
         return { status: "denied", reason: why };
       }
 
+      /* Destructive tools wait for a human (ADR-046): the run is paused, the question is answered by
+         Approve/Reject/Stop in the UI, and a rejection is data the model can react to. The gate keys on
+         the tool context — its presence is what makes this call part of an autonomous run. A direct call
+         (a test, or a human driving the tool by hand) is already in the loop, so it proceeds. */
+      if (context && !(await awaitToolApproval(api, nodeId, toolName, targetId))) {
+        await appendLog(api, nodeId, `tool ${toolName} rejected by the human`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: "the human rejected the deletion" });
+        return { status: "denied", reason: `the human rejected deleting ${targetId}` };
+      }
+
       await deleteNode(api, targetId);
       await appendLog(api, nodeId, `tool delete_node → node “${targetId}” deleted`);
       await ledgerRow(api, { node: nodeId, tool: "delete_node", status: "ok", detail: `deleted ${targetId}` });
@@ -969,6 +1050,12 @@ export async function executeTool(
         return { status: "denied", reason: why };
       }
 
+      if (context && !(await awaitToolApproval(api, nodeId, toolName, edgeId))) {
+        await appendLog(api, nodeId, `tool ${toolName} rejected by the human`);
+        await ledgerRow(api, { node: nodeId, tool: toolName, status: "denied", detail: "the human rejected the deletion" });
+        return { status: "denied", reason: `the human rejected deleting ${edgeId}` };
+      }
+
       await deleteEdge(api, edgeId);
       await appendLog(api, nodeId, `tool delete_edge → edge ${edgeId} deleted`);
       await ledgerRow(api, { node: nodeId, tool: "delete_edge", status: "ok", detail: `deleted edge ${edgeId}` });
@@ -1039,7 +1126,7 @@ export async function executeTool(
 
       const entries = buildEntries(nodeId, required, fields);
       await writeOutputs(api, nodeId, entries);
-      if (context) context.outputDelivered = true;
+      if (context) { context.outputDelivered = true; context.deliveredFields = fields; }
       await appendLog(api, nodeId, `tool write_output → ${required.length} fields delivered`);
       await ledgerRow(api, { node: nodeId, tool: "write_output", status: "ok", detail: `${required.length} fields` });
       return { status: "ok", delivered: required };
@@ -1084,6 +1171,9 @@ export async function askModel(
   let finalContent = "";
 
   while (steps < maxSteps) {
+    /* the run may have been stopped or rolled back while we were between requests (ADR-045) */
+    if (opts.shouldContinue && !opts.shouldContinue()) return finalContent;
+
     const payload: Record<string, unknown> = {
       model: route.model,
       messages: currentMessages,
@@ -1104,11 +1194,35 @@ export async function askModel(
       reqHeaders["x-goog-api-key"] = apiKey;
     }
 
-    const res = await fetch(route.endpoint, {
-      method: "POST",
-      headers: reqHeaders,
-      body: JSON.stringify(payload),
-    });
+    /* A request has a ceiling and an off-switch (ADR-045): a hung provider times out instead of holding
+       the queue, and a run that stops aborts the request that is actually running. The two abort
+       sources are merged onto one controller so `fetch` sees a single signal. */
+    const timeoutMs = opts.timeoutMs ?? 120000;
+    const reqCtl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; reqCtl.abort(); }, timeoutMs);
+    const onOuterAbort = () => reqCtl.abort();
+    if (opts.signal) opts.signal.addEventListener("abort", onOuterAbort, { once: true });
+    let res: Response;
+    try {
+      res = await fetch(route.endpoint, {
+        method: "POST",
+        headers: reqHeaders,
+        body: JSON.stringify(payload),
+        signal: reqCtl.signal,
+      });
+    } catch (err: unknown) {
+      if (reqCtl.signal.aborted) {
+        const when = timeoutMs < 1000 ? `${timeoutMs} ms` : `${Math.round(timeoutMs / 1000)} s`;
+        throw timedOut
+          ? new Error(`${route.provider} request timed out after ${when}`)
+          : new Error("the model request was aborted with the run");
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      if (opts.signal) opts.signal.removeEventListener("abort", onOuterAbort);
+    }
     if (!res.ok) throw new Error(`${route.provider} API ${res.status}`);
     const j = await res.json();
     const choice = j?.choices?.[0];
@@ -1167,6 +1281,10 @@ export async function askModel(
         content: JSON.stringify(result),
       });
 
+      /* between two tools of one assistant message the run may have stopped (a tool approval that a
+         Stop dropped, ADR-045/046): stop issuing the next request rather than feed it. */
+      if (opts.shouldContinue && !opts.shouldContinue()) break;
+
       if (steps >= maxSteps) {
         break;
       }
@@ -1178,7 +1296,16 @@ export async function askModel(
 
 /* ---------------- simulated generation ---------------- */
 
-function simFields(roleId: string, title: string, upstream: string, owner: string): Record<string, string> {
+/**
+ * The simulator's field content (ADR-040). The four original roles keep their hand-written boilerplate —
+ * tests and conditional edges pin exact values (the analyst's `risk_score: "5"` is what makes
+ * `{{ risk_score < 7 }}` true). Every other role — the six pipeline-library roles and anything the user
+ * invents — gets content **derived from its own output contract**: one field per declared required field,
+ * shaped to that field's own rules (type, range, pattern, minLength). The old single `default` branch was
+ * how the pipeline library shipped templates that cannot run on the simulator: it handed every unknown
+ * role the three fields the decision-maker happened to need.
+ */
+function simFields(roleId: string, title: string, upstream: string, owner: string, schema: OutputSchema | null = null, required: string[] = ["summary"]): Record<string, string> {
   const d = nowIso().slice(0, 10);
   const up = upstream ? upstream.slice(0, 140) : "—";
   switch (roleId) {
@@ -1201,13 +1328,62 @@ function simFields(roleId: string, title: string, upstream: string, owner: strin
         solution: `step 1: build the instant-feedback prototype (output: clickable demo — criterion: cover 80% of scenarios)\nstep 2: test with 20 students (output: engagement report — criterion: retain 60% in week three)\nstep 3: refine and prepare deployment (output: version 0.9 — criterion: no critical errors)`,
         next_actions: `- define the “active engagement” metric with the user\n- recruit 20 students for the test\n- schedule step 1 on the canvas`,
       };
-    default:
+    case "decision-maker":
       return {
         summary: `All allowed outputs were read. No serious conflict between steps; one small inconsistency in the success criteria, which the decision accounts for.`,
         decision: `Final decision: start step 1 (prototype) with a limited budget and a weekly review. Reasons: acceptable risk (5/10), a clear three-step solution, alignment with the canvas goal.`,
         approval_request: `This decision needs human approval before it runs. Options: approve and start step 1 / revise and return to the “Design the solution” node / reject entirely.`,
       };
+    default:
+      return simFieldsFromContract(roleId, title, up, owner, schema, required);
   }
+}
+
+/** One simulated value per declared field, shaped to satisfy the field's own rules (ADR-040). */
+function simFieldsFromContract(roleId: string, title: string, up: string, owner: string, schema: OutputSchema | null, required: string[]): Record<string, string> {
+  const names = (schema?.required?.length ? schema.required : required) ?? ["summary"];
+  const out: Record<string, string> = {};
+  for (const f of names) out[f] = simFieldValue(f, schema?.properties?.[f], title, up, owner, roleId);
+  return out;
+}
+
+function simFieldValue(field: string, rule: SchemaField | undefined, title: string, up: string, owner: string, roleId: string): string {
+  const d = nowIso().slice(0, 10);
+  const desc = rule?.description ?? field;
+  let text: string;
+  if (rule && (rule.type === "integer" || rule.type === "number")) {
+    const lo = rule.minimum ?? 1;
+    const hi = rule.maximum ?? 10;
+    const mid = lo + (hi - lo) / 2;
+    text = rule.type === "integer" ? String(Math.round(mid)) : String(mid);
+  } else if (field === "summary") {
+    text = `The “${title}” step of the ${roleId} role completed in a simulated session of the ${owner} canvas. Input from the previous node: ${up}. This text was generated by the internal simulator — set a provider key in Settings to get a real answer.`;
+  } else {
+    text = `Simulated ${desc} for “${title}” (recorded on ${d} by the ${owner} pipeline, provider: internal simulator): ${up}`;
+  }
+  return meetMinLength(shapeToPattern(text, rule), rule?.minLength);
+}
+
+/** The patterns this app's schemas actually use are few and known, so the boilerplate can be shaped to
+    match them. A pattern it does not recognise is left alone — the validator then names the mismatch
+    loudly instead of the simulator guessing. */
+function shapeToPattern(text: string, rule: SchemaField | undefined): string {
+  const p = rule?.pattern;
+  if (!p) return text;
+  if (p.startsWith("^-")) return `- ${text}\n- second item (simulated): ${text}`;
+  if (p.startsWith("^\\s*1") || p.startsWith("^1")) return `1. ${text}\n2. second question (simulated): ${text}`;
+  if (p.includes("step 1")) return `step 1: ${text}\nstep 2: ${text}\nstep 3: ${text}`;
+  return text;
+}
+
+/** Stretches the boilerplate to the declared floor: a simulated field shorter than its own schema's
+    minLength is a guaranteed red node, so the simulator never writes one. */
+function meetMinLength(text: string, min: number | undefined): string {
+  if (!min) return text;
+  let t = text;
+  let i = 1;
+  while (t.length < min) t += `\n(simulated padding ${i++} — enrich the field's description for better content)`;
+  return t;
 }
 
 function buildEntries(nodeId: string, required: string[], fields: Record<string, string>): OutputEntry[] {
@@ -1495,11 +1671,15 @@ async function executeNode(api: EngineApi, nodeId: string) {
   const runId = s0.execution.run_id ?? uid("run");
   const delay = s0.settings.simDelay;
 
-  // cancellation guard — aborts the run if the user stopped it or restored a checkpoint (§12.5)
+  // cancellation guard — aborts the run if the user stopped it or restored a checkpoint (§12.5).
+  // The controller also aborts the in-flight provider request (ADR-045): a "stop" that leaves a
+  // 90-second model call running to completion is not a stop, it is a delay.
   const aborted = () => api.get().execution.run_id !== runId;
+  const ctl = new AbortController();
+  activeController = ctl;
   const guard = async (ms: number) => {
     await sleep(ms);
-    if (aborted()) throw new Error("__abort__");
+    if (aborted()) { ctl.abort(); throw new Error("__abort__"); }
   };
 
   // lock §3.4
@@ -1583,7 +1763,12 @@ async function executeNode(api: EngineApi, nodeId: string) {
       : "generating a response in the phase 1 simulator…");
     let fields: Record<string, string>;
     const required = agent?.context_contract.output_contract.required_fields ?? ["summary"];
-    const toolCtx: { api: EngineApi; nodeId: string; agent?: AgentConfig | null; outputDelivered?: boolean } = {
+    /* The simulator reads the same schema file the validator will apply (ADR-040): its content is shaped
+       to the contract, so a simulated field can never fail its own schema. No validator (a hand-made
+       role) means presence-only, exactly as the validator would do. */
+    const simSchema = agent ? await loadRoleSchema(agent) : null;
+    const sim = (roleId: string) => simFields(roleId, node.data.title, upstream, s0.canvas.owner, simSchema, required);
+    const toolCtx: { api: EngineApi; nodeId: string; agent?: AgentConfig | null; outputDelivered?: boolean; deliveredFields?: Record<string, string> } = {
       api,
       nodeId,
       agent,
@@ -1593,22 +1778,42 @@ async function executeNode(api: EngineApi, nodeId: string) {
       try {
         const text = await askModel(route, effectiveKey, [
           { role: "system", content: agent.system_prompt },
-          { role: "user", content: `Canvas summary and memory:\n${memoryTxt.slice(0, 1200)}\n\nOutput of the previous node:\n${upstream.slice(0, 800)}\n\nWrite the output with these fields: ${required.join(", ")}.` },
+          { role: "user", content: `Canvas summary and memory:\n${memoryTxt.slice(0, 1200)}\n\nOutput of the previous node:\n${upstream.slice(0, 800)}\n\nDeliver the fields ${required.join(", ")} with the write_output tool. If you cannot call tools, reply with one JSON object containing exactly those fields.` },
         ], {
           maxTokens: agent.max_tokens,
           maxSteps: agent.max_steps,
           toolContext: toolCtx,
+          signal: ctl.signal,
+          shouldContinue: () => !aborted(),
         });
-        fields = { summary: text, ...simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner) };
+        /* A stop or a restore may have landed while the model was thinking: the response is then the
+           output of a run that no longer exists, and it must not reach the files (ADR-045). */
+        if (aborted()) throw new Error("__abort__");
+        if (toolCtx.outputDelivered) {
+          fields = toolCtx.deliveredFields ?? {};
+        } else {
+          /* ADR-041 — the model's words are the output. The old line was
+             `{ summary: text, ...simFields(...) }`: the spread came last, so the simulated summary
+             silently overwrote the model's answer and every other field was boilerplate — the model had
+             spoken and nobody had listened. Now: if it returned the requested JSON, those are the fields;
+             if it answered in prose, the prose is the summary. Either way the model's own `summary` (or
+             whole reply) is never replaced by a simulated one, and whatever it did not say is filled by
+             the contract-derived sim — labelled as simulation in the text itself — so the run completes
+             and the reader can tell the real from the placeholder. */
+          const parsed = extractFieldsFromReply(text);
+          fields = parsed
+            ? { ...sim(agent.role_id), ...parsed }
+            : { ...sim(agent.role_id), summary: text };
+        }
       } catch (err: unknown) {
         const errMsg = (err as Error)?.message ?? String(err);
         await appendLog(api, nodeId, `API error (${route.provider}): ${errMsg} — falling back to the simulator (§12.6 fallback)`);
         toast(api, "warn", `${route.provider} unreachable (${errMsg}); used the internal simulator.`);
-        fields = simFields(agent.role_id, node.data.title, upstream, s0.canvas.owner);
+        fields = sim(agent.role_id);
       }
     } else {
       await guard(delay * 1.4);
-      fields = simFields(agent?.role_id ?? "decision-maker", node.data.title, upstream, s0.canvas.owner);
+      fields = sim(agent?.role_id ?? "decision-maker");
     }
     steps++;
     if (steps > maxSteps) throw new Error("max_steps exceeded (§12.3)");
@@ -1684,12 +1889,17 @@ async function executeNode(api: EngineApi, nodeId: string) {
       emit(api, "run.paused", `run paused for human approval — node “${node.data.title}”`);
       toast(api, "warn", "The decision of this node needs your approval.");
     }
+    activeController = null;
   } catch (err) {
-    if (String(err).includes("__abort__")) {
-      // run was cancelled mid-flight (stop / restore) — leave state to the canceller
+    /* A cancellation can arrive two ways: a guard threw `__abort__`, or the controller aborted the
+       in-flight request (ADR-045) — either way `aborted()` is the source of truth, and the canceller
+       already owns the state, so this node leaves it alone. */
+    if (String(err).includes("__abort__") || aborted()) {
+      activeController = null;
       emit(api, "system", `run of “${node.data.title}” cancelled by a stop or a rollback`);
       return;
     }
+    activeController = null;
     const agentNow = getNode(api.get(), nodeId)?.data.agent;
     patchNode(api, nodeId, { lock: { status: "free", locked_by: null, locked_at: null }, agent: agentNow ? { ...agentNow, status: "failed" } : agentNow }, true);
     if (!refused) setNodeError(api, nodeId, String(err).replace(/^Error: /, ""));
@@ -1732,6 +1942,41 @@ async function collectToBox(api: EngineApi, boxId: string) {
    work (Law 3, ADR-009) and must not reach `state.json` — a flag that survived a reload would silently make
    the next run stop after one node. */
 let stepOnce = false;
+
+/* The in-flight node's abort controller, module-scoped so a stop/reset/restore can cancel the request
+   that is actually running (ADR-045). One at a time: the queue executes nodes strictly one by one. */
+let activeController: AbortController | null = null;
+
+function abortActiveRun(): void {
+  if (activeController) {
+    activeController.abort();
+    activeController = null;
+  }
+}
+
+/* A destructive canvas tool (delete_node / delete_edge) pauses the run here until a human decides
+   (ADR-046). One at a time: a run is single-threaded, so there is never a queue of questions. The
+   promise resolves through `settleToolApproval` — Approve/Reject/Stop in the UI all reach it. */
+let pendingToolApproval: { resolve: (ok: boolean) => void } | null = null;
+
+/** Resolve the question the run is paused on (approve → true). Whether a question was pending. */
+export function settleToolApproval(api: EngineApi, ok: boolean): boolean {
+  const pending = pendingToolApproval;
+  if (!pending) return false;
+  pendingToolApproval = null;
+  pending.resolve(ok);
+  api.set((st) => ({ execution: { ...st.execution, status: "running" } }));
+  return true;
+}
+
+async function awaitToolApproval(api: EngineApi, nodeId: string, tool: string, target: string): Promise<boolean> {
+  await appendLog(api, nodeId, `tool ${tool} → waiting for human approval (${target})`);
+  await ledgerRow(api, { node: nodeId, tool, status: "approval", detail: `human approval requested for ${target}` });
+  api.set((st) => ({ execution: { ...st.execution, status: "waiting_approval" } }));
+  emit(api, "run.paused", `${tool} of “${target}” is paused for human approval`);
+  toast(api, "warn", `Deleting “${target}” needs your approval.`);
+  return new Promise<boolean>((resolve) => { pendingToolApproval = { resolve }; });
+}
 
 async function processQueue(api: EngineApi) {
   while (true) {
@@ -1888,6 +2133,14 @@ export async function stepRun(api: EngineApi) {
 
 export async function resumeRun(api: EngineApi) {
   const ex = api.get().execution;
+  /* A tool approval is a different kind of "waiting": the queue is not the thing that is stopped —
+     the in-flight node is, mid tool-call. Resolving the question must not also run the queue (ADR-046). */
+  if (pendingToolApproval) {
+    settleToolApproval(api, true);
+    emit(api, "run.resumed", "tool approval recorded — the run continued");
+    toast(api, "success", "Approved — the tool ran and the run continued.");
+    return;
+  }
   // two ways to reach a stopped queue — a pause and an approval — and one way back out of it
   if (ex.status !== "waiting_approval" && ex.status !== "paused") return;
   const wasPaused = ex.status === "paused";
@@ -1898,6 +2151,14 @@ export async function resumeRun(api: EngineApi) {
 }
 
 export function rejectRun(api: EngineApi) {
+  /* Rejecting a *tool* question denies that one tool and lets the run continue — the model sees the
+     denial and adapts. Rejecting a *decision* stops the run, as before. (ADR-046) */
+  if (pendingToolApproval) {
+    settleToolApproval(api, false);
+    emit(api, "validation.failed", "tool rejected by the human — the run continues without it");
+    toast(api, "info", "Rejected — the tool was denied and the run continues.");
+    return;
+  }
   void endLedger(api, "rejected", "the decision was rejected before the queue drained");
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
   emit(api, "run.stopped", "the decision was rejected by the user — run stopped");
@@ -1913,6 +2174,13 @@ export function stopRun(api: EngineApi) {
     const ag = n?.data.agent;
     patchNode(api, cur, { lock: { status: "free", locked_by: null, locked_at: null }, agent: ag ? { ...ag, status: ag.status === "running" ? "idle" : ag.status } : ag }, true);
   }
+  /* A stop while a tool waits is a "no" to the question; a stop while a model call is in flight
+     cancels the request itself (ADR-045/046). Both before the state flip, so the in-flight loop sees
+     a consistent world. */
+  if (settleToolApproval(api, false)) {
+    emit(api, "validation.failed", "tool approval dropped by a stop");
+  }
+  abortActiveRun();
   void endLedger(api, "stopped", "the user pressed stop before the queue drained");
   // invalidating run_id makes any in-flight node abort at its next guard (§12.5)
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
@@ -1922,6 +2190,8 @@ export function stopRun(api: EngineApi) {
 }
 
 export function resetExecution(api: EngineApi) {
+  settleToolApproval(api, false);
+  abortActiveRun();
   api.set((st) => ({
     execution: emptyExecution(),
     nodes: st.nodes.map((n) => ({
@@ -2066,8 +2336,30 @@ export async function takeSnapshot(api: EngineApi, label: string, quiet = false)
   if (!quiet) toast(api, "success", "Checkpoint saved.");
 }
 
+/**
+ * A rollback that does not reach the files is a rollback that evaporates on the next hydrate (ADR-042):
+ * the node/edge files on disk are rewritten from the restored graph, and files the restored graph no
+ * longer owns are deleted. Only `nodes/` and `edges/` are touched — memory, outputs, chats, logs, runs
+ * and history survive a rollback, because they are the record of what happened, not the shape of now.
+ */
+export async function syncGraphFiles(api: EngineApi): Promise<void> {
+  const s = api.get();
+  const wantNodes = new Set(s.nodes.map((n) => nodePath(n.id)));
+  const wantEdges = new Set(s.edges.map((e) => edgePath(e.id)));
+  const all = await storage.allPaths().catch(() => [] as string[]);
+  for (const p of all) {
+    if (p.startsWith(`${ROOT}/nodes/`) && !wantNodes.has(p)) await storage.deleteFile(p).catch(() => undefined);
+    if (p.startsWith(`${ROOT}/edges/`) && !wantEdges.has(p)) await storage.deleteFile(p).catch(() => undefined);
+  }
+  for (const n of s.nodes) await writeNodeArtifact(api, n.id, true);
+  for (const e of s.edges) await writeEdgeArtifact(api, e.id, true);
+}
+
 export async function restoreSnapshot(api: EngineApi, id: string) {
   try {
+    /* A rollback during a run cancels the in-flight node: it is output for a timeline that no longer
+       exists, and the controller is what makes the in-flight request actually stop (ADR-042/045). */
+    abortActiveRun();
     const payload = await storage.readJson<{ graph: { nodes: RFNode[]; edges: RFEdge[] } }>(`${ROOT}/history/${id}.json`);
     const unlocked = payload.graph.nodes.map((n) => ({
       ...n,
@@ -2078,6 +2370,7 @@ export async function restoreSnapshot(api: EngineApi, id: string) {
       },
     }));
     api.set({ nodes: unlocked, edges: payload.graph.edges, execution: emptyExecution() });
+    await syncGraphFiles(api);
     emit(api, "snapshot.restored", `canvas restored to checkpoint ${id}`);
     toast(api, "success", "The canvas rolled back to the selected checkpoint.");
     touch(api);
@@ -2477,98 +2770,8 @@ export async function seedWorkspace(api: EngineApi) {
   await boot("library/shapes/agent-card.json", JSON.stringify({ id: "agent-card", name: "Agent card", type: "shape", default_size: { width: 280, height: 160 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
   await boot("library/shapes/hex-process.json", JSON.stringify({ id: "hex-process", name: "Process hexagon", type: "shape", default_size: { width: 240, height: 140 }, default_style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 } }, null, 2));
 
-  // seed 5 built-in pipeline templates in library
-  const builtInTemplates: TemplateSpec[] = [
-    {
-      template_id: "project-finder",
-      name: "Freelance Project & Proposal Pipeline",
-      description: "4-agent automated pipeline for scouting projects, evaluating feasibility, drafting bespoke proposals, and contract milestones.",
-      version: "1.0",
-      nodes: [
-        { id: "node-scout", nodeType: "agent", title: "1. Project & Client Scout", position: { x: 80, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline." },
-        { id: "node-filter", nodeType: "agent", title: "2. Feasibility & Risk Filter", position: { x: 420, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision." },
-        { id: "node-proposal", nodeType: "agent", title: "3. Proposal & Pitch Architect", position: { x: 760, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing." },
-        { id: "node-closer", nodeType: "agent", title: "4. Milestone & Deal Closer", position: { x: 1100, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "deal-closer", content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action." },
-        { id: "node-output", nodeType: "output-box", title: "Freelance Package Deliverable", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send." },
-      ],
-      edges: [
-        { id: "edge-001", source: "node-scout", target: "node-filter", edgeType: "flow", label: "scouted briefs", line_style: "solid" },
-        { id: "edge-002", source: "node-filter", target: "node-proposal", edgeType: "flow", label: "qualified projects", line_style: "solid" },
-        { id: "edge-003", source: "node-proposal", target: "node-closer", edgeType: "flow", label: "custom proposal", line_style: "solid" },
-        { id: "edge-004", source: "node-closer", target: "node-output", edgeType: "flow", label: "final package", line_style: "solid" },
-      ],
-    },
-    {
-      template_id: "decision-engine",
-      name: "Problem Solving & Decision Engine",
-      description: "4-agent executive engine for framing problems, evaluating risks, designing measurable solutions, and proposing human-approved decisions.",
-      version: "1.0",
-      nodes: [
-        { id: "node-understand", nodeType: "agent", title: "1. Understand the Problem", position: { x: 80, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "understander", content: "Clarifies ambiguities and formulates a single, precise problem statement." },
-        { id: "node-risk", nodeType: "agent", title: "2. Risk & Feasibility Analyst", position: { x: 420, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "risk-analyst", content: "Evaluates proposal vulnerabilities and scores risks from 1 to 10." },
-        { id: "node-solution", nodeType: "agent", title: "3. Solution Designer", position: { x: 760, y: 180 }, shape: "card", color: "#8fbf7f", viewMode: "card", role: "solution-designer", content: "Creates a 3-step executable solution with concrete success criteria." },
-        { id: "node-decision", nodeType: "agent", title: "4. Decision Wrap-Up", position: { x: 1100, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "decision-maker", content: "Consolidates all agent outputs and formulates final approval request." },
-        { id: "node-output", nodeType: "output-box", title: "Approved Action Plan", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#e8b04b", viewMode: "card", content: "Executive Action Plan: Validated decisions and step-by-step implementation." },
-      ],
-      edges: [
-        { id: "edge-001", source: "node-understand", target: "node-risk", edgeType: "flow", label: "problem statement", line_style: "solid" },
-        { id: "edge-002", source: "node-risk", target: "node-solution", edgeType: "flow", label: "risk report", line_style: "solid" },
-        { id: "edge-003", source: "node-solution", target: "node-decision", edgeType: "flow", label: "designed solution", line_style: "solid" },
-        { id: "edge-004", source: "node-decision", target: "node-output", edgeType: "flow", label: "approved plan", line_style: "solid" },
-      ],
-    },
-    {
-      template_id: "code-builder",
-      name: "Full-Stack Code Builder Pipeline",
-      description: "Automated software development workflow: specification framing, code synthesis, and architectural validation.",
-      version: "1.0",
-      nodes: [
-        { id: "node-architect", nodeType: "agent", title: "1. System Architect", position: { x: 100, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "understander", content: "Analyzes system requirements, data structures, and interface contracts." },
-        { id: "node-coder", nodeType: "agent", title: "2. System Builder", position: { x: 460, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "builder", content: "Writes production TypeScript code and architectural components." },
-        { id: "node-tester", nodeType: "agent", title: "3. QA & Security Reviewer", position: { x: 820, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "risk-analyst", content: "Validates test coverage, edge cases, and security boundaries." },
-        { id: "node-output", nodeType: "output-box", title: "Production Code Package", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Engineered release ready for deployment and git integration." },
-      ],
-      edges: [
-        { id: "edge-001", source: "node-architect", target: "node-coder", edgeType: "flow", label: "specifications", line_style: "solid" },
-        { id: "edge-002", source: "node-coder", target: "node-tester", edgeType: "flow", label: "source code", line_style: "solid" },
-        { id: "edge-003", source: "node-tester", target: "node-output", edgeType: "flow", label: "verified build", line_style: "solid" },
-      ],
-    },
-    {
-      template_id: "market-research",
-      name: "Market Research & Competitive Scout",
-      description: "Market intelligence pipeline: trend scouting, competitor feature matrix, and differentiation strategy.",
-      version: "1.0",
-      nodes: [
-        { id: "node-scout", nodeType: "agent", title: "1. Market Trend Scout", position: { x: 100, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Scans industry shifts, user pain points, and emerging opportunities." },
-        { id: "node-analysis", nodeType: "agent", title: "2. Competitive Analyst", position: { x: 460, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Maps competitor pricing, feature gaps, and weaknesses." },
-        { id: "node-strategy", nodeType: "agent", title: "3. Positioning Strategist", position: { x: 820, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "solution-designer", content: "Defines unique value proposition and go-to-market plan." },
-        { id: "node-output", nodeType: "output-box", title: "Strategic Market Report", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Comprehensive market intelligence brief with tactical actions." },
-      ],
-      edges: [
-        { id: "edge-001", source: "node-scout", target: "node-analysis", edgeType: "flow", label: "market data", line_style: "solid" },
-        { id: "edge-002", source: "node-analysis", target: "node-strategy", edgeType: "flow", label: "competitor matrix", line_style: "solid" },
-        { id: "edge-003", source: "node-strategy", target: "node-output", edgeType: "flow", label: "market report", line_style: "solid" },
-      ],
-    },
-    {
-      template_id: "content-engine",
-      name: "Content Strategy & Copywriting Engine",
-      description: "Multi-agent viral copywriting pipeline: research, compelling copy drafting, and conversion optimization.",
-      version: "1.0",
-      nodes: [
-        { id: "node-research", nodeType: "agent", title: "1. Topic & Hook Researcher", position: { x: 100, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "project-scout", content: "Researches trending hooks, client audience angles, and core themes." },
-        { id: "node-copy", nodeType: "agent", title: "2. Persuasive Copywriter", position: { x: 460, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "proposal-architect", content: "Drafts high-engagement posts, newsletters, and conversion copy." },
-        { id: "node-review", nodeType: "agent", title: "3. Quality & SEO Polish", position: { x: 820, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "feasibility-filter", content: "Refines readability, tone, hashtags, and call-to-action impact." },
-        { id: "node-output", nodeType: "output-box", title: "Ready-to-Publish Campaign", position: { x: 1180, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "Complete content batch formatted for immediate publishing." },
-      ],
-      edges: [
-        { id: "edge-001", source: "node-research", target: "node-copy", edgeType: "flow", label: "research & hooks", line_style: "solid" },
-        { id: "edge-002", source: "node-copy", target: "node-review", edgeType: "flow", label: "draft copy", line_style: "solid" },
-        { id: "edge-003", source: "node-review", target: "node-output", edgeType: "flow", label: "final copy batch", line_style: "solid" },
-      ],
-    },
-  ];
+  // seed the built-in pipeline templates in library (the data lives in state.ts — see BUILTIN_TEMPLATES)
+  const builtInTemplates: TemplateSpec[] = BUILTIN_TEMPLATES;
 
   for (const tpl of builtInTemplates) {
     await boot(`library/templates/${tpl.template_id}/template.json`, JSON.stringify(tpl, null, 2));
