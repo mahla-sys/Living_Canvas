@@ -263,7 +263,7 @@ export const DEEPSEEK_BASE = "https://api.deepseek.com";
 export const OLLAMA_BASE = "http://127.0.0.1:11434";
 export const MISTRAL_BASE = "https://api.mistral.ai/v1";
 export const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
-export const DEFAULT_MODEL = "mistral-small-latest";
+export const DEFAULT_MODEL = "ministral-3b-latest";
 
 /**
  * Build-time provider keys (ADR-047: the key never lives in the repository — it is injected from the
@@ -300,7 +300,7 @@ export function resolveModelRoute(id: string | null | undefined, fallback?: stri
   }
   if (name.startsWith("mistral:") || name.startsWith("mistral-") || name === "mistral" || name.startsWith("codestral")) {
     const modelName = name.startsWith("mistral:") ? name.slice("mistral:".length).trim() : name;
-    return { endpoint: `${MISTRAL_BASE}/chat/completions`, model: modelName || "mistral-small-latest", provider: "mistral" };
+    return { endpoint: `${MISTRAL_BASE}/chat/completions`, model: modelName || "ministral-3b-latest", provider: "mistral" };
   }
   return { endpoint: `${DEEPSEEK_BASE}/chat/completions`, model: name, provider: "deepseek" };
 }

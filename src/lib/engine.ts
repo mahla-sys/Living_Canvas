@@ -2515,7 +2515,7 @@ export async function createNode(
   });
   if (data.agent) {
     const settings = api.get()?.settings;
-    const activeModel = settings?.model || (settings?.provider === "gemini" ? "gemini-3.6-flash" : settings?.provider === "mistral" ? "mistral-small-latest" : "deepseek-chat");
+    const activeModel = settings?.model || (settings?.provider === "gemini" ? "gemini-3.6-flash" : settings?.provider === "mistral" ? "ministral-3b-latest" : "deepseek-chat");
     data.agent = makeAgentConfig(id, data.agent.role_id, {
       require_approval: data.agent.require_approval,
       model: data.agent.model && data.agent.model !== DEFAULT_MODEL ? data.agent.model : activeModel,
@@ -2973,88 +2973,17 @@ export async function loadTemplate(api: EngineApi, id: string) {
   toast(api, "success", `Template “${spec.name}” loaded onto the canvas.`);
 }
 
+/**
+ * A2 (roadmap 2026-09-25): this used to re-narrate the whole graph by hand — node titles, colors,
+ * positions and edges were duplicated from `BUILTIN_TEMPLATES` in three places (here, the seed, and
+ * the template file), and every change had to be made in all of them. That is the same shape of bug
+ * that made `graph.json` a cache competing with the node files (ADR-008's argument). Now it simply
+ * delegates to `loadTemplate`, which reads `library/templates/project-finder/template.json` — the one
+ * file the boot seed already writes. The pipeline *is* the template, so loading it goes through the
+ * template loader.
+ */
 export async function loadProjectFinderPipeline(api: EngineApi) {
-  const st = api.get();
-  if (st.execution.status === "running" || st.execution.status === "waiting_approval") {
-    toast(api, "warn", "Pipelines cannot be loaded mid-run.");
-    return;
-  }
-  const owner = st.settings.owner;
-  const scout = makeNodeData("agent", "1. Project & Client Scout", owner, {
-    color: "#e8b04b",
-    shape: "card",
-    content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline.",
-    agent: makeAgentConfig("node-scout", "project-scout"),
-  });
-
-  const filter = makeNodeData("agent", "2. Feasibility & Risk Filter", owner, {
-    color: "#6fb3c7",
-    shape: "card",
-    content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision.",
-    agent: makeAgentConfig("node-filter", "feasibility-filter"),
-  });
-
-  const proposal = makeNodeData("agent", "3. Proposal & Pitch Architect", owner, {
-    color: "#b98bc2",
-    shape: "card",
-    content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing.",
-    agent: makeAgentConfig("node-proposal", "proposal-architect"),
-  });
-
-  const closer = makeNodeData("agent", "4. Milestone & Deal Closer", owner, {
-    color: "#e06a4e",
-    shape: "card",
-    content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action.",
-    agent: makeAgentConfig("node-closer", "deal-closer"),
-  });
-
-  const outBox = makeNodeData("output-box", "Freelance Package Deliverable", owner, {
-    color: "#8fbf7f",
-    shape: "hexagon",
-    content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send.",
-  });
-
-  const nodes: RFNode[] = [
-    { id: "node-scout", type: "lc", position: { x: 80, y: 180 }, data: scout },
-    { id: "node-filter", type: "lc", position: { x: 420, y: 180 }, data: filter },
-    { id: "node-proposal", type: "lc", position: { x: 760, y: 180 }, data: proposal },
-    { id: "node-closer", type: "lc", position: { x: 1100, y: 180 }, data: closer },
-    { id: "node-output", type: "lc", position: { x: 1440, y: 180 }, data: outBox },
-  ];
-
-  const edges: RFEdge[] = [
-    { id: "edge-001", source: "node-scout", target: "node-filter", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "scouted briefs" }) },
-    { id: "edge-002", source: "node-filter", target: "node-proposal", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "qualified projects" }) },
-    { id: "edge-003", source: "node-proposal", target: "node-closer", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "custom proposal" }) },
-    { id: "edge-004", source: "node-closer", target: "node-output", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "final package" }) },
-  ];
-
-  for (const n of st.nodes) await storage.deleteFile(`${ROOT}/nodes/${n.id}.md`).catch(() => undefined);
-  for (const e of st.edges) await storage.deleteFile(`${ROOT}/edges/${e.id}.yaml`).catch(() => undefined);
-
-  const agents = { ...st.memory.agents };
-  for (const n of nodes) {
-    if (n.data.agent && !agents[n.id]) {
-      agents[n.id] = makeMemDoc(
-        `memory/agents/${n.id}.md`, `Memory of ${n.data.title}`,
-        "- latest inputs: —\n- decisions taken: —\n- notes for the next run: —", 0.7, "agent"
-      );
-      await storage.writeFile(`${ROOT}/memory/agents/${n.id}.md`, memoryToMd(agents[n.id])).catch(() => undefined);
-    }
-  }
-
-  api.set({
-    nodes, edges,
-    memory: { ...st.memory, agents },
-    execution: emptyExecution(),
-    canvas: { ...st.canvas, title: "Freelance Project & Proposal Pipeline", updated_at: nowIso() },
-  });
-
-  for (const n of nodes) await writeNodeArtifact(api, n.id, true);
-  for (const e of edges) await writeEdgeArtifact(api, e.id, true);
-  touch(api);
-  emit(api, "system", "loaded Freelance Project & Proposal Pipeline (4 agents + output box)");
-  toast(api, "success", "Freelance Project Finder & Proposal Pipeline loaded onto canvas!");
+  await loadTemplate(api, "project-finder");
 }
 
 /** save_role tool — keeps an agent's customised role in the library */

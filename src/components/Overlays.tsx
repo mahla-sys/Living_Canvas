@@ -500,11 +500,11 @@ export function SettingsModal() {
           <div>
             <p className="text-[11px] font-bold text-ink-300 mb-2">AI provider (§15)</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {([["sim", "Simulator", "no key needed"], ["gemini", "Gemini", "gemini-2.5-flash"], ["mistral", "Mistral", "mistral-small"], ["deepseek", "DeepSeek", "deepseek-chat"]] as const).map(([k, t, d]) => (
+              {([["sim", "Simulator", "no key needed"], ["gemini", "Gemini", "gemini-2.5-flash"], ["mistral", "Mistral", "ministral-3b"], ["deepseek", "DeepSeek", "deepseek-chat"]] as const).map(([k, t, d]) => (
                 <button
                   key={k}
                   onClick={() => {
-                    const model = k === "gemini" ? "gemini-2.5-flash" : k === "mistral" ? "mistral-small-latest" : k === "deepseek" ? "deepseek-chat" : settings.model;
+                    const model = k === "gemini" ? "gemini-2.5-flash" : k === "mistral" ? "ministral-3b-latest" : k === "deepseek" ? "deepseek-chat" : settings.model;
                     actions.updateSettings({ provider: k, model });
                   }}
                   className={`text-start p-2.5 rounded-xl border transition-all cursor-pointer ${settings.provider === k ? "border-lc-accent/60 bg-lc-accent/10" : "border-ink-600 bg-ink-850 hover:border-ink-500"}`}

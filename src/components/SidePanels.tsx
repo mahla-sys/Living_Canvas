@@ -1026,7 +1026,7 @@ function NodeInspector({ node }: { node: RFNode }) {
               </Field>
               <Field label="Model">
                 <select value={agent.model} onChange={(e) => actions.updateAgentField(node.id, { model: e.target.value })} className={selectCls}>
-                  {["deepseek-chat", "glm-4-flash", "ollama:qwen2.5"].map((m) => <option key={m} value={m}>{m}</option>)}
+                  {["ministral-3b-latest", "mistral-large-latest", "gemini-2.5-flash", "ollama:llama3.2"].map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </Field>
             </div>
@@ -1244,7 +1244,7 @@ function CanvasInspector() {
         </div>
         <Field label="Default model">
           <select value={canvas.default_model} onChange={(e) => actions.updateCanvas({ default_model: e.target.value })} className={selectCls}>
-            {["deepseek-chat", "glm-4-flash", "ollama:qwen2.5"].map((m) => <option key={m} value={m}>{m}</option>)}
+            {["ministral-3b-latest", "mistral-large-latest", "gemini-2.5-flash", "ollama:llama3.2"].map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Field>
         <Field label="Tags">

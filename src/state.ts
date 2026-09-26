@@ -279,7 +279,7 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
 /* Every entry must have an endpoint behind it (`resolveModelRoute`, ADR-008). `glm-4-flash` was removed
    rather than left to 400 and degrade to the simulator: a dropdown that offers a model the app cannot
    reach is the same lie as a validator nobody runs. Adding it back is one row in that table. */
-export const MODELS = [DEFAULT_MODEL, "gemini-2.5-flash", "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"];
+export const MODELS = [DEFAULT_MODEL, "gemini-2.5-flash", "ministral-3b-latest", "mistral-large-latest", "ollama:qwen2.5"];
 
 /* ---------------- roles (§3.8) ---------------- */
 
@@ -300,7 +300,7 @@ export const ROLES: RoleDef[] = [
     description: "Talks with the user to clarify the problem and extract a precise statement",
     system_prompt:
       "You are the \"Understand the problem\" agent. Read the canvas summary and your own memory, then make the core problem explicit. List the ambiguous questions first, then write the problem statement as one precise paragraph. Your output must contain summary, problem_statement and questions_asked.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "chat_with_user", "write_output"],
     required_fields: ["summary", "problem_statement", "questions_asked"],
   },
@@ -310,7 +310,7 @@ export const ROLES: RoleDef[] = [
     description: "Finds the risks of the proposed solution and scores them",
     system_prompt:
       "You are the \"Risk analysis\" agent. Your input is the problem statement from the previous node. List the main risks, score each from 1 to 10, and recommend one overall decision (reject / revise / approve). Output contains summary, risks, decision and a single numeric risk_score (1-10) for the whole proposal.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "risks", "decision", "risk_score"],
   },
@@ -320,7 +320,7 @@ export const ROLES: RoleDef[] = [
     description: "Designs an executable solution with clear, measurable steps",
     system_prompt:
       "You are the \"Design the solution\" agent. Given the problem statement and the risk report, design an executable solution in three steps. Each step needs an explicit output and a success criterion. Output contains summary, solution and next_actions.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "solution", "next_actions"],
   },
@@ -330,7 +330,7 @@ export const ROLES: RoleDef[] = [
     description: "Collects every output and proposes the final decision, pending human approval",
     system_prompt:
       "You are the \"Wrap-up & decision\" agent. Read every allowed output, mark the conflicts, and write one final decision with its reasons. The final decision is executed only after human approval. Output contains summary, decision and approval_request.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "decision", "approval_request"],
   },
@@ -340,7 +340,7 @@ export const ROLES: RoleDef[] = [
     description: "An AI Copilot with full access to modify the canvas structure and UI.",
     system_prompt:
       "You are the Manager agent for Living Canvas. You have full access to UI tools (get_ui_state, capture_canvas_snapshot) and graph manipulation tools (create_node, create_edge, etc.). Your job is to listen to the user and dynamically build, route, or restructure the pipeline they need. You act as an executive orchestrator.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["get_ui_state", "capture_canvas_snapshot", "create_node", "update_node", "delete_node", "create_edge", "update_edge", "delete_edge", "read_memory", "write_memory", "write_output", "get_canvas_overview", "chat_with_user"],
     required_fields: ["summary"],
   },
@@ -350,7 +350,7 @@ export const ROLES: RoleDef[] = [
     description: "An agent that helps the Manager write code or create specific node contents.",
     system_prompt:
       "You are a System Builder agent. You write code, draft node contents, and provide technical outputs based on the Manager's plan.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "technical_plan"],
   },
@@ -360,7 +360,7 @@ export const ROLES: RoleDef[] = [
     description: "Scans freelance project boards and extracts project requirements, budget, and scope",
     system_prompt:
       "You are the \"Project & Client Scout\" agent. Search, scan, and parse freelance opportunities (Upwork, Contra, Freelancer, RemoteOK). Extract client background, budget, required tech stack, deliverables, timeline, and client expectations. Output contains summary, client_brief, and project_requirements.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "client_brief", "project_requirements"],
   },
@@ -370,7 +370,7 @@ export const ROLES: RoleDef[] = [
     description: "Evaluates project profitability, client credibility, technical fit, and risk score",
     system_prompt:
       "You are the \"Feasibility & Risk Filter\" agent. Evaluate the scouted freelance project. Assess technical difficulty, client payment history/reputation, budget feasibility, and profit margin. Output contains summary, risk_score (1-10), technical_fit, and decision (BID or PASS).",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "risk_score", "technical_fit", "decision"],
   },
@@ -380,7 +380,7 @@ export const ROLES: RoleDef[] = [
     description: "Crafts persuasive, personalized proposals tailored to the client's problem with high conversion rate",
     system_prompt:
       "You are the \"Proposal & Pitch Architect\" agent. Write a compelling, bespoke freelance proposal. Start with an attention-grabbing hook understanding the client's exact problem, follow with the precise solution and tech stack, attach relevant portfolio proof, and present transparent pricing and delivery milestones. Output contains summary, proposal_letter, and portfolio_highlights.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "proposal_letter", "portfolio_highlights"],
   },
@@ -390,7 +390,7 @@ export const ROLES: RoleDef[] = [
     description: "Formulates project milestones, delivery roadmap, kick-off questions, and closing terms",
     system_prompt:
       "You are the \"Milestone & Deal Closer\" agent. Create a structured project delivery roadmap with milestones, clear acceptance criteria, onboarding checklist, and closing call-to-action to finalize the contract. Output contains summary, delivery_roadmap, and onboarding_checklist.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "delivery_roadmap", "onboarding_checklist"],
   },
@@ -689,7 +689,7 @@ const SETTINGS_BASE: Settings = envGemini ? {
   provider: "gemini", apiKey: envGemini, model: "gemini-2.5-flash", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 } : envMistral ? {
-  provider: "mistral", apiKey: envMistral, model: "mistral-small-latest", owner: "mahla", simDelay: 620,
+  provider: "mistral", apiKey: envMistral, model: "ministral-3b-latest", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 } : {
   provider: "sim", apiKey: "", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,
