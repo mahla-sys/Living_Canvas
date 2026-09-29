@@ -196,6 +196,65 @@ export const BUILTIN_TEMPLATES: TemplateSpec[] = [
   },
 ];
 
+/**
+ * The Pipeline Library cards (docs/ui-spec.md §3.1). One entry per built-in template, derived from
+ * `BUILTIN_TEMPLATES` — the file seed stays the source of truth, this is only what the card shows:
+ * a stage ribbon (the role chain), an accent hue picked from the first agent node's data colour, and
+ * a one-line Persian tagline for the footer. A new built-in template gets its card by adding `meta`
+ * here; `library.test.ts` fails if the two lists ever drift apart.
+ */
+export interface PipelineCardMeta {
+  id: string;
+  name: string;
+  description: string;
+  tagline: string;
+  stages: string[];
+  hue: string; // lc-data-colour — mirrors the seed's first agent-node colour, which is written into files
+}
+
+export const PIPELINE_CARDS: PipelineCardMeta[] = [
+  {
+    id: "project-finder",
+    name: "Freelance Project & Proposal",
+    description: "Scout projects, filter by risk, draft the proposal, close with milestones.",
+    tagline: "از شکار پروژه تا بسته پیشنهاد و قرارداد",
+    stages: ["Scout", "Filter", "Proposal", "Close"],
+    hue: "#e8b04b", // lc-data-colour
+  },
+  {
+    id: "decision-engine",
+    name: "Problem & Decision Engine",
+    description: "Frame the problem, score the risks, design the fix, ask for approval.",
+    tagline: "تحلیل چندمرحله‌ای: مسئله، ریسک، راه‌حل، تصمیم",
+    stages: ["Understand", "Risk", "Solution", "Decide"],
+    hue: "#6fb3c7", // lc-data-colour
+  },
+  {
+    id: "code-builder",
+    name: "Code Builder",
+    description: "Spec the feature, build it, review it, ship it.",
+    tagline: "از اسپک تا بیلد، ریویو و تحویل",
+    stages: ["Spec", "Build", "Review", "Ship"],
+    hue: "#8fbf7f", // lc-data-colour
+  },
+  {
+    id: "market-research",
+    name: "Market Research",
+    description: "Scan the market, size the niche, read the competitors, write the brief.",
+    tagline: "بازارکاوی: اسکن، اندازه‌گیری، رقبا، بریف",
+    stages: ["Scan", "Size", "Compete", "Brief"],
+    hue: "#b98bc2", // lc-data-colour
+  },
+  {
+    id: "content-engine",
+    name: "Content Engine",
+    description: "Research hooks, write the copy, polish for SEO, publish the batch.",
+    tagline: "قالب تولید محتوا: هوک، کپی، سئو، انتشار",
+    stages: ["Research", "Copy", "Polish", "Publish"],
+    hue: "#e8b04b", // lc-data-colour
+  },
+];
+
 export interface AppState {
   booted: boolean;
   bootLines: { text: string; ok: boolean }[];
@@ -229,7 +288,7 @@ export interface AppState {
     saveState: "saved" | "saving" | "failed";
   typing: Record<string, boolean>;
   ui: {
-    leftTab: "palette" | "files";
+    leftTab: "palette" | "library" | "files";
     /**
      * Which inspector tab is showing (ADR-015). Session-only: a tab that survived a reload would reopen
      * somebody else's moment of reading, and it is a view of the node rather than a fact about it.
@@ -279,7 +338,7 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
 /* Every entry must have an endpoint behind it (`resolveModelRoute`, ADR-008). `glm-4-flash` was removed
    rather than left to 400 and degrade to the simulator: a dropdown that offers a model the app cannot
    reach is the same lie as a validator nobody runs. Adding it back is one row in that table. */
-export const MODELS = [DEFAULT_MODEL, "gemini-2.5-flash", "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"];
+export const MODELS = [DEFAULT_MODEL, "gemini-2.5-flash", "ministral-3b-latest", "mistral-large-latest", "ollama:qwen2.5"];
 
 /* ---------------- roles (§3.8) ---------------- */
 
@@ -300,7 +359,7 @@ export const ROLES: RoleDef[] = [
     description: "Talks with the user to clarify the problem and extract a precise statement",
     system_prompt:
       "You are the \"Understand the problem\" agent. Read the canvas summary and your own memory, then make the core problem explicit. List the ambiguous questions first, then write the problem statement as one precise paragraph. Your output must contain summary, problem_statement and questions_asked.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "chat_with_user", "write_output"],
     required_fields: ["summary", "problem_statement", "questions_asked"],
   },
@@ -310,7 +369,7 @@ export const ROLES: RoleDef[] = [
     description: "Finds the risks of the proposed solution and scores them",
     system_prompt:
       "You are the \"Risk analysis\" agent. Your input is the problem statement from the previous node. List the main risks, score each from 1 to 10, and recommend one overall decision (reject / revise / approve). Output contains summary, risks, decision and a single numeric risk_score (1-10) for the whole proposal.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "risks", "decision", "risk_score"],
   },
@@ -320,7 +379,7 @@ export const ROLES: RoleDef[] = [
     description: "Designs an executable solution with clear, measurable steps",
     system_prompt:
       "You are the \"Design the solution\" agent. Given the problem statement and the risk report, design an executable solution in three steps. Each step needs an explicit output and a success criterion. Output contains summary, solution and next_actions.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "solution", "next_actions"],
   },
@@ -330,7 +389,7 @@ export const ROLES: RoleDef[] = [
     description: "Collects every output and proposes the final decision, pending human approval",
     system_prompt:
       "You are the \"Wrap-up & decision\" agent. Read every allowed output, mark the conflicts, and write one final decision with its reasons. The final decision is executed only after human approval. Output contains summary, decision and approval_request.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "decision", "approval_request"],
   },
@@ -340,7 +399,7 @@ export const ROLES: RoleDef[] = [
     description: "An AI Copilot with full access to modify the canvas structure and UI.",
     system_prompt:
       "You are the Manager agent for Living Canvas. You have full access to UI tools (get_ui_state, capture_canvas_snapshot) and graph manipulation tools (create_node, create_edge, etc.). Your job is to listen to the user and dynamically build, route, or restructure the pipeline they need. You act as an executive orchestrator.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["get_ui_state", "capture_canvas_snapshot", "create_node", "update_node", "delete_node", "create_edge", "update_edge", "delete_edge", "read_memory", "write_memory", "write_output", "get_canvas_overview", "chat_with_user"],
     required_fields: ["summary"],
   },
@@ -350,7 +409,7 @@ export const ROLES: RoleDef[] = [
     description: "An agent that helps the Manager write code or create specific node contents.",
     system_prompt:
       "You are a System Builder agent. You write code, draft node contents, and provide technical outputs based on the Manager's plan.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "technical_plan"],
   },
@@ -360,7 +419,7 @@ export const ROLES: RoleDef[] = [
     description: "Scans freelance project boards and extracts project requirements, budget, and scope",
     system_prompt:
       "You are the \"Project & Client Scout\" agent. Search, scan, and parse freelance opportunities (Upwork, Contra, Freelancer, RemoteOK). Extract client background, budget, required tech stack, deliverables, timeline, and client expectations. Output contains summary, client_brief, and project_requirements.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "client_brief", "project_requirements"],
   },
@@ -370,7 +429,7 @@ export const ROLES: RoleDef[] = [
     description: "Evaluates project profitability, client credibility, technical fit, and risk score",
     system_prompt:
       "You are the \"Feasibility & Risk Filter\" agent. Evaluate the scouted freelance project. Assess technical difficulty, client payment history/reputation, budget feasibility, and profit margin. Output contains summary, risk_score (1-10), technical_fit, and decision (BID or PASS).",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "risk_score", "technical_fit", "decision"],
   },
@@ -380,7 +439,7 @@ export const ROLES: RoleDef[] = [
     description: "Crafts persuasive, personalized proposals tailored to the client's problem with high conversion rate",
     system_prompt:
       "You are the \"Proposal & Pitch Architect\" agent. Write a compelling, bespoke freelance proposal. Start with an attention-grabbing hook understanding the client's exact problem, follow with the precise solution and tech stack, attach relevant portfolio proof, and present transparent pricing and delivery milestones. Output contains summary, proposal_letter, and portfolio_highlights.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "proposal_letter", "portfolio_highlights"],
   },
@@ -390,7 +449,7 @@ export const ROLES: RoleDef[] = [
     description: "Formulates project milestones, delivery roadmap, kick-off questions, and closing terms",
     system_prompt:
       "You are the \"Milestone & Deal Closer\" agent. Create a structured project delivery roadmap with milestones, clear acceptance criteria, onboarding checklist, and closing call-to-action to finalize the contract. Output contains summary, delivery_roadmap, and onboarding_checklist.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "delivery_roadmap", "onboarding_checklist"],
   },
@@ -633,9 +692,13 @@ export function makeNodeData(
     title,
     shape: nodeType === "agent" ? "card" : nodeType === "output-box" ? "hexagon" : "rectangle",
     color: NODE_COLORS[nodeType],
-    animation: { type: nodeType === "agent" ? "breathe" : "none", speed: 1 },
+    // B1 (work-order 2026-09-25): new nodes are calm by default — no breathing motion.
+    // The user can still switch a node to "breathe" from the inspector; only the default changed.
+    animation: { type: "none", speed: 1 },
     viewMode: nodeType === "note" ? "markdown" : "card",
-    style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 },
+    // B2: border derives from the node's own colour at low alpha instead of a hard dark stroke,
+    // so shapes read as soft fills (Excalidraw-like) rather than white-outlined boxes.
+    style: { strokeColor: NODE_COLORS[nodeType], strokeWidth: 0, fillStyle: "solid", opacity: 100 },
     lock: { status: "free", locked_by: null, locked_at: null },
     content: "",
     agent: nodeType === "agent" ? makeAgentConfig("pending", "understander") : null,
@@ -689,7 +752,7 @@ const SETTINGS_BASE: Settings = envGemini ? {
   provider: "gemini", apiKey: envGemini, model: "gemini-2.5-flash", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 } : envMistral ? {
-  provider: "mistral", apiKey: envMistral, model: "mistral-small-latest", owner: "mahla", simDelay: 620,
+  provider: "mistral", apiKey: envMistral, model: "ministral-3b-latest", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 } : {
   provider: "sim", apiKey: "", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,

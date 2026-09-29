@@ -1,1 +1,11 @@
+# Dependencies
 node_modules/
+
+# Build artifacts
+dist/
+
+# Environment variables
+.env
+
+# Test results
+test-results/
