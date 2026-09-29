@@ -2973,7 +2973,22 @@ export async function loadTemplate(api: EngineApi, id: string) {
   const nodes: RFNode[] = (spec.nodes ?? []).map((sn) => {
     const data = makeNodeData(sn.nodeType ?? "note", sn.title ?? "Untitled", owner, {
       shape: sn.shape, color: sn.color, viewMode: sn.viewMode, content: sn.content ?? "",
-      ...(sn.role ? { agent: makeAgentConfig(sn.id, sn.role) } : {}),
+      /* ADR-048: a template node may carry a per-node role_override (prompt/tools/fields/tokens).
+         It is merged onto the role defaults here so loading `ai-partner-team` (or any tuned pipeline)
+         actually applies its contract instead of silently falling back to the global ROLES table. */
+      ...(sn.role
+        ? {
+            agent: makeAgentConfig(sn.id, sn.role, sn.role_override ? {
+              ...(sn.role_override.system_prompt !== undefined ? { system_prompt: sn.role_override.system_prompt } : {}),
+              ...(sn.role_override.tools !== undefined ? { tools: sn.role_override.tools } : {}),
+              ...(sn.role_override.max_tokens !== undefined ? { max_tokens: sn.role_override.max_tokens } : {}),
+              ...(sn.role_override.max_steps !== undefined ? { max_steps: sn.role_override.max_steps } : {}),
+              ...(sn.role_override.required_fields !== undefined
+                ? { context_contract: { output_contract: { required_fields: sn.role_override.required_fields } } }
+                : {}),
+            } : undefined),
+          }
+        : {}),
     });
     return { id: sn.id, type: "lc", position: { x: sn.position?.x ?? 120, y: sn.position?.y ?? 120 }, data } as RFNode;
   });
