@@ -71,8 +71,11 @@ function shapeStyle(d: LCNodeData): React.CSSProperties {
   return {
     clipPath: clip,
     borderRadius: d.shape === "circle" ? "9999px" : d.shape === "card" ? "14px" : "8px",
-    border: d.shape === "rectangle" || d.shape === "card" || d.shape === "empty" ? `${Math.max(1, (s.strokeWidth ?? 2) / 2)}px solid ${s.strokeColor ?? c}4d` : "none",
-    boxShadow: `0 0 0 1px ${c}33, 0 10px 30px -12px ${c}40, inset 3px 0 0 0 ${c}`,
+    // B2: strokeWidth 0 means "no hard outline" — the soft tinted glow below carries the edge.
+    border: (s.strokeWidth ?? 2) > 0 && (d.shape === "rectangle" || d.shape === "card" || d.shape === "empty")
+      ? `${Math.max(1, (s.strokeWidth ?? 2) / 2)}px solid ${s.strokeColor ?? c}4d`
+      : "none",
+    boxShadow: `0 10px 30px -12px ${c}40, inset 3px 0 0 0 ${c}`,
     opacity: (s.opacity ?? 100) / 100,
   };
 }
@@ -107,7 +110,16 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const shell = (inner: React.ReactNode, w?: string) => (
     <div
       className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""}`}
-      style={breathe ? breatheDur : undefined}
+      style={{
+        ...(breathe ? breatheDur : undefined),
+        // B3: sketch-converted nodes carry explicit width/height from their drawn bounding box
+        ...((typeof data.width === "number" && data.width > 0) || (typeof data.height === "number" && data.height > 0)
+          ? {
+              width: typeof data.width === "number" && data.width > 0 ? `${data.width}px` : undefined,
+              height: typeof data.height === "number" && data.height > 0 ? `${data.height}px` : undefined,
+            }
+          : {}),
+      }}
     >
       {/* Ghost Cursor */}
       {(running || typing) && (

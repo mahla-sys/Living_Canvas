@@ -45,7 +45,7 @@ describe("resolveModelRoute — the provider comes from the model name, not from
   it("with no model anywhere it still produces a callable route rather than an empty request", () => {
     const r = resolveModelRoute("", "");
     expect(r.model).toBe(DEFAULT_MODEL);
-    /* DEFAULT_MODEL is "mistral-small-latest" (ADR-047, 2026-09-25): the shipped default must be a
+    /* DEFAULT_MODEL is "ministral-3b-latest" (ADR-047, 2026-09-25): the shipped default must be a
        provider we can actually answer with, so the fallback follows the name, not a legacy constant. */
     expect(r.provider).toBe("mistral");
   });
@@ -68,7 +68,7 @@ describe("resolveModelRoute — the provider comes from the model name, not from
   });
 
   it("a mistral model name routes to the mistral endpoint", () => {
-    const r = resolveModelRoute("mistral-small-latest", "deepseek-chat");
+    const r = resolveModelRoute("ministral-3b-latest", "deepseek-chat");
     expect(r.provider).toBe("mistral");
     expect(r.endpoint).toContain("api.mistral.ai");
   });
@@ -92,7 +92,7 @@ describe("every model the UI offers is one the app can actually call", () => {
   it("the shipped list is exactly the providers that exist — a removed model stays removed", () => {
     /* `glm-4-flash` was in this list while the only endpoint was DeepSeek, so choosing it produced a 400
        and a silent fall back to the simulator. It comes back with a Zhipu route, not with a placeholder. */
-    expect(MODELS).toEqual([DEFAULT_MODEL, "gemini-2.5-flash", "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"]);
+    expect(MODELS).toEqual([DEFAULT_MODEL, "gemini-2.5-flash", "ministral-3b-latest", "mistral-large-latest", "ollama:qwen2.5"]);
   });
 });
 

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "../store";
-import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT, NODE_COLORS, makeAgentConfig } from "../state";
-import type { RFNode } from "../state";
+import { PALETTE, ROLES, roleById, CANVAS_ID, ROOT, NODE_COLORS, makeAgentConfig, PIPELINE_CARDS } from "../state";
+import type { RFNode, PipelineCardMeta } from "../state";
 import { storage, type NodeType, type ShapeKind, type ViewMode, type EdgeType, fmtClock, EMPTY_ARR, type ChatMsg } from "../lib/core";
 import {
   IBrain, IBox, IFile, IFolder, IChevD, IChevR, ITrash, IPlay, IChat, ILock,
@@ -52,24 +52,6 @@ function ContractGroup({ title, color, paths, nodeId }: { title: string; color: 
 
 function Palette() {
   const actions = useStore((s) => s.actions);
-  const templates = useStore((s) => s.templates);
-  const [tplSearch, setTplSearch] = useState("");
-  const [saveName, setSaveName] = useState("");
-  const [savingOpen, setSavingOpen] = useState(false);
-
-  const filteredTemplates = useMemo(() => {
-    const q = tplSearch.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter((t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q));
-  }, [templates, tplSearch]);
-
-  const handleSave = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!saveName.trim()) return;
-    actions.saveTemplate(saveName.trim());
-    setSaveName("");
-    setSavingOpen(false);
-  };
 
   return (
     <div className="p-3 pb-24 space-y-4">
@@ -104,99 +86,179 @@ function Palette() {
         </div>
       </div>
 
-      {/* AI Pipeline Library Section */}
+      {/* Pipeline Library — the curated shelf (ribbon tab "Library"). Built-ins come from
+          PIPELINE_CARDS; anything saved to library/templates/ joins as a "Saved" row. */}
+      <PipelineLibrary />
+
+      {/* Roles shelf — the same library material the inspector's role picker reads from */}
       <div className="pt-3 border-t border-border-subtle">
-        <div className="flex items-center justify-between px-1 mb-2">
-          <p className="text-[10.5px] font-bold uppercase tracking-wider text-text-tertiary">Pipeline Library</p>
-          <button
-            onClick={() => setSavingOpen(!savingOpen)}
-            title="Save current canvas as reusable template"
-            className="text-[10px] font-medium text-lc-accent hover:underline cursor-pointer flex items-center gap-1"
-          >
-            <ISpark size={10} /> {savingOpen ? "Cancel" : "+ Save Canvas"}
-          </button>
-        </div>
-
-        {savingOpen && (
-          <form onSubmit={handleSave} className="mb-3 p-2.5 rounded-lg bg-surface-raised border border-border-subtle anim-fade space-y-2">
-            <input
-              type="text"
-              placeholder="Template name (e.g. My Custom Pipeline)"
-              value={saveName}
-              onChange={(e) => setSaveName(e.target.value)}
-              className="w-full px-2.5 py-1 text-[11px] rounded bg-surface-base border border-border-default text-text-primary placeholder:text-text-quaternary focus:outline-none focus:border-lc-accent"
-              autoFocus
-            />
-            <div className="flex justify-end gap-1.5">
-              <button
-                type="button"
-                onClick={() => setSavingOpen(false)}
-                className="px-2 py-0.5 text-[10px] rounded text-text-tertiary hover:text-text-secondary cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={!saveName.trim()}
-                className="px-2.5 py-0.5 text-[10px] font-semibold rounded bg-lc-accent text-void disabled:opacity-50 cursor-pointer"
-              >
-                Save
-              </button>
+        <p className="text-[10.5px] font-bold uppercase tracking-wider text-text-tertiary px-1 mb-2">Roles</p>
+        <div className="space-y-1">
+          {ROLES.map((r) => (
+            <div key={r.id} className="flex items-center gap-2 px-2 py-1 rounded-md hover:bg-surface-raised transition-colors group">
+              <span className="w-1 h-4 rounded-full shrink-0 bg-lc-accent/50 group-hover:bg-lc-accent transition-colors" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[10.5px] font-semibold text-text-primary truncate">{r.name}</p>
+                <p className="text-[8.5px] font-mono text-text-tertiary truncate">{r.id}</p>
+              </div>
             </div>
-          </form>
-        )}
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-        {templates.length > 2 && (
+/* ================= pipeline library (left panel, ADR-039 shelf) =================
+   The one place a pipeline is *registered*: built-in cards live in `PIPELINE_CARDS` (state.ts), and every
+   template saved with "Save Canvas" lands in `library/templates/<id>/` and appears here under "Saved".
+   Obsidian-style chrome: hairline separators instead of boxed cards, accent tint only on hover. */
+function PipelineLibrary() {
+  const actions = useStore((s) => s.actions);
+  const templates = useStore((s) => s.templates);
+  const [q, setQ] = useState("");
+  const [savingOpen, setSavingOpen] = useState(false);
+  const [saveName, setSaveName] = useState("");
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!saveName.trim()) return;
+    actions.saveTemplate(saveName.trim());
+    setSaveName("");
+    setSavingOpen(false);
+  };
+
+  const query = q.trim().toLowerCase();
+  const builtins = PIPELINE_CARDS.filter(
+    (c) => !query || c.name.toLowerCase().includes(query) || c.description.toLowerCase().includes(query) || c.tagline.includes(q.trim()),
+  );
+  const saved = templates.filter(
+    (t) => !t.builtin && (!query || t.name.toLowerCase().includes(query) || t.description.toLowerCase().includes(query)),
+  );
+
+  return (
+    <div className="pt-3 border-t border-border-subtle">
+      <div className="flex items-center justify-between px-1 mb-2">
+        <p className="text-[10.5px] font-bold uppercase tracking-wider text-text-tertiary">Pipeline Library</p>
+        <button
+          onClick={() => setSavingOpen(!savingOpen)}
+          title="Save current canvas as reusable pipeline"
+          className="text-[10px] font-medium text-lc-accent hover:underline cursor-pointer flex items-center gap-1"
+        >
+          <ISpark size={10} /> {savingOpen ? "Cancel" : "+ Save Canvas"}
+        </button>
+      </div>
+
+      {savingOpen && (
+        <form onSubmit={handleSave} className="mb-3 p-2.5 rounded-lg bg-surface-raised border border-border-subtle anim-fade space-y-2">
           <input
             type="text"
-            placeholder="Search pipelines…"
-            value={tplSearch}
-            onChange={(e) => setTplSearch(e.target.value)}
-            className="w-full mb-2 px-2.5 py-1 text-[10.5px] rounded-md bg-surface-base border border-border-subtle text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-lc-accent/40"
+            placeholder="Pipeline name (e.g. My Research Team)"
+            value={saveName}
+            onChange={(e) => setSaveName(e.target.value)}
+            className="w-full px-2.5 py-1 text-[11px] rounded bg-surface-base border border-border-default text-text-primary placeholder:text-text-quaternary focus:outline-none focus:border-lc-accent"
+            autoFocus
           />
-        )}
+          <div className="flex justify-end gap-1.5">
+            <button type="button" onClick={() => setSavingOpen(false)} className="px-2 py-0.5 text-[10px] rounded text-text-tertiary hover:text-text-secondary cursor-pointer">
+              Cancel
+            </button>
+            <button type="submit" disabled={!saveName.trim()} className="px-2.5 py-0.5 text-[10px] font-semibold rounded bg-lc-accent text-void disabled:opacity-50 cursor-pointer">
+              Save
+            </button>
+          </div>
+        </form>
+      )}
 
-        {filteredTemplates.length > 0 ? (
-          <div className="space-y-1.5">
-            {filteredTemplates.map((t) => (
-              <div
-                key={t.id}
-                className="p-2.5 rounded-lg bg-surface-base hover:bg-surface-raised transition-all duration-150 group border border-border-subtle/50 hover:border-lc-accent/30"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11.5px] font-semibold text-text-primary truncate">
-                      {t.name}
-                    </p>
-                    <p className="text-[9.5px] text-text-tertiary line-clamp-2 mt-0.5 leading-snug">
-                      {t.description || "Multi-agent workflow pipeline"}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-[9px] font-mono text-text-tertiary px-1.5 py-0.5 rounded bg-surface-base border border-border-subtle">
-                    {t.nodes} nodes
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center justify-between pt-1.5 border-t border-border-subtle/40">
-                  <span className="text-[9px] text-text-tertiary">
-                    {t.edges} connections
-                  </span>
-                  <button
-                    onClick={() => actions.loadTemplate(t.id)}
-                    className="text-[10px] font-bold px-2 py-0.5 rounded bg-lc-accent/15 border border-lc-accent/40 text-lc-accent hover:bg-lc-accent hover:text-void transition-all cursor-pointer active:scale-95"
-                  >
-                    Load Pipeline
-                  </button>
-                </div>
+      <input
+        type="text"
+        placeholder="Search pipelines…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        className="w-full mb-2 px-2.5 py-1 text-[10.5px] rounded-md bg-surface-base border border-border-subtle text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-lc-accent/40"
+      />
+
+      {builtins.length === 0 && saved.length === 0 ? (
+        <div className="px-3 py-4 rounded-xl border border-dashed border-border-subtle bg-surface-base/40 text-center select-none">
+          <ISpark size={15} className="mx-auto text-text-tertiary mb-1.5" />
+          <p className="text-[11px] font-semibold text-text-secondary">No matching pipelines</p>
+          <p className="text-[9.5px] text-text-tertiary mt-0.5 leading-4">Save your canvas above or clear the search.</p>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {builtins.length > 0 && (
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-text-quaternary px-1 mb-1">Built-in</p>
+              <div className="divide-y divide-border-subtle/60">
+                {builtins.map((c) => (
+                  <PipelineCard key={c.id} card={c} onLoad={() => actions.loadTemplate(c.id)} />
+                ))}
               </div>
-            ))}
-          </div>
-        ) : (
-          <div className="px-3 py-4 rounded-xl border border-dashed border-border-subtle bg-surface-base/40 text-center select-none">
-            <ISpark size={15} className="mx-auto text-text-tertiary mb-1.5" />
-            <p className="text-[11px] font-semibold text-text-secondary">No matching templates</p>
-            <p className="text-[9.5px] text-text-tertiary mt-0.5 leading-4">Save your pipeline above or clear your search.</p>
-          </div>
-        )}
+            </div>
+          )}
+          {saved.length > 0 && (
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-widest text-text-quaternary px-1 mb-1">Saved</p>
+              <div className="divide-y divide-border-subtle/60">
+                {saved.map((t) => (
+                  <div key={t.id} className="group px-1.5 py-2 rounded-lg hover:bg-surface-raised transition-colors duration-150">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[11px] font-semibold text-text-primary truncate">{t.name}</p>
+                        <p className="text-[9px] text-text-tertiary line-clamp-1 mt-0.5">{t.description}</p>
+                      </div>
+                      <span className="shrink-0 text-[8.5px] font-mono text-text-quaternary">{t.nodes}n·{t.edges}e</span>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between">
+                      <span className="text-[8.5px] font-mono text-text-quaternary">library/templates/{t.id}/</span>
+                      <button
+                        onClick={() => actions.loadTemplate(t.id)}
+                        className="text-[9.5px] font-bold px-2 py-0.5 rounded-md bg-lc-accent/10 border border-lc-accent/30 text-lc-accent hover:bg-lc-accent hover:text-void transition-all cursor-pointer active:scale-95 opacity-0 group-hover:opacity-100"
+                      >
+                        Load
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One shelf row: stage ribbon drawn from the pipeline's own role chain, no borders until hovered. */
+function PipelineCard({ card, onLoad }: { card: PipelineCardMeta; onLoad: () => void }) {
+  return (
+    <div className="group px-1.5 py-2.5 rounded-lg hover:bg-surface-raised transition-colors duration-150">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-[11.5px] font-semibold text-text-primary truncate">{card.name}</p>
+        <span className="shrink-0 text-[8.5px] font-mono text-text-quaternary">{card.stages.length} stages</span>
+      </div>
+      <p className="text-[9.5px] text-text-tertiary leading-snug mt-0.5 line-clamp-2">{card.description}</p>
+      <div dir="ltr" className="flex items-center gap-1 mt-2 flex-wrap" aria-hidden="true">
+        {card.stages.map((st, i) => (
+          <span key={st} className="contents">
+            {i > 0 && <span className="w-2.5 h-px bg-border-strong" />}
+            <span
+              className="text-[8.5px] font-mono px-1.5 py-0.5 rounded border"
+              style={{ color: card.hue, borderColor: `${card.hue}30`, background: `${card.hue}0d` }} // lc-data-colour
+            >
+              {st}
+            </span>
+          </span>
+        ))}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-2">
+        <p dir="rtl" className="text-[9px] text-text-quaternary truncate min-w-0 flex-1">{card.tagline}</p>
+        <button
+          onClick={onLoad}
+          className="shrink-0 text-[9.5px] font-bold px-2 py-0.5 rounded-md bg-lc-accent/10 border border-lc-accent/30 text-lc-accent hover:bg-lc-accent hover:text-void transition-all cursor-pointer active:scale-95 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        >
+          Load Pipeline
+        </button>
       </div>
     </div>
   );
@@ -676,6 +738,18 @@ export function LeftRibbon() {
       </button>
 
       <button
+        onClick={() => toggleTab("library")}
+        title="Pipeline Library — every pipeline is registered here"
+        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all cursor-pointer ${
+          leftOpen && tab === "library"
+            ? "bg-lc-accent/15 text-lc-accent border border-lc-accent/40"
+            : "text-text-tertiary hover:text-text-primary hover:bg-surface-hover"
+        }`}
+      >
+        <ILayers size={16} />
+      </button>
+
+      <button
         onClick={() => actions.setPortOpen(true)}
         title="Memory Vault & Storage Mode"
         className="w-8 h-8 rounded-lg flex items-center justify-center text-text-tertiary hover:text-text-primary hover:bg-surface-hover transition-all cursor-pointer"
@@ -1026,7 +1100,7 @@ function NodeInspector({ node }: { node: RFNode }) {
               </Field>
               <Field label="Model">
                 <select value={agent.model} onChange={(e) => actions.updateAgentField(node.id, { model: e.target.value })} className={selectCls}>
-                  {["deepseek-chat", "glm-4-flash", "ollama:qwen2.5"].map((m) => <option key={m} value={m}>{m}</option>)}
+                  {["ministral-3b-latest", "mistral-large-latest", "gemini-2.5-flash", "ollama:llama3.2"].map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </Field>
             </div>
@@ -1244,7 +1318,7 @@ function CanvasInspector() {
         </div>
         <Field label="Default model">
           <select value={canvas.default_model} onChange={(e) => actions.updateCanvas({ default_model: e.target.value })} className={selectCls}>
-            {["deepseek-chat", "glm-4-flash", "ollama:qwen2.5"].map((m) => <option key={m} value={m}>{m}</option>)}
+            {["ministral-3b-latest", "mistral-large-latest", "gemini-2.5-flash", "ollama:llama3.2"].map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </Field>
         <Field label="Tags">
