@@ -3,7 +3,7 @@
    ============================================================ */
 import type { Node, Edge } from "@xyflow/react";
 import {
-  DEFAULT_THEME, DEFAULT_MODEL, isThemeId, readSettingsLocal,
+  DEFAULT_THEME, DEFAULT_MODEL, isThemeId, readSettingsLocal, envProviderKey,
   PANEL_DEFAULT_LEFT, PANEL_DEFAULT_RIGHT
 } from "./lib/core";
 import type {
@@ -70,6 +70,9 @@ export interface TemplateSpecNode {
   viewMode?: ViewMode;
   content?: string | null;
   role?: string | null;
+  /* ADR-048: a template may carry its own role contract per node (prompt/tools/fields), so a pipeline
+     can be tuned for one provider without touching the global ROLES table. */
+  role_override?: TemplateRoleOverride;
 }
 export interface TemplateSpecEdge {
   id: string;
@@ -86,6 +89,19 @@ export interface TemplateSpec {
   version: string;
   nodes: TemplateSpecNode[];
   edges: TemplateSpecEdge[];
+}
+
+/** A per-node role override carried by a template node (ADR-048). */
+export interface TemplateRoleOverride {
+  system_prompt?: string;
+  tools?: string[];
+  required_fields?: string[];
+  max_tokens?: number;
+  max_steps?: number;
+  /* ADR-046/049: a template can mark its agent as needing a human checkpoint after it answers,
+     or carry the question a `human-gate` node will put to the person running the pipeline. */
+  require_approval?: boolean;
+  gate_question?: string;
 }
 export interface TemplateInfo {
   id: string;
@@ -194,6 +210,95 @@ export const BUILTIN_TEMPLATES: TemplateSpec[] = [
       { id: "edge-003", source: "node-review", target: "node-output", edgeType: "flow", label: "final copy batch", line_style: "solid" },
     ],
   },
+  /* ADR-048 — the first pipeline built *for the app's own AI partner*: a four-role team that runs live
+     on Mistral out of the box. Each stage carries a per-node `role_override` (prompt tuned for the free
+     tier, small max_tokens) so tuning this pipeline never touches the global ROLES table. */
+  {
+    template_id: "ai-partner-team",
+    name: "AI Partner Team (live)",
+    description: "Four-agent analysis team — brief, research, critique, synthesize — tuned to answer live on the free Mistral tier.",
+    version: "1.0",
+    nodes: [
+      { id: "node-brief", nodeType: "agent", title: "1. Task Brief", position: { x: 80, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "planner", content: "Restates the raw request as one crisp task brief with done-criteria.", role_override: { max_tokens: 500 } },
+      { id: "node-research", nodeType: "agent", title: "2. Context Research", position: { x: 420, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "researcher", content: "Pulls the 3–5 considerations and options that shape the answer.", role_override: { max_tokens: 500 } },
+      { id: "node-critique", nodeType: "agent", title: "3. Critique", position: { x: 760, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "critic", content: "Attacks the draft constructively and returns a verdict.", role_override: { max_tokens: 500 } },
+      { id: "node-answer", nodeType: "agent", title: "4. Final Answer", position: { x: 1100, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "synthesizer", content: "Merges every upstream output into one actionable answer.", role_override: { max_tokens: 600 } },
+      { id: "node-deliverable", nodeType: "output-box", title: "Actionable Answer", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "The team's final answer: action list + caveat, ready to run." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-brief", target: "node-research", edgeType: "flow", label: "task brief", line_style: "solid" },
+      { id: "edge-002", source: "node-research", target: "node-critique", edgeType: "flow", label: "context notes", line_style: "solid" },
+      { id: "edge-003", source: "node-critique", target: "node-answer", edgeType: "flow", label: "verdict", line_style: "solid" },
+      { id: "edge-004", source: "node-answer", target: "node-deliverable", edgeType: "flow", label: "final answer", line_style: "solid" },
+    ],
+  },
+];
+
+/**
+ * The Pipeline Library cards (docs/ui-spec.md §3.1). One entry per built-in template, derived from
+ * `BUILTIN_TEMPLATES` — the file seed stays the source of truth, this is only what the card shows:
+ * a stage ribbon (the role chain), an accent hue picked from the first agent node's data colour, and
+ * a one-line Persian tagline for the footer. A new built-in template gets its card by adding `meta`
+ * here; `library.test.ts` fails if the two lists ever drift apart.
+ */
+export interface PipelineCardMeta {
+  id: string;
+  name: string;
+  description: string;
+  tagline: string;
+  stages: string[];
+  hue: string; // lc-data-colour — mirrors the seed's first agent-node colour, which is written into files
+}
+
+export const PIPELINE_CARDS: PipelineCardMeta[] = [
+  {
+    id: "project-finder",
+    name: "Freelance Project & Proposal",
+    description: "Scout projects, filter by risk, draft the proposal, close with milestones.",
+    tagline: "از شکار پروژه تا بسته پیشنهاد و قرارداد",
+    stages: ["Scout", "Filter", "Proposal", "Close"],
+    hue: "#e8b04b", // lc-data-colour
+  },
+  {
+    id: "decision-engine",
+    name: "Problem & Decision Engine",
+    description: "Frame the problem, score the risks, design the fix, ask for approval.",
+    tagline: "تحلیل چندمرحله‌ای: مسئله، ریسک، راه‌حل، تصمیم",
+    stages: ["Understand", "Risk", "Solution", "Decide"],
+    hue: "#6fb3c7", // lc-data-colour
+  },
+  {
+    id: "code-builder",
+    name: "Code Builder",
+    description: "Spec the feature, build it, review it, ship it.",
+    tagline: "از اسپک تا بیلد، ریویو و تحویل",
+    stages: ["Spec", "Build", "Review", "Ship"],
+    hue: "#8fbf7f", // lc-data-colour
+  },
+  {
+    id: "market-research",
+    name: "Market Research",
+    description: "Scan the market, size the niche, read the competitors, write the brief.",
+    tagline: "بازارکاوی: اسکن، اندازه‌گیری، رقبا، بریف",
+    stages: ["Scan", "Size", "Compete", "Brief"],
+    hue: "#b98bc2", // lc-data-colour
+  },
+  {
+    id: "content-engine",
+    name: "Content Engine",
+    description: "Research hooks, write the copy, polish for SEO, publish the batch.",
+    tagline: "قالب تولید محتوا: هوک، کپی، سئو، انتشار",
+    stages: ["Research", "Copy", "Polish", "Publish"],
+    hue: "#e8b04b", // lc-data-colour
+  },
+  {
+    id: "ai-partner-team",
+    name: "AI Partner Team (live)",
+    description: "Brief the task, research context, critique the draft, ship one actionable answer.",
+    tagline: "تیم چهار نفرهٔ تحلیل: بریف، پژوهش، نقد، پاسخ نهایی — زنده روی Mistral",
+    stages: ["Brief", "Research", "Critique", "Answer"],
+    hue: "#6fb3c7", // lc-data-colour
+  },
 ];
 
 export interface AppState {
@@ -229,7 +334,7 @@ export interface AppState {
     saveState: "saved" | "saving" | "failed";
   typing: Record<string, boolean>;
   ui: {
-    leftTab: "palette" | "files";
+    leftTab: "palette" | "library" | "files";
     /**
      * Which inspector tab is showing (ADR-015). Session-only: a tab that survived a reload would reopen
      * somebody else's moment of reading, and it is a view of the node rather than a fact about it.
@@ -257,6 +362,8 @@ export interface AppState {
 export const NODE_COLORS: Record<NodeType, string> = {
   agent: "#e8b04b",
   note: "#6fb3c7",
+  // ADR-049: a human gate is the run's pause point — it reads as a stop sign, not an agent.
+  "human-gate": "#d9534f",
   "output-box": "#8fbf7f",
   folder: "#d9c9a3",
   "pipeline-step": "#b98bc2",
@@ -268,6 +375,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
 export const NODE_TYPE_LABEL: Record<NodeType, string> = {
   agent: "Agent",
   note: "Note",
+  "human-gate": "Human gate",
   "output-box": "Output box",
   folder: "Folder",
   "pipeline-step": "Pipeline step",
@@ -279,7 +387,7 @@ export const NODE_TYPE_LABEL: Record<NodeType, string> = {
 /* Every entry must have an endpoint behind it (`resolveModelRoute`, ADR-008). `glm-4-flash` was removed
    rather than left to 400 and degrade to the simulator: a dropdown that offers a model the app cannot
    reach is the same lie as a validator nobody runs. Adding it back is one row in that table. */
-export const MODELS = [DEFAULT_MODEL, "gemini-2.5-flash", "mistral-small-latest", "mistral-large-latest", "ollama:qwen2.5"];
+export const MODELS = [DEFAULT_MODEL, "gemini-2.5-flash", "ministral-3b-latest", "mistral-large-latest", "ollama:qwen2.5"];
 
 /* ---------------- roles (§3.8) ---------------- */
 
@@ -300,7 +408,7 @@ export const ROLES: RoleDef[] = [
     description: "Talks with the user to clarify the problem and extract a precise statement",
     system_prompt:
       "You are the \"Understand the problem\" agent. Read the canvas summary and your own memory, then make the core problem explicit. List the ambiguous questions first, then write the problem statement as one precise paragraph. Your output must contain summary, problem_statement and questions_asked.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "chat_with_user", "write_output"],
     required_fields: ["summary", "problem_statement", "questions_asked"],
   },
@@ -310,7 +418,7 @@ export const ROLES: RoleDef[] = [
     description: "Finds the risks of the proposed solution and scores them",
     system_prompt:
       "You are the \"Risk analysis\" agent. Your input is the problem statement from the previous node. List the main risks, score each from 1 to 10, and recommend one overall decision (reject / revise / approve). Output contains summary, risks, decision and a single numeric risk_score (1-10) for the whole proposal.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "risks", "decision", "risk_score"],
   },
@@ -320,7 +428,7 @@ export const ROLES: RoleDef[] = [
     description: "Designs an executable solution with clear, measurable steps",
     system_prompt:
       "You are the \"Design the solution\" agent. Given the problem statement and the risk report, design an executable solution in three steps. Each step needs an explicit output and a success criterion. Output contains summary, solution and next_actions.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "solution", "next_actions"],
   },
@@ -330,7 +438,7 @@ export const ROLES: RoleDef[] = [
     description: "Collects every output and proposes the final decision, pending human approval",
     system_prompt:
       "You are the \"Wrap-up & decision\" agent. Read every allowed output, mark the conflicts, and write one final decision with its reasons. The final decision is executed only after human approval. Output contains summary, decision and approval_request.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "decision", "approval_request"],
   },
@@ -340,7 +448,7 @@ export const ROLES: RoleDef[] = [
     description: "An AI Copilot with full access to modify the canvas structure and UI.",
     system_prompt:
       "You are the Manager agent for Living Canvas. You have full access to UI tools (get_ui_state, capture_canvas_snapshot) and graph manipulation tools (create_node, create_edge, etc.). Your job is to listen to the user and dynamically build, route, or restructure the pipeline they need. You act as an executive orchestrator.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["get_ui_state", "capture_canvas_snapshot", "create_node", "update_node", "delete_node", "create_edge", "update_edge", "delete_edge", "read_memory", "write_memory", "write_output", "get_canvas_overview", "chat_with_user"],
     required_fields: ["summary"],
   },
@@ -350,7 +458,7 @@ export const ROLES: RoleDef[] = [
     description: "An agent that helps the Manager write code or create specific node contents.",
     system_prompt:
       "You are a System Builder agent. You write code, draft node contents, and provide technical outputs based on the Manager's plan.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "technical_plan"],
   },
@@ -360,7 +468,7 @@ export const ROLES: RoleDef[] = [
     description: "Scans freelance project boards and extracts project requirements, budget, and scope",
     system_prompt:
       "You are the \"Project & Client Scout\" agent. Search, scan, and parse freelance opportunities (Upwork, Contra, Freelancer, RemoteOK). Extract client background, budget, required tech stack, deliverables, timeline, and client expectations. Output contains summary, client_brief, and project_requirements.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "client_brief", "project_requirements"],
   },
@@ -370,7 +478,7 @@ export const ROLES: RoleDef[] = [
     description: "Evaluates project profitability, client credibility, technical fit, and risk score",
     system_prompt:
       "You are the \"Feasibility & Risk Filter\" agent. Evaluate the scouted freelance project. Assess technical difficulty, client payment history/reputation, budget feasibility, and profit margin. Output contains summary, risk_score (1-10), technical_fit, and decision (BID or PASS).",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "risk_score", "technical_fit", "decision"],
   },
@@ -380,7 +488,7 @@ export const ROLES: RoleDef[] = [
     description: "Crafts persuasive, personalized proposals tailored to the client's problem with high conversion rate",
     system_prompt:
       "You are the \"Proposal & Pitch Architect\" agent. Write a compelling, bespoke freelance proposal. Start with an attention-grabbing hook understanding the client's exact problem, follow with the precise solution and tech stack, attach relevant portfolio proof, and present transparent pricing and delivery milestones. Output contains summary, proposal_letter, and portfolio_highlights.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "proposal_letter", "portfolio_highlights"],
   },
@@ -390,9 +498,52 @@ export const ROLES: RoleDef[] = [
     description: "Formulates project milestones, delivery roadmap, kick-off questions, and closing terms",
     system_prompt:
       "You are the \"Milestone & Deal Closer\" agent. Create a structured project delivery roadmap with milestones, clear acceptance criteria, onboarding checklist, and closing call-to-action to finalize the contract. Output contains summary, delivery_roadmap, and onboarding_checklist.",
-    model: "deepseek-chat",
+    model: "ministral-3b-latest",
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "delivery_roadmap", "onboarding_checklist"],
+  },
+  /* ADR-048 — the "AI partner" roles. These exist so the canvas answers *for real* out of the box:
+     short prompts, small max_tokens, and outputs that stay inside one field each, because the free
+     Mistral tier rate-limits long generations. They are the building blocks of `ai-partner-team`. */
+  {
+    id: "planner",
+    name: "Task Planner",
+    description: "Turns a raw request into a precise task brief for the team",
+    system_prompt:
+      "You are the Task Planner of an AI partner team inside a visual canvas app. The user gives you a raw request. Restate it as ONE crisp task brief (max 60 words): goal, constraints, done-criteria. Be concrete; never invent facts the user did not give. Output fields: summary, task_brief.",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "task_brief"],
+  },
+  {
+    id: "researcher",
+    name: "Context Researcher",
+    description: "Pulls relevant knowledge and options from the canvas memory and upstream output",
+    system_prompt:
+      "You are the Context Researcher. Given the task brief, list the 3 to 5 most relevant considerations, known facts, or options that shape the answer (max 25 words each). No filler, no repetition of the brief. Output fields: summary, context_notes.",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "context_notes"],
+  },
+  {
+    id: "critic",
+    name: "Devil's Advocate",
+    description: "Challenges the draft plan: finds flaws, risks and missing pieces",
+    system_prompt:
+      "You are the Devil's Advocate. Read the upstream answer and attack it constructively: name up to 3 weaknesses or missing pieces (max 25 words each), then say whether the plan still stands. Output fields: summary, objections, verdict (one of: sound / needs-revision / reject).",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "objections", "verdict"],
+  },
+  {
+    id: "synthesizer",
+    name: "Synthesis Writer",
+    description: "Merges every upstream output into one final answer ready to act on",
+    system_prompt:
+      "You are the Synthesis Writer. Merge the task brief, the research notes and the critique into ONE final answer the human can act on directly: a numbered action list (max 5 steps, each with a success check) plus the single most important caveat. Keep it under 150 words. Output fields: summary, final_answer.",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "final_answer"],
   },
 ];
 
@@ -539,6 +690,58 @@ export const ROLE_SCHEMAS: Record<string, unknown> = {
       onboarding_checklist: { type: "string", minLength: 30, description: "kickoff questions, access requirements and CTA" },
     },
   },
+  /* ADR-048 — schemas for the AI-partner roles. Deliberately lenient (presence + short minimums):
+     the free Mistral tier truncates long generations, and a validator stricter than the model's
+     budget turns every live run into a contract failure that only the simulator hides. */
+  planner: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "planner output",
+    description: "the raw request, restated as one crisp task brief",
+    type: "object",
+    required: ["summary", "task_brief"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: what the user asked for" },
+      task_brief: { type: "string", minLength: 20, description: "goal, constraints, done-criteria in ≤60 words" },
+    },
+  },
+  researcher: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "researcher output",
+    description: "the considerations that shape the answer",
+    type: "object",
+    required: ["summary", "context_notes"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: what was looked at" },
+      context_notes: { type: "string", minLength: 20, description: "dash list of 3–5 relevant facts/options" },
+    },
+  },
+  critic: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "critic output",
+    description: "the attack on the draft, and whether it still stands",
+    type: "object",
+    required: ["summary", "objections", "verdict"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: how the draft was reviewed" },
+      objections: { type: "string", minLength: 15, description: "up to 3 weaknesses or missing pieces" },
+      verdict: { type: "string", minLength: 4, description: "sound / needs-revision / reject" },
+    },
+  },
+  synthesizer: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "synthesizer output",
+    description: "one final answer the human can act on directly",
+    type: "object",
+    required: ["summary", "final_answer"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: what was merged" },
+      final_answer: { type: "string", minLength: 30, description: "numbered action list plus the key caveat" },
+    },
+  },
 };
 
 /** The canvas-relative path a role's schema lives at (§4.9). */
@@ -631,11 +834,15 @@ export function makeNodeData(
   return {
     nodeType,
     title,
-    shape: nodeType === "agent" ? "card" : nodeType === "output-box" ? "hexagon" : "rectangle",
+    shape: nodeType === "agent" ? "card" : nodeType === "output-box" ? "hexagon" : nodeType === "human-gate" ? "diamond" : "rectangle",
     color: NODE_COLORS[nodeType],
-    animation: { type: nodeType === "agent" ? "breathe" : "none", speed: 1 },
+    // B1 (work-order 2026-09-25): new nodes are calm by default — no breathing motion.
+    // The user can still switch a node to "breathe" from the inspector; only the default changed.
+    animation: { type: "none", speed: 1 },
     viewMode: nodeType === "note" ? "markdown" : "card",
-    style: { strokeColor: "#0b1312", strokeWidth: 2, fillStyle: "solid", opacity: 100 },
+    // B2: border derives from the node's own colour at low alpha instead of a hard dark stroke,
+    // so shapes read as soft fills (Excalidraw-like) rather than white-outlined boxes.
+    style: { strokeColor: NODE_COLORS[nodeType], strokeWidth: 0, fillStyle: "solid", opacity: 100 },
     lock: { status: "free", locked_by: null, locked_at: null },
     content: "",
     agent: nodeType === "agent" ? makeAgentConfig("pending", "understander") : null,
@@ -674,16 +881,22 @@ export const emptyExecution = (): ExecutionState => ({
   errors: {},
 });
 
-const envGemini = typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim() : "";
+const envGemini = envProviderKey("gemini");
+const envMistral = envProviderKey("mistral");
 
 /**
  * No credential ever lives in the repository (ADR-047). The default is the internal simulator; a real
  * provider is a reader choice — the key is typed into Settings (reader-scoped, never a canvas file) or
- * arrives through the build-time `VITE_GEMINI_API_KEY`. An earlier build hardcoded a Mistral key here and
- * shipped it in git history; that key was removed and rotated on 2026-09-24.
+ * arrives through the build-time `VITE_GEMINI_API_KEY` / `VITE_MISTRAL_API_KEY`. An earlier build
+ * hardcoded a Mistral key here and shipped it in git history; that key was removed and rotated on
+ * 2026-09-24. When a Mistral key is present the app boots straight into the live provider so the AI
+ * answers from inside the app without any manual Settings step (roadmap phase A).
  */
 const SETTINGS_BASE: Settings = envGemini ? {
   provider: "gemini", apiKey: envGemini, model: "gemini-2.5-flash", owner: "mahla", simDelay: 620,
+  backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
+} : envMistral ? {
+  provider: "mistral", apiKey: envMistral, model: "ministral-3b-latest", owner: "mahla", simDelay: 620,
   backendUrl: "", workspaceRoot: null, theme: DEFAULT_THEME, snapToGrid: false,
 } : {
   provider: "sim", apiKey: "", model: DEFAULT_MODEL, owner: "mahla", simDelay: 620,
