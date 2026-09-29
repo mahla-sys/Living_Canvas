@@ -1624,7 +1624,7 @@ export function evalCondition(raw: string, ctx: Record<string, unknown>): CondRe
 export function computeOrder(s: AppState, startId: string, scope?: readonly string[]): { order: string[]; cyclic: string[] } {
   const inScope = scope ? new Set(scope) : null;
   const runnable = s.nodes
-    .filter((n) => n.data.nodeType === "agent" || n.data.nodeType === "output-box")
+    .filter((n) => n.data.nodeType === "agent" || n.data.nodeType === "output-box" || n.data.nodeType === "human-gate")
     .filter((n) => !inScope || inScope.has(n.id))
     .slice()
     .sort((a, b) => (a.data.created_at || "").localeCompare(b.data.created_at || "") || a.id.localeCompare(b.id));
@@ -1978,6 +1978,23 @@ async function awaitToolApproval(api: EngineApi, nodeId: string, tool: string, t
   return new Promise<boolean>((resolve) => { pendingToolApproval = { resolve }; });
 }
 
+/* ADR-049 — the human as a pipeline stage. A `human-gate` node is queued like an agent but runs no
+   model: it pauses the run with the question written on the card. Approve (resumeRun) lets the queue
+   drain onward; Reject stops the whole run (rejectRun). The gate's own answer is not produced by a
+   model — it is the human's decision, recorded in the log and the ledger. */
+async function runHumanGate(api: EngineApi, nodeId: string) {
+  const node = getNode(api.get(), nodeId);
+  if (!node) return;
+  const question = (typeof node.data.content === "string" && node.data.content.trim())
+    ? node.data.content.trim()
+    : `Continue the run past “${node.data.title}”?`;
+  await appendLog(api, nodeId, `== gate opened ==\nquestion: ${question}\nwaiting for the human…`);
+  await ledgerRow(api, { node: nodeId, tool: "human_gate", status: "approval", detail: question });
+  api.set((st) => ({ execution: { ...st.execution, status: "waiting_approval", current_node_id: nodeId } }));
+  emit(api, "run.paused", `human gate “${node.data.title}” is waiting for a decision`);
+  toast(api, "warn", `The pipeline is waiting for you at “${node.data.title}”.`);
+}
+
 async function processQueue(api: EngineApi) {
   while (true) {
     const ex = api.get().execution;
@@ -2018,6 +2035,9 @@ async function processQueue(api: EngineApi) {
     }
     if (node.data.nodeType === "agent") await executeNode(api, nextId);
     else if (node.data.nodeType === "output-box") await collectToBox(api, nextId);
+    /* ADR-049: the gate answers by pausing — it is done only once the human has decided, so it is
+       NOT marked completed here; resumeRun marks it and processQueue re-enters to drain onward. */
+    else if (node.data.nodeType === "human-gate") await runHumanGate(api, nextId);
     else api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nextId] } }));
     touch(api);
     /* Step mode stops here, at the node boundary, with that node's own output already written — which is the

@@ -98,6 +98,10 @@ export interface TemplateRoleOverride {
   required_fields?: string[];
   max_tokens?: number;
   max_steps?: number;
+  /* ADR-046/049: a template can mark its agent as needing a human checkpoint after it answers,
+     or carry the question a `human-gate` node will put to the person running the pipeline. */
+  require_approval?: boolean;
+  gate_question?: string;
 }
 export interface TemplateInfo {
   id: string;
@@ -358,6 +362,8 @@ export interface AppState {
 export const NODE_COLORS: Record<NodeType, string> = {
   agent: "#e8b04b",
   note: "#6fb3c7",
+  // ADR-049: a human gate is the run's pause point — it reads as a stop sign, not an agent.
+  "human-gate": "#d9534f",
   "output-box": "#8fbf7f",
   folder: "#d9c9a3",
   "pipeline-step": "#b98bc2",
@@ -369,6 +375,7 @@ export const NODE_COLORS: Record<NodeType, string> = {
 export const NODE_TYPE_LABEL: Record<NodeType, string> = {
   agent: "Agent",
   note: "Note",
+  "human-gate": "Human gate",
   "output-box": "Output box",
   folder: "Folder",
   "pipeline-step": "Pipeline step",
@@ -827,7 +834,7 @@ export function makeNodeData(
   return {
     nodeType,
     title,
-    shape: nodeType === "agent" ? "card" : nodeType === "output-box" ? "hexagon" : "rectangle",
+    shape: nodeType === "agent" ? "card" : nodeType === "output-box" ? "hexagon" : nodeType === "human-gate" ? "diamond" : "rectangle",
     color: NODE_COLORS[nodeType],
     // B1 (work-order 2026-09-25): new nodes are calm by default — no breathing motion.
     // The user can still switch a node to "breathe" from the inspector; only the default changed.

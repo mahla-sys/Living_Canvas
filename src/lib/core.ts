@@ -4,7 +4,7 @@
    ============================================================ */
 
 export type NodeType =
-  | "note" | "agent" | "folder" | "output-box"
+  | "note" | "agent" | "human-gate" | "folder" | "output-box"
   | "pipeline-step" | "file" | "shape" | "drawing";
 
 export type ViewMode = "dot" | "name" | "card" | "markdown";
