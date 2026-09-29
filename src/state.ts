@@ -70,6 +70,9 @@ export interface TemplateSpecNode {
   viewMode?: ViewMode;
   content?: string | null;
   role?: string | null;
+  /* ADR-048: a template may carry its own role contract per node (prompt/tools/fields), so a pipeline
+     can be tuned for one provider without touching the global ROLES table. */
+  role_override?: TemplateRoleOverride;
 }
 export interface TemplateSpecEdge {
   id: string;
@@ -86,6 +89,15 @@ export interface TemplateSpec {
   version: string;
   nodes: TemplateSpecNode[];
   edges: TemplateSpecEdge[];
+}
+
+/** A per-node role override carried by a template node (ADR-048). */
+export interface TemplateRoleOverride {
+  system_prompt?: string;
+  tools?: string[];
+  required_fields?: string[];
+  max_tokens?: number;
+  max_steps?: number;
 }
 export interface TemplateInfo {
   id: string;
@@ -194,6 +206,28 @@ export const BUILTIN_TEMPLATES: TemplateSpec[] = [
       { id: "edge-003", source: "node-review", target: "node-output", edgeType: "flow", label: "final copy batch", line_style: "solid" },
     ],
   },
+  /* ADR-048 — the first pipeline built *for the app's own AI partner*: a four-role team that runs live
+     on Mistral out of the box. Each stage carries a per-node `role_override` (prompt tuned for the free
+     tier, small max_tokens) so tuning this pipeline never touches the global ROLES table. */
+  {
+    template_id: "ai-partner-team",
+    name: "AI Partner Team (live)",
+    description: "Four-agent analysis team — brief, research, critique, synthesize — tuned to answer live on the free Mistral tier.",
+    version: "1.0",
+    nodes: [
+      { id: "node-brief", nodeType: "agent", title: "1. Task Brief", position: { x: 80, y: 180 }, shape: "card", color: "#e8b04b", viewMode: "card", role: "planner", content: "Restates the raw request as one crisp task brief with done-criteria.", role_override: { max_tokens: 500 } },
+      { id: "node-research", nodeType: "agent", title: "2. Context Research", position: { x: 420, y: 180 }, shape: "card", color: "#6fb3c7", viewMode: "card", role: "researcher", content: "Pulls the 3–5 considerations and options that shape the answer.", role_override: { max_tokens: 500 } },
+      { id: "node-critique", nodeType: "agent", title: "3. Critique", position: { x: 760, y: 180 }, shape: "card", color: "#e06a4e", viewMode: "card", role: "critic", content: "Attacks the draft constructively and returns a verdict.", role_override: { max_tokens: 500 } },
+      { id: "node-answer", nodeType: "agent", title: "4. Final Answer", position: { x: 1100, y: 180 }, shape: "card", color: "#b98bc2", viewMode: "card", role: "synthesizer", content: "Merges every upstream output into one actionable answer.", role_override: { max_tokens: 600 } },
+      { id: "node-deliverable", nodeType: "output-box", title: "Actionable Answer", position: { x: 1440, y: 180 }, shape: "hexagon", color: "#8fbf7f", viewMode: "card", content: "The team's final answer: action list + caveat, ready to run." },
+    ],
+    edges: [
+      { id: "edge-001", source: "node-brief", target: "node-research", edgeType: "flow", label: "task brief", line_style: "solid" },
+      { id: "edge-002", source: "node-research", target: "node-critique", edgeType: "flow", label: "context notes", line_style: "solid" },
+      { id: "edge-003", source: "node-critique", target: "node-answer", edgeType: "flow", label: "verdict", line_style: "solid" },
+      { id: "edge-004", source: "node-answer", target: "node-deliverable", edgeType: "flow", label: "final answer", line_style: "solid" },
+    ],
+  },
 ];
 
 /**
@@ -252,6 +286,14 @@ export const PIPELINE_CARDS: PipelineCardMeta[] = [
     tagline: "قالب تولید محتوا: هوک، کپی، سئو، انتشار",
     stages: ["Research", "Copy", "Polish", "Publish"],
     hue: "#e8b04b", // lc-data-colour
+  },
+  {
+    id: "ai-partner-team",
+    name: "AI Partner Team (live)",
+    description: "Brief the task, research context, critique the draft, ship one actionable answer.",
+    tagline: "تیم چهار نفرهٔ تحلیل: بریف، پژوهش، نقد، پاسخ نهایی — زنده روی Mistral",
+    stages: ["Brief", "Research", "Critique", "Answer"],
+    hue: "#6fb3c7", // lc-data-colour
   },
 ];
 
@@ -453,6 +495,49 @@ export const ROLES: RoleDef[] = [
     tools: ["read_memory", "write_memory", "write_output"],
     required_fields: ["summary", "delivery_roadmap", "onboarding_checklist"],
   },
+  /* ADR-048 — the "AI partner" roles. These exist so the canvas answers *for real* out of the box:
+     short prompts, small max_tokens, and outputs that stay inside one field each, because the free
+     Mistral tier rate-limits long generations. They are the building blocks of `ai-partner-team`. */
+  {
+    id: "planner",
+    name: "Task Planner",
+    description: "Turns a raw request into a precise task brief for the team",
+    system_prompt:
+      "You are the Task Planner of an AI partner team inside a visual canvas app. The user gives you a raw request. Restate it as ONE crisp task brief (max 60 words): goal, constraints, done-criteria. Be concrete; never invent facts the user did not give. Output fields: summary, task_brief.",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "task_brief"],
+  },
+  {
+    id: "researcher",
+    name: "Context Researcher",
+    description: "Pulls relevant knowledge and options from the canvas memory and upstream output",
+    system_prompt:
+      "You are the Context Researcher. Given the task brief, list the 3 to 5 most relevant considerations, known facts, or options that shape the answer (max 25 words each). No filler, no repetition of the brief. Output fields: summary, context_notes.",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "context_notes"],
+  },
+  {
+    id: "critic",
+    name: "Devil's Advocate",
+    description: "Challenges the draft plan: finds flaws, risks and missing pieces",
+    system_prompt:
+      "You are the Devil's Advocate. Read the upstream answer and attack it constructively: name up to 3 weaknesses or missing pieces (max 25 words each), then say whether the plan still stands. Output fields: summary, objections, verdict (one of: sound / needs-revision / reject).",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "objections", "verdict"],
+  },
+  {
+    id: "synthesizer",
+    name: "Synthesis Writer",
+    description: "Merges every upstream output into one final answer ready to act on",
+    system_prompt:
+      "You are the Synthesis Writer. Merge the task brief, the research notes and the critique into ONE final answer the human can act on directly: a numbered action list (max 5 steps, each with a success check) plus the single most important caveat. Keep it under 150 words. Output fields: summary, final_answer.",
+    model: "ministral-3b-latest",
+    tools: ["read_memory", "write_memory", "write_output"],
+    required_fields: ["summary", "final_answer"],
+  },
 ];
 
 export const roleById = (id: string) => ROLES.find((r) => r.id === id) ?? ROLES[0];
@@ -596,6 +681,58 @@ export const ROLE_SCHEMAS: Record<string, unknown> = {
       summary: { type: "string", minLength: 30, description: "closing strategy overview" },
       delivery_roadmap: { type: "string", minLength: 50, description: "phased milestone schedule with deliverables" },
       onboarding_checklist: { type: "string", minLength: 30, description: "kickoff questions, access requirements and CTA" },
+    },
+  },
+  /* ADR-048 — schemas for the AI-partner roles. Deliberately lenient (presence + short minimums):
+     the free Mistral tier truncates long generations, and a validator stricter than the model's
+     budget turns every live run into a contract failure that only the simulator hides. */
+  planner: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "planner output",
+    description: "the raw request, restated as one crisp task brief",
+    type: "object",
+    required: ["summary", "task_brief"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: what the user asked for" },
+      task_brief: { type: "string", minLength: 20, description: "goal, constraints, done-criteria in ≤60 words" },
+    },
+  },
+  researcher: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "researcher output",
+    description: "the considerations that shape the answer",
+    type: "object",
+    required: ["summary", "context_notes"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: what was looked at" },
+      context_notes: { type: "string", minLength: 20, description: "dash list of 3–5 relevant facts/options" },
+    },
+  },
+  critic: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "critic output",
+    description: "the attack on the draft, and whether it still stands",
+    type: "object",
+    required: ["summary", "objections", "verdict"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: how the draft was reviewed" },
+      objections: { type: "string", minLength: 15, description: "up to 3 weaknesses or missing pieces" },
+      verdict: { type: "string", minLength: 4, description: "sound / needs-revision / reject" },
+    },
+  },
+  synthesizer: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    title: "synthesizer output",
+    description: "one final answer the human can act on directly",
+    type: "object",
+    required: ["summary", "final_answer"],
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string", minLength: 20, description: "one paragraph: what was merged" },
+      final_answer: { type: "string", minLength: 30, description: "numbered action list plus the key caveat" },
     },
   },
 };
