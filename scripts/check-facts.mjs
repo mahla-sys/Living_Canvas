@@ -35,13 +35,34 @@ const tracked = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "
 
 const srcFiles = tracked.filter((p) => /^src\//.test(p));
 const tsFiles = srcFiles.filter((p) => /\.tsx?$/.test(p));
-const testFiles = tsFiles.filter((p) => /\.test\.tsx?$/.test(p));
-const testDirLines = testFiles.reduce((n, f) => n + countLines(f), 0);
+const allTestFiles = tsFiles.filter((p) => /\.test\.tsx?$/.test(p));
+/* Keep the browser-only viewport suite out of `npm test` facts; it has its own command/config. */
+const testFiles = allTestFiles.filter((p) => p !== "src/lib/__tests__/viewport-playwright.test.ts");
+const testDirLines = allTestFiles.reduce((n, f) => n + countLines(f), 0);
 
-/* A test is a top-level `it(...)` / `test(...)`. Counted statically rather than by running vitest so this
-   gate stays fast enough to run before every commit; the count is verified against a real run below. */
+/* Count registered unit tests without launching Chromium. Ordinary declarations are one per line; the two
+   parameterized suites below are expanded from their source arrays, so generated cases count individually. */
 let tests = 0;
-for (const f of testFiles) tests += (read(f).match(/^\s*(?:it|test)\(/gm) ?? []).length;
+const testCountProblems = [];
+for (const f of testFiles) {
+  const source = read(f);
+  tests += (source.match(/^\s*(?:it|test)\(/gm) ?? []).length;
+  let handledParameterizedSites = 0;
+  if (f === "src/lib/__tests__/design-tokens.test.ts") {
+    const pairs = source.match(/const pairs:[\s\S]*?=\s*\[([\s\S]*?)\n\s*\];/)?.[1] ?? "";
+    tests += (pairs.match(/^\s*\["[^"]+"/gm) ?? []).length;
+    handledParameterizedSites = 1;
+  }
+  if (f === "src/lib/__tests__/templates-sim.test.ts") {
+    const templates = read("src/state.ts").match(/export const BUILTIN_TEMPLATES: TemplateSpec\[\] = \[([\s\S]*?)\n\];/)?.[1] ?? "";
+    tests += (templates.match(/^\s*template_id:/gm) ?? []).length;
+    handledParameterizedSites = 1;
+  }
+  const parameterizedSites = source.match(/^\s*(?:it|test|describe)\.each\(/gm) ?? [];
+  if (parameterizedSites.length !== handledParameterizedSites) {
+    testCountProblems.push(`${f}: found ${parameterizedSites.length} parameterized test/group site(s), but only ${handledParameterizedSites} has an explicit case counter`);
+  }
+}
 
 const components = srcFiles.filter((p) => /^src\/components\//.test(p));
 const componentLines = components.reduce((n, f) => n + countLines(f), 0);
@@ -132,7 +153,7 @@ const CLAIMS = [
 ];
 
 /* ---- apply ---- */
-const problems = [];
+const problems = [...testCountProblems];
 const touched = new Set();
 for (const c of CLAIMS) {
   if (!existsSync(join(ROOT, c.file))) { problems.push(`${c.file}: missing`); continue; }
@@ -174,7 +195,7 @@ if (problems.length) {
   process.exit(1);
 }
 
-/* ---- a count this script invents is worse than no count: cross-check the test number ---- */
+/* ---- keep the unit-test file inventory aligned; runtime execution remains the responsibility of `npm test` ---- */
 console.log(
   `facts: ${srcFiles.length} src files / ${grouped(srcLines)} lines (${grouped(tsLines)} TypeScript), ` +
   `${components.length} components / ${grouped(componentLines)} lines, ${actions} actions, ` +
@@ -182,8 +203,8 @@ console.log(
 );
 if (existsSync(join(ROOT, "src/lib/__tests__"))) {
   const names = readdirSync(join(ROOT, "src/lib/__tests__")).filter((f) => /\.test\.tsx?$/.test(f)); // .tsx too: a jsdom test is still a test
-  if (names.length !== testFiles.length) {
-    console.error(`facts: the __tests__ folder holds ${names.length} files but git tracks ${testFiles.length} — is one untracked?`);
+  if (names.length !== allTestFiles.length) {
+    console.error(`facts: the __tests__ folder holds ${names.length} files but git tracks ${allTestFiles.length} — is one untracked?`);
     process.exit(1);
   }
 }

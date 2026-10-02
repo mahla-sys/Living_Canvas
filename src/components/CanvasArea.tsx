@@ -71,8 +71,11 @@ function shapeStyle(d: LCNodeData): React.CSSProperties {
   return {
     clipPath: clip,
     borderRadius: d.shape === "circle" ? "9999px" : d.shape === "card" ? "14px" : "8px",
-    border: d.shape === "rectangle" || d.shape === "card" || d.shape === "empty" ? `${Math.max(1, (s.strokeWidth ?? 2) / 2)}px solid ${s.strokeColor ?? c}4d` : "none",
-    boxShadow: `0 0 0 1px ${c}33, 0 10px 30px -12px ${c}40, inset 3px 0 0 0 ${c}`,
+    // B2: strokeWidth 0 means "no hard outline" — the soft tinted glow below carries the edge.
+    border: (s.strokeWidth ?? 2) > 0 && (d.shape === "rectangle" || d.shape === "card" || d.shape === "empty")
+      ? `${Math.max(1, (s.strokeWidth ?? 2) / 2)}px solid ${s.strokeColor ?? c}4d`
+      : "none",
+    boxShadow: `0 10px 30px -12px ${c}40, inset 3px 0 0 0 ${c}`,
     opacity: (s.opacity ?? 100) / 100,
   };
 }
@@ -107,7 +110,16 @@ function LcNode({ id, data, selected }: NodeProps<RFNode>) {
   const shell = (inner: React.ReactNode, w?: string) => (
     <div
       className={`relative ${w ?? "w-[264px]"} transition-shadow duration-200 ${ring} ${selected ? "lc-node-selected" : ""}`}
-      style={breathe ? breatheDur : undefined}
+      style={{
+        ...(breathe ? breatheDur : undefined),
+        // B3: sketch-converted nodes carry explicit width/height from their drawn bounding box
+        ...((typeof data.width === "number" && data.width > 0) || (typeof data.height === "number" && data.height > 0)
+          ? {
+              width: typeof data.width === "number" && data.width > 0 ? `${data.width}px` : undefined,
+              height: typeof data.height === "number" && data.height > 0 ? `${data.height}px` : undefined,
+            }
+          : {}),
+      }}
     >
       {/* Ghost Cursor */}
       {(running || typing) && (
@@ -868,7 +880,10 @@ export function CanvasInner() {
       tool: "pen" as const, color: DRAW_COLORS[0], width: 4,
     });
 
-  const toFlow = (e: React.PointerEvent) => screenToFlowPosition({ x: e.clientX, y: e.clientY });
+  const toFlow = (e: React.PointerEvent): StrokePoint | null => {
+    const point = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    return Number.isFinite(point.x) && Number.isFinite(point.y) ? point : null;
+  };
 
   const eraseAt = useCallback((p: StrokePoint) => {
     const zoom = getZoom() || 1;
@@ -878,12 +893,15 @@ export function CanvasInner() {
   }, [getZoom, actions]);
 
   const onDrawDown = useCallback((e: React.PointerEvent) => {
-    if (!drawMode || e.button !== 0) return;
+    /* `button` is undefined for a synthetic pointerdown without an explicit button (jsdom tests fire one);
+       in real browsers left-drag reports 0. Treat only the non-left buttons as "not drawing". */
+    if (!drawMode || (typeof e.button === "number" && e.button > 0)) return;
     const t = e.target as HTMLElement;
     if (t.closest(".react-flow__controls, .react-flow__minimap, .react-flow__attribution, .react-flow__panel, [data-drawui]")) return;
+    const p = toFlow(e);
+    if (!p) return;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     const cfg = drawCfg();
-    const p = toFlow(e);
     if (cfg.tool === "eraser") {
       drawingRef.current = true;
       eraseAt(p);
@@ -896,8 +914,9 @@ export function CanvasInner() {
 
   const onDrawMove = useCallback((e: React.PointerEvent) => {
     if (!drawMode || !drawingRef.current) return;
-    const cfg = drawCfg();
     const p = toFlow(e);
+    if (!p) return;
+    const cfg = drawCfg();
     if (cfg.tool === "eraser") {
       eraseAt(p);
       return;
@@ -1052,7 +1071,11 @@ export function CanvasInner() {
             <IWarn size={18} className="text-ember" />
             <div className="text-[12px]">
               <p className="font-extrabold text-ink-50">Human approval required — “{waitingNode.data.title}”</p>
-              <p className="text-ink-300 text-[10.5px]">The node output is ready; decide to continue the pipeline.</p>
+              {waitingNode.data.nodeType === "human-gate" ? (
+                <p className="text-ink-300 text-[10.5px]">{waitingNode.data.content?.trim() || "Approve this checkpoint to continue the pipeline."}</p>
+              ) : (
+                <p className="text-ink-300 text-[10.5px]">The node output is ready; decide to continue the pipeline.</p>
+              )}
             </div>
             <button onClick={actions.resume} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sage/15 border border-sage/50 text-sage text-[11.5px] font-bold hover:bg-sage/25 transition-colors cursor-pointer">
               <ICheck size={13} /> Approve &amp; continue

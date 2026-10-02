@@ -26,6 +26,12 @@ Format — frontmatter at byte zero, then Context / Decision / Why / Consequence
 | 009 | `adr-009-layout-is-canvas-content-focus-mode-is-not.md` | accepted | panel widths in `canvas.yaml`, focus mode in memory — the three-way rule for interface state |
 | 010 | `adr-010-accent-is-a-role-and-plum-is-default.md` | accepted (clause 3 superseded by 011) | `--color-lc-accent` / `--color-lc-warn` as roles rather than palette steps, amber kept only as canvas data |
 | 011 | `adr-011-accent-must-differ-in-hue-from-ink.md` | accepted | an accent must sit at least 60° from its own theme's ink hue (or, on an achromatic ramp, carry enough chroma), enforced by the palette gate; `botanical` is the default again |
+| 053 | `adr-053-seeded-library-is-complete-and-visible.md` | proposed | seed every built-in role/template and reflect built-ins in the file-backed library index |
+| 052 | `adr-052-a11y-audit-must-fail-on-violations.md` | proposed | the axe audit fails on violations instead of merely writing a report |
+| 051 | `adr-051-unit-and-browser-test-separation.md` | proposed | `npm test` is independent of Chromium; browser coverage has an explicit command |
+| 050 | `adr-050-local-secrets-and-generated-files.md` | proposed | local keys and reproducible outputs stay out of Git and branch history |
+| 049 | `adr-049-human-gates-are-run-stages.md` | proposed | a gate completes only on approval; rejection stops and step mode remains a single step |
+| 048 | `adr-048-template-role-overrides.md` | proposed | loading a template applies each declared per-node role override |
 | 047 | `adr-047-no-credentials-in-the-repository.md` | accepted | the two committed API keys are redacted and must be rotated; `SETTINGS_BASE` ships no key and defaults to the simulator |
 | 046 | `adr-046-destructive-tools-wait-for-a-human.md` | accepted | `delete_node`/`delete_edge` in an autonomous run pause on `waiting_approval`; approve deletes, reject denies the tool, stop cancels |
 | 045 | `adr-045-model-requests-abort-and-time-out.md` | accepted | every model request has a 120 s ceiling and the run's abort controller; a stopped run's response never reaches the files |

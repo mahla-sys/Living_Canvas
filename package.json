@@ -10,7 +10,8 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "vitest run src/lib/__tests__/viewport-playwright.test.ts",
+    "test:e2e": "vitest run --config vitest.e2e.config.js",
+    "test:a11y": "playwright test tests/a11y.spec.ts",
     "capture:ui": "node scripts/capture-ui.mjs",
     "audit:ui": "node scripts/auto-designer.mjs"
   },
@@ -32,7 +33,7 @@
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@vitejs/plugin-react": "^4.3.4",
-    "jsdom": "^30.0.1",
+    "jsdom": "^26.1.0",
     "playwright": "^1.62.1",
     "tailwindcss": "^4.1.7",
     "typescript": "^5.7.0",

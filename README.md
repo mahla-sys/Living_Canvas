@@ -22,7 +22,9 @@ and the app reads your edits back.** Files are the source of truth; in-memory st
 ```bash
 npm install
 npm run dev         # http://localhost:3000  (binds 0.0.0.0, accepts any host for sandboxed previews)
-npm test            # vitest run — 31 files / 305 tests, no jsdom, no extra config file
+npm test            # vitest run — 33 files / 329 tests (unit/jsdom; Playwright runs separately)
+npm run test:e2e    # Playwright viewport checks (install Chromium with `npx playwright install chromium` first)
+npm run test:a11y   # axe WCAG 2.1 A/AA audit; fails on any violation (also needs Chromium)
 npm run typecheck   # tsc --noEmit, noUnusedLocals is ON
 npm run build       # tsc --noEmit && vite build — types are part of the build
 node scripts/check-english.mjs   # the language rule above, as CI runs it
@@ -31,6 +33,8 @@ node scripts/check-palette.mjs   # appearance gate: theme registry, contrast per
 node scripts/doc-anchors.mjs     # regenerate the line anchors in ARCHITECTURE.md §3.4 (--check to gate)
 node scripts/check-facts.mjs     # regenerate every count the docs quote (--check to gate)
 ```
+Copy `.env.example` to `.env` only for a trusted local build. `GEMINI_API_KEY` and `MISTRAL_API_KEY` are embedded in the browser bundle at build time; never commit real values or publish a build containing a private key. For a shared deployment, use the server-side proxy planned in `docs/inbox.md`.
+
 CI is **defined** at [`ci/github-actions.yml`](ci/github-actions.yml) — typecheck → test → build → language gate →
 docs gate → palette gate → anchor gate → facts gate — but it is **not wired up**, and this branch cannot wire it up:
 pushing `.github/workflows/ci.yml` is refused by the remote with
@@ -67,7 +71,7 @@ src/
 ├── lib/engine.ts                behaviour: events · files · memory · execution · strokes · portability
 ├── lib/portable.ts              the export bundle + rebuilding a canvas from its files
 ├── lib/fs-access.ts             the File System Access adapter (a real folder on disk)
-├── lib/__tests__/               305 tests, production code only (no fixtures that reimplement a serialiser)
+├── lib/__tests__/               329 tests, production code only (no fixtures that reimplement a serialiser)
 └── components/                  CanvasArea · SidePanels · Overlays · icons
 ```
 
@@ -85,9 +89,9 @@ src/
    written to the run ledger, and shows up on the node card. `validator: null` is the only opt-out, and it is a
    line in the user's own node file. Tested.
 
-A **fresh canvas is a blank board, not a demo**: one "Start here" note, the four memory documents, the four
-role definitions and their schemas. No pre-built four-agent pipeline, no output box, no built-in template — the
-shape is yours to draw, the guarantees above are what the app brings.
+A **fresh canvas is a blank board, not a demo**: one "Start here" note, the four memory documents, the built-in
+role definitions and their schemas, plus six templates in the library. No pipeline or output box is preloaded onto
+the canvas — choose a library template or draw your own; the guarantees above are what the app brings.
 
 ## Portability
 

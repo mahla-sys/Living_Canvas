@@ -1,8 +1,8 @@
 ---
 title: Work order — rounds of 2026-09
 status: active
-updated: 2026-09-24
-sources: [scripts/check-css.mjs, src/components/CanvasArea.tsx, src/lib/__tests__/drawing.test.tsx, src/lib/__tests__/interactive.test.tsx, docs/decisions/adr-014-layout-height-is-a-build-contract.md, docs/decisions/adr-040-simulator-derives-from-the-contract.md, docs/decisions/adr-047-no-credentials-in-the-repository.md]
+updated: 2026-10-02
+sources: [scripts/check-css.mjs, src/components/CanvasArea.tsx, src/lib/__tests__/drawing.test.tsx, src/lib/__tests__/interactive.test.tsx, docs/decisions/adr-014-layout-height-is-a-build-contract.md, docs/decisions/adr-040-simulator-derives-from-the-contract.md, docs/decisions/adr-047-no-credentials-in-the-repository.md, docs/decisions/adr-048-template-role-overrides.md, docs/decisions/adr-049-human-gates-are-run-stages.md, docs/decisions/adr-050-local-secrets-and-generated-files.md, docs/decisions/adr-051-unit-and-browser-test-separation.md]
 ---
 
 # Work order — rounds of 2026-09
@@ -27,6 +27,21 @@ Acceptance for the round as a whole: `npm test` is green, and the new gate `temp
 every built-in template loads and runs to `completed` on the simulator — the exact path a first-time user
 takes with no provider key. All items mutation-tested where the shape allowed (revert the fix, the test
 fails); the pipeline gate is the strongest one, because it exercises the whole engine per template.
+
+## Merge-readiness audit — 2026-10-02 (active)
+
+| # | Finding | Acceptance criteria | Status |
+|---|---|---|---|
+| a | A cleared ignore file tracked a local `.env`, installed dependencies, compiled output, and test results | The final branch tree/history delta from `main` contains no local key or generated dependency/build/test artifacts; `.env.example` contains placeholders only. The owner is told to rotate any key that was committed. | ✅ — clean branch delta; rotate the previously committed key |
+| b | `npm test` launched Playwright and failed without Chromium; two unit tests were stale or had unrealistic jsdom pointer events | `npm test` passes without a browser install; `npm run test:e2e` explicitly selects the browser suite; drawing assertions use finite coordinates and distinguish right-click. | ✅ |
+| c | A human-gate node was never marked complete on approval, so the queue selected it again; step mode could hide its approval prompt | Regression tests prove approval completes the gate and runs downstream once, rejection stops, ledger records the choice, and step mode waits for approval before pausing. | ✅ |
+| d | Template role overrides declared approval and human-gate fields that the loader ignored | A template contract test proves prompt/tool/field/token and approval overrides are applied, and a gate question reaches its node. | ✅ |
+| e | The build-time Mistral key setting read only the process environment, not a local `.env` file | A config test verifies local and CI environment keys follow the documented names without adding a credential to source or tests. | ✅ |
+| f | The axe audit wrote a "baseline" but passed regardless of its violations | Wait for the app store to boot; then fail on every WCAG 2.1 A/AA violation, report rule/impact/affected count, and run separately with Chromium. | ⚠️ code fixed; browser unavailable |
+| g | Fresh-seed role files omitted four built-in roles; built-in template files were not indexed as built-ins in state | Seed all `ROLES`, populate built-in template info after seed/reload, and test complete files plus stable built-in/user flags. | ✅ |
+| h | Six Persian pipeline taglines violated the source-language gate; the AI Partner card claimed it was live even when the keyless simulator is active | Keep source/UI copy in English and describe Mistral as optional; `check-english.mjs` must pass. | ✅ |
+
+Round acceptance: all repository gates in `AGENTS.md` pass; `npm test`, `npm run build`, and regenerated docs facts pass. Run `npm run test:e2e` and `npm run test:a11y` when Chromium is available; otherwise report them separately as not run, never fold them into the unit command.
 
 ## Round of 2026-09-02 (closed)
 

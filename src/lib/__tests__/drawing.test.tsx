@@ -59,6 +59,20 @@ function Canvas() {
 
 beforeEach(() => {
   (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver ??= ResizeObserverStub;
+  if (typeof window.PointerEvent !== "function") {
+    class PointerEventStub extends MouseEvent {
+      pointerId: number;
+      pointerType: string;
+      isPrimary: boolean;
+      constructor(type: string, init: PointerEventInit = {}) {
+        super(type, init);
+        this.pointerId = init.pointerId ?? 0;
+        this.pointerType = init.pointerType ?? "mouse";
+        this.isPrimary = init.isPrimary ?? true;
+      }
+    }
+    Object.defineProperty(window, "PointerEvent", { configurable: true, value: PointerEventStub });
+  }
   (globalThis as unknown as { DOMMatrixReadOnly: unknown }).DOMMatrixReadOnly ??= class {
     m22 = 1; constructor(_?: string) {}
   };
@@ -78,6 +92,19 @@ afterEach(() => cleanup());
 
 const enterDrawMode = () => fireEvent.click(screen.getByRole("button", { name: /draw on the canvas|pen/i }));
 
+function canvasSurface(): HTMLElement {
+  const surface = document.querySelector(".react-flow") as HTMLElement;
+  expect(surface).toBeTruthy();
+  const bounds = {
+    x: 0, y: 0, width: 1200, height: 800, top: 0, left: 0, right: 1200, bottom: 800,
+    toJSON: () => ({ x: 0, y: 0, width: 1200, height: 800 }),
+  } as DOMRect;
+  Object.defineProperty(surface, "getBoundingClientRect", { configurable: true, value: () => bounds });
+  Object.defineProperty(surface, "clientWidth", { configurable: true, value: 1200 });
+  Object.defineProperty(surface, "clientHeight", { configurable: true, value: 800 });
+  return surface;
+}
+
 describe("drawing on the canvas", () => {
   it("enters draw mode and offers the tools", () => {
     render(<Canvas />);
@@ -88,8 +115,7 @@ describe("drawing on the canvas", () => {
   it("a left-button drag creates a stroke in state with the points it passed through", async () => {
     render(<Canvas />);
     enterDrawMode();
-    const surface = document.querySelector(".react-flow") as HTMLElement;
-    expect(surface).toBeTruthy();
+    const surface = canvasSurface();
 
     fireEvent.pointerDown(surface, { button: 0, clientX: 200, clientY: 200, pointerId: 1 });
     fireEvent.pointerMove(surface, { button: 0, clientX: 260, clientY: 240, pointerId: 1 });
@@ -99,6 +125,7 @@ describe("drawing on the canvas", () => {
     await waitFor(() => expect(useStore.getState().strokes).toHaveLength(1));
     const stroke = useStore.getState().strokes[0];
     expect(stroke.points.length).toBeGreaterThanOrEqual(2);
+    expect(stroke.points.every((point) => Number.isFinite(point.x) && Number.isFinite(point.y))).toBe(true);
     expect(stroke.tool).toBe("pen");
     expect(stroke.canvas_id).toBe(CANVAS_ID);
     expect(stroke.author).toBe(useStore.getState().canvas.owner);
@@ -107,7 +134,7 @@ describe("drawing on the canvas", () => {
   it("the stroke is written to strokes/ — the file is the record, not the pixels (Law 1)", async () => {
     render(<Canvas />);
     enterDrawMode();
-    const surface = document.querySelector(".react-flow") as HTMLElement;
+    const surface = canvasSurface();
 
     fireEvent.pointerDown(surface, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.pointerMove(surface, { button: 0, clientX: 180, clientY: 160, pointerId: 1 });
@@ -122,7 +149,7 @@ describe("drawing on the canvas", () => {
   it("a plain click with no movement is not a stroke", async () => {
     render(<Canvas />);
     enterDrawMode();
-    const surface = document.querySelector(".react-flow") as HTMLElement;
+    const surface = canvasSurface();
 
     fireEvent.pointerDown(surface, { button: 0, clientX: 300, clientY: 300, pointerId: 1 });
     fireEvent.pointerUp(surface, { button: 0, clientX: 300, clientY: 300, pointerId: 1 });
@@ -131,10 +158,28 @@ describe("drawing on the canvas", () => {
     expect(useStore.getState().strokes).toHaveLength(0);
   });
 
+  it("does not persist a stroke when the canvas cannot provide finite geometry", async () => {
+    render(<Canvas />);
+    enterDrawMode();
+    const surface = canvasSurface();
+    Object.defineProperty(surface, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ x: Number.NaN, y: Number.NaN, left: Number.NaN, top: Number.NaN, width: 0, height: 0 }),
+    });
+
+    fireEvent.pointerDown(surface, { button: 0, clientX: 100, clientY: 100, pointerId: 1 });
+    fireEvent.pointerMove(surface, { button: 0, clientX: 180, clientY: 160, pointerId: 1 });
+    fireEvent.pointerUp(surface, { button: 0, clientX: 180, clientY: 160, pointerId: 1 });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+
+    expect(useStore.getState().strokes).toHaveLength(0);
+    expect((await storage.allPaths()).filter((path) => path.includes("/strokes/"))).toEqual([]);
+  });
+
   it("the right button pans instead of drawing", async () => {
     render(<Canvas />);
     enterDrawMode();
-    const surface = document.querySelector(".react-flow") as HTMLElement;
+    const surface = canvasSurface();
 
     fireEvent.pointerDown(surface, { button: 2, clientX: 100, clientY: 100, pointerId: 2 });
     fireEvent.pointerMove(surface, { button: 2, clientX: 200, clientY: 200, pointerId: 2 });
@@ -147,7 +192,7 @@ describe("drawing on the canvas", () => {
   it("strokes are painted under the viewport transform, in flow coordinates", async () => {
     render(<Canvas />);
     enterDrawMode();
-    const surface = document.querySelector(".react-flow") as HTMLElement;
+    const surface = canvasSurface();
 
     fireEvent.pointerDown(surface, { button: 0, clientX: 200, clientY: 200, pointerId: 1 });
     fireEvent.pointerMove(surface, { button: 0, clientX: 300, clientY: 260, pointerId: 1 });

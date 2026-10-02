@@ -232,7 +232,14 @@ describe("agent.model decides the endpoint — with the network stubbed, not the
   /** the graph runs with the provider switch on and a key present, so the real branch is taken */
   function livePipeline(models: Record<string, string>) {
     const { api } = fourAgentPipeline(models);
-    api.set({ settings: { ...api.get().settings, provider: "deepseek", apiKey: "test-key" } });
+    api.set((state) => ({
+      settings: { ...state.settings, provider: "deepseek", apiKey: "test-key" },
+      // Unspecified test nodes model a legacy file with an empty agent.model, so they exercise the
+      // documented fallback to Settings rather than makeAgentConfig's new Mistral default.
+      nodes: state.nodes.map((node) => node.data.agent
+        ? { ...node, data: { ...node.data, agent: { ...node.data.agent, model: models[node.id] ?? "" } } }
+        : node),
+    }));
     return api;
   }
 
