@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { setStorage, storage, MemoryStorageAdapter, nodeToMarkdown, toYaml, frontmatter } from "../core";
 import { applyImport, hydrate, seedWorkspace } from "../engine";
-import { emptyExecution, makeNodeData, CANVAS_ID } from "../../state";
+import { emptyExecution, makeNodeData, CANVAS_ID, ROLES, BUILTIN_TEMPLATES, schemaPathFor } from "../../state";
 import type { AppState } from "../../state";
 
 /* ============================================================
@@ -80,7 +80,7 @@ describe("hydrate — restoration from files", () => {
     expect(ok).toBe(true);
     const ids = api.peek().templates.map((t) => t.id);
     expect(ids).toContain("my-flow"); // ← this line used to fail
-    // and nothing else: there is no built-in template to inject any more (structure 1.4)
+    // Hydration reflects this workspace's files; it must not inject built-ins into an existing custom library.
     expect(ids).toEqual(["my-flow"]);
     const mine = api.peek().templates.find((t) => t.id === "my-flow")!;
     expect(mine.name).toBe("My flow");
@@ -196,7 +196,7 @@ describe("hydrate — restoration from files", () => {
 /* ---------------- structure 1.4: one source of truth, and nothing pre-fabricated ---------------- */
 
 describe("what a fresh canvas and an old bundle look like (§4.1, decisions Q1 + Q3)", () => {
-  it("seeding writes schema files, no demo pipeline, and no graph.json", async () => {
+  it("seeds every built-in role and template without loading a demo pipeline or graph.json", async () => {
     const store = await freshStore({});
     const api = makeApi();
     await seedWorkspace(api);
@@ -206,15 +206,28 @@ describe("what a fresh canvas and an old bundle look like (§4.1, decisions Q1 +
     expect(paths.filter((p) => p.endsWith("/graph.json"))).toEqual([]);
     expect(paths).toContain(`${ROOT}/state.json`); // still written, still only a cache
 
-    // the contracts the built-in roles declare exist as real files, or "hard validation" is a promise with nothing behind it
-    for (const role of ["understander", "risk-analyst", "solution-designer", "decision-maker"]) {
-      expect(paths).toContain(`${ROOT}/library/schemas/${role}.schema.json`);
-      expect(paths).toContain(`${ROOT}/library/roles/${role}.json`);
+    // Every role contract has an on-disk role and schema, including the four AI-partner roles.
+    for (const role of ROLES) {
+      expect(paths).toContain(`${ROOT}/library/roles/${role.id}.json`);
+      expect(paths).toContain(`${ROOT}/${schemaPathFor(role.id)}`);
     }
+    expect(paths.filter((path) => path.endsWith("/template.json")).sort()).toEqual(
+      BUILTIN_TEMPLATES.map((template) => `${ROOT}/library/templates/${template.template_id}/template.json`).sort(),
+    );
+    expect(api.peek().templates.map((template) => [template.id, template.builtin])).toEqual(
+      BUILTIN_TEMPLATES.map((template) => [template.template_id, true]),
+    );
 
-    // a fresh canvas is a blank board, not a screenshot of a test: one note, no edges, no fake pipeline
+    // A fresh canvas has a blank active graph; the six built-in pipelines remain ordinary library files.
     expect(api.peek().edges).toEqual([]);
     expect(api.peek().nodes.map((n) => n.data.nodeType)).toEqual(["note"]);
+
+    // Hydration derives the same built-in flags from the files, and does not invent a parallel template list.
+    const reloaded = makeApi();
+    expect(await hydrate(reloaded)).toBe(true);
+    expect(reloaded.peek().templates.map((template) => [template.id, template.builtin]).sort(([a], [b]) => String(a).localeCompare(String(b)))).toEqual(
+      BUILTIN_TEMPLATES.map((template) => [template.template_id, true]).sort(([a], [b]) => String(a).localeCompare(String(b))),
+    );
   }, 15000);
 
   it("a legacy graph.json inside an imported bundle is dropped, and the reason is said out loud", async () => {

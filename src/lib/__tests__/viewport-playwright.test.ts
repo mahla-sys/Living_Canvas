@@ -1,8 +1,16 @@
 // @vitest-environment node
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { createServer, type ViteDevServer } from "vite";
 import http from "node:http";
+
+async function waitForAppReady(page: Page) {
+  await page.waitForFunction(
+    () => (window as unknown as { useStore?: { getState: () => { booted: boolean } } }).useStore?.getState().booted === true,
+    undefined,
+    { timeout: 15_000 },
+  );
+}
 
 describe("laptop viewport geometry and scroll contracts (Playwright)", () => {
   let browser: Browser;
@@ -55,7 +63,7 @@ describe("laptop viewport geometry and scroll contracts (Playwright)", () => {
     it(`never overflows viewport bounds on ${vp.name}`, async () => {
       const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } });
       await page.goto(baseUrl, { waitUntil: "networkidle" });
-      await page.waitForTimeout(300);
+      await waitForAppReady(page);
 
       const metrics = await page.evaluate(() => {
         const doc = document.scrollingElement!;
@@ -112,7 +120,7 @@ describe("laptop viewport geometry and scroll contracts (Playwright)", () => {
   it("engages internal scrolling in side panels when content exceeds panel height", async () => {
     const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
     await page.goto(baseUrl, { waitUntil: "networkidle" });
-    await page.waitForTimeout(300);
+    await waitForAppReady(page);
 
     // Switch to Files tab on the left panel (has many items exceeding 768px height)
     const filesTab = page.locator("aside button:has-text('Files')");

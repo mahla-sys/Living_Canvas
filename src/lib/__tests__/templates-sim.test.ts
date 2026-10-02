@@ -15,7 +15,7 @@ import { setStorage, MemoryStorageAdapter, storage } from "../core";
 import { runPipeline, loadTemplate, type EngineApi } from "../engine";
 import {
   CANVAS_ID, ROOT, emptyExecution, makeMemDoc, BUILTIN_TEMPLATES, ROLES, ROLE_SCHEMAS, schemaPathFor, makeRoleSchema,
-  type AppState,
+  type AppState, type TemplateSpec,
 } from "../../state";
 
 function makeApi(): EngineApi {
@@ -47,7 +47,7 @@ function makeApi(): EngineApi {
   };
 }
 
-/** The canvas a fresh boot would contain: the five template packages and every role schema. */
+/** The canvas a fresh boot would contain: the built-in template packages and every role schema. */
 function freshLibrary(): MemoryStorageAdapter {
   const files: Record<string, string> = {};
   for (const t of BUILTIN_TEMPLATES) files[`${ROOT}/library/templates/${t.template_id}/template.json`] = JSON.stringify(t, null, 2);
@@ -79,4 +79,47 @@ describe("every built-in template runs green on the simulator (ADR-040)", () => 
       expect(outputs.length).toBeGreaterThan(0);
     },
   );
+
+  it("applies every declared per-node override, including approval and a gate question (ADR-048)", async () => {
+    const template: TemplateSpec = {
+      template_id: "override-contract",
+      name: "Override contract",
+      description: "A role override and a file-backed human question.",
+      version: "1.0",
+      nodes: [
+        {
+          id: "tuned-agent", nodeType: "agent", title: "Tuned agent", position: { x: 0, y: 0 }, role: "manager",
+          role_override: {
+            system_prompt: "Use only this pipeline-specific prompt.",
+            tools: ["read_memory"],
+            required_fields: ["summary"],
+            max_tokens: 321,
+            max_steps: 2,
+            require_approval: true,
+          },
+        },
+        {
+          id: "approval-gate", nodeType: "human-gate", title: "Review", position: { x: 300, y: 0 },
+          role_override: { gate_question: "Approve the plan before continuing?" },
+        },
+      ],
+      edges: [],
+    };
+    await storage.writeJson(`${ROOT}/library/templates/${template.template_id}/template.json`, template);
+
+    const api = makeApi();
+    await loadTemplate(api, template.template_id);
+
+    const agent = api.get().nodes.find((node) => node.id === "tuned-agent")?.data.agent;
+    expect(agent).toMatchObject({
+      system_prompt: "Use only this pipeline-specific prompt.",
+      tools: ["read_memory"],
+      max_tokens: 321,
+      max_steps: 2,
+      require_approval: true,
+    });
+    expect(agent?.context_contract.output_contract.required_fields).toEqual(["summary"]);
+    expect(api.get().nodes.find((node) => node.id === "approval-gate")?.data.content)
+      .toBe("Approve the plan before continuing?");
+  });
 });

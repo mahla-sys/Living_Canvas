@@ -5,9 +5,9 @@
 import {
   storage, setStorage, createDefaultStorage, storageMode, HttpStorageAdapter, bus, uid, nowIso, nowStamp, fmtClock, sleep, debounce,
   nodeToMarkdown, edgeToYaml, memoryToMd, outputsIndexYaml, chatToMd, logText, toYaml, frontmatter,
-  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout, DEFAULT_MODEL,
+  validateAgainstSchema, parseOutputSchema, resolveModelRoute, normalizeLayout, DEFAULT_MODEL, envProviderKey,
   type BusEventType, type OutputEntry, type AgentConfig, type MemDoc, type ChatMsg, type Stroke, type StrokePoint, type NodeType, type EdgeType, type LCEdgeData,
-  type ModelRoute, type OutputSchema, type SchemaField,
+  type ModelRoute, type OutputSchema, type SchemaField, type Settings, type ShapeKind,
 } from "./core";
 import {
   FsAccessStorageAdapter, isFsAccessSupported, pickCanvasDirectory, ensurePermission,
@@ -18,10 +18,10 @@ import {
   downloadJson, readFileAsText, bundleBytes, MAX_BUNDLE_BYTES, type CanvasFiles,
 } from "./portable";
 import {
-  ROOT, CANVAS_ID, APP_VERSION, STRUCTURE_VERSION, buildSeed, emptyExecution, roleById,
+  ROOT, CANVAS_ID, APP_VERSION, STRUCTURE_VERSION, buildSeed, emptyExecution, roleById, ROLES,
   makeAgentConfig, makeNodeData, makeEdgeData, makeMemDoc, DEFAULT_LAYOUT,
   ROLE_SCHEMAS, schemaPathFor, makeRoleSchema, BUILTIN_TEMPLATES,
-  type AppState, type RFNode, type RFEdge, type TemplateSpec, type TemplateInfo,
+  type AppState, type RFNode, type RFEdge, type TemplateSpec, type TemplateInfo, type AgentConfigOverrides,
 } from "../state";
 
 export interface EngineApi {
@@ -351,7 +351,7 @@ export async function testFallback(api: EngineApi) {
   const s = api.get();
   const settings = s.settings;
   const isReal = settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini";
-  const effectiveKey = (settings?.apiKey?.trim()) || (settings?.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY).trim() : "");
+  const effectiveKey = (settings?.apiKey?.trim()) || envProviderKey(settings.provider);
   if (!isReal || !effectiveKey) {
     emit(api, "system", "fallback test: no API key configured — internal simulator is active (phase 1 default)");
     toast(api, "info", "No key configured; the system runs on the internal simulator.");
@@ -1624,7 +1624,7 @@ export function evalCondition(raw: string, ctx: Record<string, unknown>): CondRe
 export function computeOrder(s: AppState, startId: string, scope?: readonly string[]): { order: string[]; cyclic: string[] } {
   const inScope = scope ? new Set(scope) : null;
   const runnable = s.nodes
-    .filter((n) => n.data.nodeType === "agent" || n.data.nodeType === "output-box")
+    .filter((n) => n.data.nodeType === "agent" || n.data.nodeType === "output-box" || n.data.nodeType === "human-gate")
     .filter((n) => !inScope || inScope.has(n.id))
     .slice()
     .sort((a, b) => (a.data.created_at || "").localeCompare(b.data.created_at || "") || a.id.localeCompare(b.id));
@@ -1753,7 +1753,7 @@ async function executeNode(api: EngineApi, nodeId: string) {
     // fallback for a node whose file predates the field or whose author left it empty.
     const settings = api.get()?.settings;
     const isRealProvider = settings ? (settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini") : false;
-    const effectiveKey = (settings?.apiKey) || (settings?.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY) : "");
+    const effectiveKey = (settings?.apiKey) || envProviderKey(settings.provider as Settings["provider"]);
     const effectiveModel = (agent?.model === DEFAULT_MODEL && settings?.provider !== "deepseek" && settings?.model && settings.model !== DEFAULT_MODEL)
       ? settings.model
       : (agent?.model || settings?.model);
@@ -1978,6 +1978,23 @@ async function awaitToolApproval(api: EngineApi, nodeId: string, tool: string, t
   return new Promise<boolean>((resolve) => { pendingToolApproval = { resolve }; });
 }
 
+/* ADR-049 — the human as a pipeline stage. A `human-gate` node is queued like an agent but runs no
+   model: it pauses the run with the question written on the card. Approve (resumeRun) lets the queue
+   drain onward; Reject stops the whole run (rejectRun). The gate's own answer is not produced by a
+   model — it is the human's decision, recorded in the log and the ledger. */
+async function runHumanGate(api: EngineApi, nodeId: string) {
+  const node = getNode(api.get(), nodeId);
+  if (!node) return;
+  const question = (typeof node.data.content === "string" && node.data.content.trim())
+    ? node.data.content.trim()
+    : `Continue the run past “${node.data.title}”?`;
+  await appendLog(api, nodeId, `== gate opened ==\nquestion: ${question}\nwaiting for the human…`);
+  await ledgerRow(api, { node: nodeId, tool: "human_gate", status: "approval", detail: question });
+  api.set((st) => ({ execution: { ...st.execution, status: "waiting_approval", current_node_id: nodeId } }));
+  emit(api, "run.paused", `human gate “${node.data.title}” is waiting for a decision`);
+  toast(api, "warn", `The pipeline is waiting for you at “${node.data.title}”.`);
+}
+
 async function processQueue(api: EngineApi) {
   while (true) {
     const ex = api.get().execution;
@@ -2018,11 +2035,19 @@ async function processQueue(api: EngineApi) {
     }
     if (node.data.nodeType === "agent") await executeNode(api, nextId);
     else if (node.data.nodeType === "output-box") await collectToBox(api, nextId);
+    /* ADR-049: the gate answers by pausing — it is done only once the human has decided, so it is
+       NOT marked completed here; resumeRun marks it and processQueue re-enters to drain onward. */
+    else if (node.data.nodeType === "human-gate") await runHumanGate(api, nextId);
     else api.set((st) => ({ execution: { ...st.execution, completed: [...st.execution.completed, nextId] } }));
     touch(api);
     /* Step mode stops here, at the node boundary, with that node's own output already written — which is the
        whole point of pausing cooperatively (ADR-013). */
     if (stepOnce) {
+      const status = api.get().execution.status;
+      // Approval is still part of this step. Keep the prompt visible and remember step mode until the
+      // person decides; a failed/stopped node must not be rewritten to "paused" either.
+      if (status === "waiting_approval") return;
+      if (status !== "running") return;
       stepOnce = false;
       api.set((st) => ({ execution: { ...st.execution, status: "paused" } }));
       await ledgerRow(api, { node: nextId, tool: "step", status: "ok", detail: "one step — the run is now paused" });
@@ -2057,6 +2082,7 @@ export async function runPipeline(api: EngineApi, opts?: { scope?: string[]; lab
     return;
   }
   const { order, cyclic } = computeOrder(s, start.id, scoped ?? undefined);
+  stepOnce = false;
   api.set({
     execution: {
       ...emptyExecution(), run_id: uid("run"), status: "running",
@@ -2079,6 +2105,7 @@ export async function runSingle(api: EngineApi, nodeId: string) {
     toast(api, "warn", "Another run is already in progress.");
     return;
   }
+  stepOnce = false;
   api.set({ execution: { ...emptyExecution(), run_id: uid("run"), status: "running", queue: [nodeId], started_at: nowIso() } });
   emit(api, "run.started", `single-node run: ${nodeId}`);
   await startLedger(api, `Single-node run of ${nodeId}.`);
@@ -2144,29 +2171,74 @@ export async function resumeRun(api: EngineApi) {
   // two ways to reach a stopped queue — a pause and an approval — and one way back out of it
   if (ex.status !== "waiting_approval" && ex.status !== "paused") return;
   const wasPaused = ex.status === "paused";
-  api.set((st) => ({ execution: { ...st.execution, status: "running" } }));
-  emit(api, "run.resumed", wasPaused ? "the paused run continued" : "human approval recorded — the run continued");
+  const waitingNode = ex.status === "waiting_approval" && ex.current_node_id
+    ? getNode(api.get(), ex.current_node_id)
+    : null;
+  const approvedGateId = waitingNode?.data.nodeType === "human-gate" ? waitingNode.id : null;
+  if (approvedGateId) {
+    await appendLog(api, approvedGateId, "== gate approved ==");
+    await ledgerRow(api, { node: approvedGateId, tool: "human_gate", status: "approved", detail: "approved by the human" });
+  }
+
+  const completesStep = stepOnce;
+  api.set((st) => ({
+    execution: {
+      ...st.execution,
+      status: completesStep ? "paused" : "running",
+      ...(approvedGateId && !st.execution.completed.includes(approvedGateId)
+        ? { completed: [...st.execution.completed, approvedGateId] }
+        : {}),
+    },
+  }));
+  emit(api, "run.resumed", approvedGateId
+    ? `human gate “${waitingNode?.data.title}” approved${completesStep ? "; step mode remains paused" : " — the run continued"}`
+    : wasPaused ? "the paused run continued" : "human approval recorded — the run continued");
+
+  if (completesStep) {
+    stepOnce = false;
+    await ledgerRow(api, { node: approvedGateId ?? ex.current_node_id ?? "—", tool: "step", status: "ok", detail: "approved step complete — the run is paused" });
+    emit(api, "run.paused", "the approved step is complete — the run is paused");
+    toast(api, "success", "Approved — this step is complete; run the next step when ready.");
+    return;
+  }
+
   toast(api, "success", wasPaused ? "Resuming the run…" : "Approved — resuming the run…");
   await processQueue(api);
 }
 
-export function rejectRun(api: EngineApi) {
+export async function rejectRun(api: EngineApi): Promise<void> {
   /* Rejecting a *tool* question denies that one tool and lets the run continue — the model sees the
-     denial and adapts. Rejecting a *decision* stops the run, as before. (ADR-046) */
+     denial and adapts. Rejecting a decision or a human-gate stage stops the run. (ADR-046/049) */
   if (pendingToolApproval) {
     settleToolApproval(api, false);
     emit(api, "validation.failed", "tool rejected by the human — the run continues without it");
     toast(api, "info", "Rejected — the tool was denied and the run continues.");
     return;
   }
-  void endLedger(api, "rejected", "the decision was rejected before the queue drained");
+
+  const ex = api.get().execution;
+  const waitingNode = ex.status === "waiting_approval" && ex.current_node_id
+    ? getNode(api.get(), ex.current_node_id)
+    : null;
+  const rejectedGateId = waitingNode?.data.nodeType === "human-gate" ? waitingNode.id : null;
+  if (rejectedGateId) {
+    await appendLog(api, rejectedGateId, "== gate rejected ==");
+    await ledgerRow(api, { node: rejectedGateId, tool: "human_gate", status: "rejected", detail: "rejected by the human" });
+  }
+  stepOnce = false;
+  await endLedger(api, "rejected", rejectedGateId
+    ? `human gate “${waitingNode?.data.title}” was rejected before downstream work ran`
+    : "the decision was rejected before the queue drained");
   api.set((st) => ({ execution: { ...st.execution, status: "stopped", current_node_id: null, run_id: null } }));
-  emit(api, "run.stopped", "the decision was rejected by the user — run stopped");
-  toast(api, "info", "Decision rejected and the run stopped.");
+  emit(api, "run.stopped", rejectedGateId
+    ? `human gate “${waitingNode?.data.title}” was rejected — run stopped`
+    : "the decision was rejected by the user — run stopped");
+  toast(api, "info", rejectedGateId ? "Rejected — the pipeline stopped before downstream work." : "Decision rejected and the run stopped.");
   touch(api);
 }
 
 export function stopRun(api: EngineApi) {
+  stepOnce = false;
   const s = api.get();
   const cur = s.execution.current_node_id;
   if (cur) {
@@ -2190,6 +2262,7 @@ export function stopRun(api: EngineApi) {
 }
 
 export function resetExecution(api: EngineApi) {
+  stepOnce = false;
   settleToolApproval(api, false);
   abortActiveRun();
   api.set((st) => ({
@@ -2274,7 +2347,7 @@ export async function sendChat(api: EngineApi, nodeId: string, text: string) {
   let reply: string;
   const settings = api.get().settings;
   const isReal = settings.provider === "deepseek" || settings.provider === "mistral" || settings.provider === "gemini";
-  const effectiveKey = settings.apiKey || (settings.provider === "gemini" && typeof import.meta !== "undefined" && import.meta.env?.VITE_GEMINI_API_KEY ? String(import.meta.env.VITE_GEMINI_API_KEY) : "");
+  const effectiveKey = settings.apiKey || envProviderKey(settings.provider);
   if (isReal && effectiveKey && node.data.agent) {
     try {
       const history = (api.get().chats[nodeId] ?? []).slice(-8).map((m) => ({
@@ -2394,6 +2467,31 @@ function strokeBox(pts: StrokePoint[]): Box {
   return { minX, minY, maxX, maxY };
 }
 
+/** Closedness of a stroke path: distance between first and last point vs. the path's diagonal.
+ *  A hand-drawn circle/rect closes back on itself, so the gap is small relative to size. */
+export function isClosedStroke(s: Stroke): boolean {
+  const pts = s.points;
+  if (pts.length < 6) return false;
+  const box = strokeBox(pts);
+  const diag = Math.hypot(box.maxX - box.minX, box.maxY - box.minY);
+  if (diag < 20) return false; // too small to judge — treat as an open mark
+  const gap = Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y);
+  return gap / diag < 0.35;
+}
+
+/** Infers the drawn shape kind from a cluster's geometry (B3, work-order 2026-09-25):
+ *  aspect ratio + closedness decide rectangle / circle / diamond; anything else stays empty. */
+export function inferShapeFromCluster(c: StrokeCluster): ShapeKind {
+  const w = c.box.maxX - c.box.minX;
+  const h = c.box.maxY - c.box.minY;
+  const allClosed = c.strokes.every(isClosedStroke);
+  const anyClosed = c.strokes.some(isClosedStroke);
+  const ratio = w === 0 ? 1 : h / w;
+  if (!anyClosed) return "empty"; // free scribble / arrow — no recognizable outline
+  if (Math.abs(ratio - 1) < 0.25 && w >= 40) return allClosed ? "circle" : "diamond";
+  return "rectangle";
+}
+
 export interface StrokeCluster {
   strokes: Stroke[];
   box: Box;
@@ -2471,7 +2569,10 @@ export async function clearStrokes(api: EngineApi) {
   toast(api, "info", "Drawing layer emptied.");
 }
 
-/** Converts strokes into a graph — one node per cluster, in drawing order */
+/** Converts strokes into a graph — one node per cluster, in drawing order.
+ *  B3 (work-order 2026-09-25): the drawn geometry is no longer discarded. Each cluster's
+ *  bounding box becomes the node size, and the outline shape (circle / diamond / rectangle)
+ *  is inferred from closedness + aspect ratio, so "I draw a circle" yields a circle node. */
 export async function convertStrokesToGraph(api: EngineApi, opts: { nodeType: NodeType; connect: boolean }) {
   const s = api.get();
   const clusters = clusterStrokes(s.strokes);
@@ -2484,9 +2585,15 @@ export async function convertStrokesToGraph(api: EngineApi, opts: { nodeType: No
   let i = 1;
   for (const c of clusters) {
     const title = `Sketch ${i++}`;
-    const id = await createNode(api, opts.nodeType, { x: c.cx - 40, y: c.cy - 32 }, {
+    const shape = inferShapeFromCluster(c);
+    const w = Math.max(80, Math.round(c.box.maxX - c.box.minX));
+    const h = Math.max(48, Math.round(c.box.maxY - c.box.minY));
+    const id = await createNode(api, opts.nodeType, { x: c.box.minX, y: c.box.minY }, {
       title,
-      content: `This node was converted from the drawing layer.\n\n- cluster centre: (${Math.round(c.cx)}, ${Math.round(c.cy)})\n- stroke count: ${c.strokes.length}`,
+      shape,
+      width: w,
+      height: h,
+      content: `This node was converted from the drawing layer.\n\n- shape inferred from the sketch: ${shape}\n- cluster centre: (${Math.round(c.cx)}, ${Math.round(c.cy)})\n- stroke count: ${c.strokes.length}`,
     });
     ids.push(id);
   }
@@ -2515,7 +2622,7 @@ export async function createNode(
   });
   if (data.agent) {
     const settings = api.get()?.settings;
-    const activeModel = settings?.model || (settings?.provider === "gemini" ? "gemini-3.6-flash" : settings?.provider === "mistral" ? "mistral-small-latest" : "deepseek-chat");
+    const activeModel = settings?.model || (settings?.provider === "gemini" ? "gemini-3.6-flash" : settings?.provider === "mistral" ? "ministral-3b-latest" : "deepseek-chat");
     data.agent = makeAgentConfig(id, data.agent.role_id, {
       require_approval: data.agent.require_approval,
       model: data.agent.model && data.agent.model !== DEFAULT_MODEL ? data.agent.model : activeModel,
@@ -2615,25 +2722,32 @@ async function loadStrokes(): Promise<Stroke[]> {
   return strokes.sort((a, b) => a.created_at.localeCompare(b.created_at));
 }
 
+function templateInfo(spec: TemplateSpec, builtin: boolean): TemplateInfo {
+  const savedAt = (spec as TemplateSpec & { saved_at?: unknown }).saved_at;
+  return {
+    id: spec.template_id,
+    name: spec.name,
+    description: spec.description,
+    nodes: spec.nodes?.length ?? 0,
+    edges: spec.edges?.length ?? 0,
+    builtin,
+    saved_at: typeof savedAt === "string" ? savedAt : nowIso(),
+  };
+}
+
 /**
- * Saved templates from library/templates/ (§13).
- * A template package lives in a subfolder; the `listDirectory` fix was needed so
- * folders are visible here (before it returned empty and user templates vanished after a refresh).
+ * Templates are discovered from library files (§13); the built-in flag is derived from their stable IDs,
+ * not stored in a second registry. The `listDirectory` fix was needed so packages survive a refresh.
  */
 async function loadTemplates(): Promise<TemplateInfo[]> {
   const out: TemplateInfo[] = [];
+  const builtinIds = new Set(BUILTIN_TEMPLATES.map((template) => template.template_id));
   try {
     for (const d of await storage.listDirectory(`${ROOT}/library/templates`)) {
       const dir = d.replace(/\/$/, "");
       if (!dir) continue;
       const spec = await storage.readJson<TemplateSpec>(`${ROOT}/library/templates/${dir}/template.json`).catch(() => null);
-      if (spec?.template_id) {
-        out.push({
-          id: spec.template_id, name: spec.name, description: spec.description,
-          nodes: spec.nodes?.length ?? 0, edges: spec.edges?.length ?? 0,
-          builtin: false, saved_at: (spec as TemplateSpec & { saved_at?: string }).saved_at ?? nowIso(),
-        });
-      }
+      if (spec?.template_id) out.push(templateInfo(spec, builtinIds.has(spec.template_id)));
     }
   } catch { /* no custom template yet */ }
   return out;
@@ -2758,9 +2872,8 @@ export async function seedWorkspace(api: EngineApi) {
   await boot("memory/user.md", memoryToMd(st.memory.user));
   for (const [id, doc] of Object.entries(st.memory.agents)) await boot(`memory/agents/${id}.md`, memoryToMd(doc));
   await boot("history/index.yaml", toYaml({ canvas_id: st.canvasId, snapshot_count: 0, snapshots: [] }));
-  for (const role of ["understander", "risk-analyst", "solution-designer", "decision-maker", "manager", "builder", "project-scout", "feasibility-filter", "proposal-architect", "deal-closer"]) {
-    const r = roleById(role);
-    await boot(`library/roles/${role}.json`, JSON.stringify({
+  for (const r of ROLES) {
+    await boot(`library/roles/${r.id}.json`, JSON.stringify({
       id: r.id, name: r.name, description: r.description, system_prompt: `prompts/${r.id}.md`,
       model: r.model, tools: r.tools, version: "1.0",
       default_output_contract: { format: "markdown", required_fields: r.required_fields, validator: schemaPathFor(r.id), save_to: "outputs/{node_id}/" },
@@ -2778,14 +2891,17 @@ export async function seedWorkspace(api: EngineApi) {
     await boot(`library/templates/${tpl.template_id}/template.yaml`, toYaml({ template_id: tpl.template_id, name: tpl.name, version: "1.0", nodes: tpl.nodes.length, edges: tpl.edges.length }));
   }
   // the output contracts the roles declare have to exist as files, or "hard validation" is a promise
-  // with nothing behind it: seed the four schemas the built-in roles point at (§4.9, Q1).
+  // with nothing behind it: seed every schema the built-in roles point at (§4.9, Q1).
   for (const [roleId, schema] of Object.entries(ROLE_SCHEMAS))
     await boot(`${schemaPathFor(roleId)}`, JSON.stringify(schema, null, 2));
   await storage.writeJson(`${ROOT}/state.json`, {
     canvas: st.canvas, memory: st.memory, outputs: {}, chats: {}, logs: {}, snapshots: [],
     execution: emptyExecution(), saved_at: nowIso(),
   });
-  api.set((prev) => ({ bootLines: [...prev.bootLines, { text: "state.json (cache only — graph.json is gone)", ok: true }] }));
+  api.set((prev) => ({
+    templates: builtInTemplates.map((template) => templateInfo(template, true)),
+    bootLines: [...prev.bootLines, { text: "state.json (cache only — graph.json is gone)", ok: true }],
+  }));
   emit(api, "system", "a fresh canvas was initialised — the §2 structure is complete");
 }
 
@@ -2937,9 +3053,25 @@ export async function loadTemplate(api: EngineApi, id: string) {
 
   const owner = st.settings.owner;
   const nodes: RFNode[] = (spec.nodes ?? []).map((sn) => {
+    const roleOverride = sn.role_override;
+    const agentOverrides: AgentConfigOverrides | undefined = roleOverride ? {
+      ...(roleOverride.system_prompt !== undefined ? { system_prompt: roleOverride.system_prompt } : {}),
+      ...(roleOverride.tools !== undefined ? { tools: roleOverride.tools } : {}),
+      ...(roleOverride.max_tokens !== undefined ? { max_tokens: roleOverride.max_tokens } : {}),
+      ...(roleOverride.max_steps !== undefined ? { max_steps: roleOverride.max_steps } : {}),
+      ...(roleOverride.require_approval !== undefined ? { require_approval: roleOverride.require_approval } : {}),
+      ...(roleOverride.required_fields !== undefined
+        ? { context_contract: { output_contract: { required_fields: roleOverride.required_fields } } }
+        : {}),
+    } : undefined;
+    const content = sn.nodeType === "human-gate" && roleOverride?.gate_question !== undefined
+      ? roleOverride.gate_question
+      : sn.content ?? "";
     const data = makeNodeData(sn.nodeType ?? "note", sn.title ?? "Untitled", owner, {
-      shape: sn.shape, color: sn.color, viewMode: sn.viewMode, content: sn.content ?? "",
-      ...(sn.role ? { agent: makeAgentConfig(sn.id, sn.role) } : {}),
+      shape: sn.shape, color: sn.color, viewMode: sn.viewMode, content,
+      /* ADR-048: every declared per-node role override is applied without changing the shared role.
+         ADR-049: a template may keep a human-gate question in the same node's file-backed content. */
+      ...(sn.role ? { agent: makeAgentConfig(sn.id, sn.role, agentOverrides) } : {}),
     });
     return { id: sn.id, type: "lc", position: { x: sn.position?.x ?? 120, y: sn.position?.y ?? 120 }, data } as RFNode;
   });
@@ -2973,88 +3105,17 @@ export async function loadTemplate(api: EngineApi, id: string) {
   toast(api, "success", `Template “${spec.name}” loaded onto the canvas.`);
 }
 
+/**
+ * A2 (roadmap 2026-09-25): this used to re-narrate the whole graph by hand — node titles, colors,
+ * positions and edges were duplicated from `BUILTIN_TEMPLATES` in three places (here, the seed, and
+ * the template file), and every change had to be made in all of them. That is the same shape of bug
+ * that made `graph.json` a cache competing with the node files (ADR-008's argument). Now it simply
+ * delegates to `loadTemplate`, which reads `library/templates/project-finder/template.json` — the one
+ * file the boot seed already writes. The pipeline *is* the template, so loading it goes through the
+ * template loader.
+ */
 export async function loadProjectFinderPipeline(api: EngineApi) {
-  const st = api.get();
-  if (st.execution.status === "running" || st.execution.status === "waiting_approval") {
-    toast(api, "warn", "Pipelines cannot be loaded mid-run.");
-    return;
-  }
-  const owner = st.settings.owner;
-  const scout = makeNodeData("agent", "1. Project & Client Scout", owner, {
-    color: "#e8b04b",
-    shape: "card",
-    content: "Scouts and aggregates freelance projects (Upwork, Freelancer, Contra, RemoteOK). Extracts client requirements, budget range ($500-$5000+), and timeline.",
-    agent: makeAgentConfig("node-scout", "project-scout"),
-  });
-
-  const filter = makeNodeData("agent", "2. Feasibility & Risk Filter", owner, {
-    color: "#6fb3c7",
-    shape: "card",
-    content: "Analyzes client hire rate, payment security, technical requirements, and margin. Generates a risk score (1-10) and BID/PASS decision.",
-    agent: makeAgentConfig("node-filter", "feasibility-filter"),
-  });
-
-  const proposal = makeNodeData("agent", "3. Proposal & Pitch Architect", owner, {
-    color: "#b98bc2",
-    shape: "card",
-    content: "Crafts a high-converting, tailored proposal with custom problem analysis, technical roadmap, portfolio highlights, and transparent pricing.",
-    agent: makeAgentConfig("node-proposal", "proposal-architect"),
-  });
-
-  const closer = makeNodeData("agent", "4. Milestone & Deal Closer", owner, {
-    color: "#e06a4e",
-    shape: "card",
-    content: "Designs project milestone roadmap, client kickoff questionnaire, deliverable checklist, and closing call-to-action.",
-    agent: makeAgentConfig("node-closer", "deal-closer"),
-  });
-
-  const outBox = makeNodeData("output-box", "Freelance Package Deliverable", owner, {
-    color: "#8fbf7f",
-    shape: "hexagon",
-    content: "Final Freelance Package: Scouted briefs, feasibility evaluations, winning proposals, and milestone contract deliverables ready to send.",
-  });
-
-  const nodes: RFNode[] = [
-    { id: "node-scout", type: "lc", position: { x: 80, y: 180 }, data: scout },
-    { id: "node-filter", type: "lc", position: { x: 420, y: 180 }, data: filter },
-    { id: "node-proposal", type: "lc", position: { x: 760, y: 180 }, data: proposal },
-    { id: "node-closer", type: "lc", position: { x: 1100, y: 180 }, data: closer },
-    { id: "node-output", type: "lc", position: { x: 1440, y: 180 }, data: outBox },
-  ];
-
-  const edges: RFEdge[] = [
-    { id: "edge-001", source: "node-scout", target: "node-filter", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "scouted briefs" }) },
-    { id: "edge-002", source: "node-filter", target: "node-proposal", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "qualified projects" }) },
-    { id: "edge-003", source: "node-proposal", target: "node-closer", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "custom proposal" }) },
-    { id: "edge-004", source: "node-closer", target: "node-output", type: "lc", data: makeEdgeData({ edgeType: "flow", label: "final package" }) },
-  ];
-
-  for (const n of st.nodes) await storage.deleteFile(`${ROOT}/nodes/${n.id}.md`).catch(() => undefined);
-  for (const e of st.edges) await storage.deleteFile(`${ROOT}/edges/${e.id}.yaml`).catch(() => undefined);
-
-  const agents = { ...st.memory.agents };
-  for (const n of nodes) {
-    if (n.data.agent && !agents[n.id]) {
-      agents[n.id] = makeMemDoc(
-        `memory/agents/${n.id}.md`, `Memory of ${n.data.title}`,
-        "- latest inputs: —\n- decisions taken: —\n- notes for the next run: —", 0.7, "agent"
-      );
-      await storage.writeFile(`${ROOT}/memory/agents/${n.id}.md`, memoryToMd(agents[n.id])).catch(() => undefined);
-    }
-  }
-
-  api.set({
-    nodes, edges,
-    memory: { ...st.memory, agents },
-    execution: emptyExecution(),
-    canvas: { ...st.canvas, title: "Freelance Project & Proposal Pipeline", updated_at: nowIso() },
-  });
-
-  for (const n of nodes) await writeNodeArtifact(api, n.id, true);
-  for (const e of edges) await writeEdgeArtifact(api, e.id, true);
-  touch(api);
-  emit(api, "system", "loaded Freelance Project & Proposal Pipeline (4 agents + output box)");
-  toast(api, "success", "Freelance Project Finder & Proposal Pipeline loaded onto canvas!");
+  await loadTemplate(api, "project-finder");
 }
 
 /** save_role tool — keeps an agent's customised role in the library */
