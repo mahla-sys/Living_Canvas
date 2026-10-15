@@ -71,6 +71,7 @@ const files = getTrackedFiles();
 const bad = [];
 let rtlExempt = 0;
 for (const f of files) {
+  if (/\.(png|jpe?g|gif|webp|ico|pdf|zip|lockb?|woff2?|ttf|eot)$/i.test(f)) continue;
   let text;
   try { text = readFileSync(f, "utf8"); } catch { continue; }
   const exempt = DOCS.test(f);

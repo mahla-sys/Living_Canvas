@@ -17,6 +17,16 @@ and the app reads your edits back.** Files are the source of truth; in-memory st
 
 ---
 
+## Visual Showcase
+
+| Interactive Multi-Agent Canvas | Node Inspector & Contract Configuration |
+| :---: | :---: |
+| <img src="screenshots/01-canvas-overview.png" alt="Canvas Overview" width="480" /> | <img src="screenshots/03-node-inspector.png" alt="Node Inspector" width="480" /> |
+| **Pipeline Flow & Execution State** | **Dark Botanical Design System** |
+| <img src="screenshots/02-agent-pipeline.png" alt="Multi-Agent Pipeline" width="480" /> | <img src="screenshots/04-dark-botanical-theme.png" alt="Design Tokens & Theme" width="480" /> |
+
+---
+
 ## Run it
 
 ```bash
