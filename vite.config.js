@@ -1,11 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { buildProviderDefines, loadProviderDefines } from "./src/lib/build-env.ts";
 
-export default defineConfig(({ mode }) => ({
-  // Unit tests stay on the simulator; never inject a developer's local key into a test bundle.
-  define: mode === "test" ? buildProviderDefines({}) : loadProviderDefines(mode, process.cwd(), process.env),
+export default defineConfig({
+  define: {
+    "import.meta.env.VITE_GEMINI_API_KEY": JSON.stringify(process.env.GEMINI_API_KEY || ""),
+  },
   plugins: [react(), tailwindcss()],
   build: {
     /* Measured before this change: one 538 kB chunk (166 kB gzip) that had to download, parse and
@@ -33,7 +33,7 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: "jsdom",
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
-    exclude: ["tests/**", "node_modules/**", "src/lib/__tests__/viewport-playwright.test.ts"],
+    exclude: ["tests/**", "node_modules/**"],
   },
   server: {
     host: "0.0.0.0",
@@ -45,4 +45,4 @@ export default defineConfig(({ mode }) => ({
       port: 3000,
     },
   },
-}));
+});

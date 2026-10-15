@@ -20,12 +20,42 @@
    Deliberately dumb: no YAML dependency, flat `key: value` frontmatter with inline `[a, b]` lists only.
    If a doc needs richer metadata, that is a signal the doc is becoming a database.
    ============================================================ */
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { dirname, join, posix } from "node:path";
+import { dirname, join, posix, relative } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+function walkDir(dir, baseDir = dir) {
+  let files = [];
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git" || entry.name === "test-results") continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files = files.concat(walkDir(fullPath, baseDir));
+      } else if (entry.isFile()) {
+        files.push(posix.normalize(relative(baseDir, fullPath)));
+      }
+    }
+  } catch { /* ignore */ }
+  return files;
+}
+
+function getTrackedFiles() {
+  try {
+    return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+      cwd: ROOT,
+      encoding: "utf8",
+    })
+      .split("\0")
+      .filter(Boolean);
+  } catch {
+    return walkDir(ROOT);
+  }
+}
 
 /* ---- rules, written as data so the doc can quote them without drifting ---- */
 const EXEMPT = new Set(["docs/ARCHITECTURE.md"]); // the mechanism reference: no frontmatter, owns its own layout
@@ -47,12 +77,7 @@ const ROOT_CAP = 180;
 /* ---- repository index, so citations are checked against what actually exists ----
    `--others --exclude-standard` on purpose: a gate that only sees committed files cannot be run by the person
    who is adding the file, which is the one moment anyone would listen. Git-ignored material stays invisible. */
-const tracked = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
-  cwd: ROOT,
-  encoding: "utf8",
-})
-  .split("\0")
-  .filter(Boolean);
+const tracked = getTrackedFiles();
 const byBasename = new Map();
 for (const p of tracked) {
   const base = p.split("/").pop();

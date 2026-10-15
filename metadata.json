@@ -1,0 +1,7 @@
+{
+  "name": "Living Canvas",
+  "description": "An interactive living whiteboard with nodes, edges, drawings, AI canvas capabilities, and plain-file persistence.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -10,7 +10,37 @@
    The legacy Persian snapshot is git-ignored, so it is not in `git ls-files` and stays untouched.
    ============================================================ */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, posix, relative } from "node:path";
+
+function walkDir(dir, baseDir = dir) {
+  let files = [];
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === "dist" || entry.name === ".git" || entry.name === "test-results") continue;
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        files = files.concat(walkDir(fullPath, baseDir));
+      } else if (entry.isFile()) {
+        files.push(posix.normalize(relative(baseDir, fullPath)));
+      }
+    }
+  } catch { /* ignore */ }
+  return files;
+}
+
+function getTrackedFiles() {
+  try {
+    return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+      encoding: "utf8",
+    })
+      .split("\0")
+      .filter(Boolean);
+  } catch {
+    return walkDir(".");
+  }
+}
 
 const RTL_SCRIPT = [
   [0x0590, 0x05ff], // Hebrew
@@ -37,9 +67,7 @@ const DOCS = /^docs\//;
 /* `--others --exclude-standard`, same as check-docs.mjs: a gate that only sees committed files cannot be run
    by the person adding the file, which is the one moment anyone would listen to it. Git-ignored material
    stays invisible, which is the point. */
-const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
-  encoding: "utf8",
-}).split("\0").filter(Boolean);
+const files = getTrackedFiles();
 const bad = [];
 let rtlExempt = 0;
 for (const f of files) {
